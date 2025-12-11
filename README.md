@@ -1,1 +1,1 @@
-# template_python
+# OpenMM NQE
