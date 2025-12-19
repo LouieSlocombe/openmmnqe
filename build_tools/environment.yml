@@ -1,4 +1,4 @@
-name: nqetools
+name: openmmnqe
 channels:
   - conda-forge
   - defaults
