@@ -1,0 +1,70 @@
+conda install gxx_linux-64 -y
+
+conda create -n openmm_custom python=3.13 cmake make git swig numpy cython doxygen -y
+conda activate openmm_custom
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+
+# OpenMM
+git clone https://github.com/openmm/openmm.git
+cd openmm
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+		 -DPYTHON_EXECUTABLE=$(which python)
+make -j8
+make install
+make PythonInstall
+
+# PLUMED
+cd
+git clone https://github.com/plumed/plumed2.git
+cd plumed2
+./configure --prefix=$CONDA_PREFIX --enable-modules=opes
+
+make -j8
+make install
+export PLUMED_INCLUDE_DIR=$CONDA_PREFIX/include/plumed
+export PLUMED_LIBRARY_DIR=$CONDA_PREFIX/lib
+
+
+
+nano /home/louie/anaconda3/envs/openmm_custom/include/plumed/wrapper/Plumed.h
+#include <array> /* array */
+#include <memory>  // <--- ADD THIS LINE
+#include <initializer_list> /* initializer_list */
+
+
+# openmm-plumed
+cd ..
+git clone https://github.com/openmm/openmm-plumed.git
+cd openmm-plumed
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+         -DOPENMM_DIR=$CONDA_PREFIX \
+         -DPLUMED_INCLUDE_DIR=$PLUMED_INCLUDE_DIR \
+         -DPLUMED_LIBRARY_DIR=$PLUMED_LIBRARY_DIR \
+         -DPYTHON_EXECUTABLE=$(which python)
+make -j8
+make install
+cd python
+pip install . --no-build-isolation
+make PythonInstall
+
+# openmm-torch
+cd
+git clone https://github.com/openmm/openmm-torch.git
+cd openmm-torch
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+         -DOPENMM_DIR=$CONDA_PREFIX \
+         -DCMAKE_PREFIX_PATH=/home/louie/anaconda3/envs/openmm_custom/lib/python3.14/site-packages/torch/share/cmake
+make -j8
+make install
+make PythonInstall
+
+# OpenMM-ML
+cd ../..
+git clone https://github.com/openmm/openmm-ml.git
+cd openmm-ml
+pip install .
+
+conda install -c conda-forge openmm-torch openmm-ml

@@ -16,6 +16,7 @@ dependencies:
   - openmm-ml
   - openmm-torch
   - openmmforcefields
+  - openmm-plumed
   - openmmtools
   - ambertools
   - pdbfixer
