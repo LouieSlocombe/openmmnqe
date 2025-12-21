@@ -1,0 +1,24 @@
+name: openmmnqe_custom
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.13
+  - pip
+  - pytest
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - sympy
+  - gxx_linux-64
+  - cmake
+  - make
+  - git
+  - swig
+  - cython
+  - doxygen
+  - ambertools
+  - pdbfixer
+  - rdkit
+  - mdanalysis
