@@ -1,49 +1,58 @@
+# Create and activate the environment
 conda env create -f environment_custom.yml
 conda activate openmmnqe_custom
 
+# Install PyTorch (CUDA 13.0 specific)
 pip3 install torch --index-url https://download.pytorch.org/whl/cu130
 
-# OpenMM
+# Create a directory to keep source codes organized (optional but recommended)
+mkdir -p sources && cd sources
+
+# Clone and Build OpenMM
 git clone https://github.com/openmm/openmm.git
 cd openmm
-mkdir build && cd build
+mkdir -p build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-		 -DPYTHON_EXECUTABLE=$(which python)
-make -j8
+         -DPYTHON_EXECUTABLE=$(which python)
+make -j$(nproc)
 make install
 make PythonInstall
+# Return to sources directory
+cd ../..
 
-# PLUMED
-cd
-git clone https://github.com/plumed/plumed2.git
-cd plumed2
+# Clone PLUMED
+git clone https://github.com/plumed/plumed2.git && cd plumed2
+git clone --branch v2.9.4 https://github.com/plumed/plumed2.git && cd plumed2
+# Configure with OPES module
 ./configure --prefix=$CONDA_PREFIX --enable-modules=opes
-make -j8
+./configure --prefix=$CONDA_PREFIX --enable-modules=all
+make -j8 CXXFLAGS="-O3 -Wno-error"
+make -j$(nproc)
 make install
+# Export required environment variables
 export PLUMED_INCLUDE_DIR=$CONDA_PREFIX/include/plumed
 export PLUMED_LIBRARY_DIR=$CONDA_PREFIX/lib
-
-nano /home/louie/anaconda3/envs/openmmnqe_custom/include/plumed/wrapper/Plumed.h
-#include <array> /* array */
-#include <memory>  // <--- ADD THIS LINE
-#include <initializer_list> /* initializer_list */
-
-
-# openmm-plumed
+# Apply patch to Plumed.h. It inserts #include <memory> after #include <array>
+sed -i '/#include <array> \/\* array \*\//a #include <memory>' $CONDA_PREFIX/include/plumed/wrapper/Plumed.h
+# Return to sources directory
 cd ..
+
 git clone https://github.com/openmm/openmm-plumed.git
 cd openmm-plumed
-mkdir build && cd build
+mkdir -p build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
          -DOPENMM_DIR=$CONDA_PREFIX \
          -DPLUMED_INCLUDE_DIR=$PLUMED_INCLUDE_DIR \
          -DPLUMED_LIBRARY_DIR=$PLUMED_LIBRARY_DIR \
          -DPYTHON_EXECUTABLE=$(which python)
-make -j8
+make -j$(nproc)
 make install
+make PythonInstall
+# Install the Python wrapper
 cd python
 pip install . --no-build-isolation
-make PythonInstall
+# Return to sources directory
+cd ../..
 
 # openmm-torch
 cd
@@ -53,7 +62,7 @@ mkdir build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
          -DOPENMM_DIR=$CONDA_PREFIX \
          -DCMAKE_PREFIX_PATH=/home/louie/anaconda3/envs/openmm_custom/lib/python3.14/site-packages/torch/share/cmake
-make -j8
+make -j$(nproc)
 make install
 make PythonInstall
 
