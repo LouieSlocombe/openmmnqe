@@ -21,7 +21,9 @@ def test_openmm_ml():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    nqe.run_openmm_relaxation(modeller, forcefield, platform_name='CUDA')
+    nqe.run_openmm_relaxation(modeller,
+                              forcefield,
+                              platform_name='CUDA')
     os.remove('minimized.pdb')
 
 
@@ -44,7 +46,11 @@ def test_openmm_ml_mixed_system():
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
 
-    nqe.run_openmm_relaxation(modeller, forcefield, platform_name='CUDA', potential=potential, ml_idx=ml_atoms)
+    nqe.run_openmm_relaxation(modeller,
+                              forcefield,
+                              platform_name='CUDA',
+                              potential=potential,
+                              ml_idx=ml_atoms)
     os.remove('minimized.pdb')
 
 
@@ -52,8 +58,12 @@ def test_prepare_ligand_ff():
     print(flush=True)
     input_pdb = "tests/data/pdb/gt_wob_pol.pdb"
     cache_name = "gaff-molecules.json"
-    rm_ions = ['Na+', 'Cl-', 'NA']
-    residue_map = {'DGN': 'DG', 'DTN': 'DT', 'GTP': 'LIG'}
+    rm_ions = ['Na+',
+               'Cl-',
+               'NA']
+    residue_map = {'DGN': 'DG',
+                   'DTN': 'DT',
+                   'GTP': 'LIG'}
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
                                                 rm_ions=rm_ions,
                                                 residue_map=residue_map,
@@ -84,8 +94,12 @@ def test_nonstandard_ligand():
     print(flush=True)
     input_pdb = "tests/data/pdb/gt_wob_pol.pdb"
 
-    rm_ions = ['Na+', 'Cl-', 'NA']
-    residue_map = {'DGN': 'DG', 'DTN': 'DT', 'GTP': 'LIG'}
+    rm_ions = ['Na+',
+               'Cl-',
+               'NA']
+    residue_map = {'DGN': 'DG',
+                   'DTN': 'DT',
+                   'GTP': 'LIG'}
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
                                                 rm_ions=rm_ions,
                                                 residue_map=residue_map,
@@ -95,9 +109,12 @@ def test_nonstandard_ligand():
     modeller = app.Modeller(pdb_topology, pdb_positions)
     modeller.deleteWater()
     modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"), molecule)
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule)
 
-    nqe.run_openmm_relaxation(modeller, forcefield, platform_name='CUDA')
+    nqe.run_openmm_relaxation(modeller,
+                              forcefield,
+                              platform_name='CUDA')
     os.remove('minimized.pdb')
 
 
@@ -135,7 +152,6 @@ def test_deuterate_system():
     mass_after = _get_total_mass(system)
     print(f"{'Mass Before':<20} | {mass_before.value_in_unit(unit.dalton):.4f} Da")
     print(f"{'Mass After':<20} | {mass_after.value_in_unit(unit.dalton):.4f} Da")
-    # print the number of hydrogens
     print(f"{'Number of Hydrogens':<20} | {h_count}")
 
     mass_H = app.element.hydrogen.mass
@@ -173,10 +189,17 @@ def test_plumed():
     cwd = os.getcwd()
 
     rm_ions = ['Na+', 'Cl-', 'NA']
-    residue_map = {'DGN': 'DG', 'DTN': 'DT', 'GTP': 'LIG'}
+    residue_map = {'DGN': 'DG',
+                   'DTN': 'DT',
+                   'GTP': 'LIG'}
 
-    pdb_data, molecule = nqe.prepare_lig_system(pdb_file, rm_ions=rm_ions, residue_map=residue_map, rm_files=False)
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"), molecule, pc_methods='am1bcc')
+    pdb_data, molecule = nqe.prepare_lig_system(pdb_file,
+                                                rm_ions=rm_ions,
+                                                residue_map=residue_map,
+                                                rm_files=False)
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule,
+                                       pc_methods='am1bcc')
 
     idx1 = nqe.get_atoms_in_residue('combined_system.pdb', 0, chain_id='F')
     idx2 = nqe.get_atoms_in_residue('combined_system.pdb', 4, chain_id='B')
@@ -218,11 +241,9 @@ FLUSH STRIDE=1
         f.write(plumed_script)
 
     system.addForce(PlumedForce(plumed_script))
-    integrator = openmm.LangevinIntegrator(
-        temperature,
-        friction_coeff,
-        timestep
-    )
+    integrator = openmm.LangevinIntegrator(temperature,
+                                           friction_coeff,
+                                           timestep)
 
     platform = openmm.Platform.getPlatformByName('CUDA')
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
@@ -274,7 +295,7 @@ def test_get_atoms_in_residue():
     print(flush=True)
     input_pdb = 'tests/data/pdb/input.pdb'
     indexes = nqe.get_atoms_in_residue(input_pdb, 0)
-    print(indexes)
+    print(indexes, flush=True)
     ref_indexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     assert indexes == ref_indexes
 
@@ -306,7 +327,10 @@ def test_run_openmm_heating():
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')
     nqe.run_openmm_heating(modeller, forcefield)
-    os.remove('equilibrated.pdb')
+    os.remove('equilibrate.chk')
+    os.remove('equilibrate.log')
+    os.remove('equilibrate.pdb')
+    os.remove('equilibrate_steps.pdb')
 
 
 def test_run_openmm_heating_deuterate():
@@ -321,7 +345,10 @@ def test_run_openmm_heating_deuterate():
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')
     nqe.run_openmm_heating(modeller, forcefield, deuterate=True)
-    os.remove('equilibrated.pdb')
+    os.remove('equilibrate.chk')
+    os.remove('equilibrate.log')
+    os.remove('equilibrate.pdb')
+    os.remove('equilibrate_steps.pdb')
 
 
 def test_run_openmm_npt():
@@ -336,7 +363,10 @@ def test_run_openmm_npt():
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')
     nqe.run_openmm_npt(modeller, forcefield)
+    os.remove('npt_equilibrated.chk')
+    os.remove('npt_equilibrated.log')
     os.remove('npt_equilibrated.pdb')
+    os.remove('npt_equilibrated_steps.pdb')
 
 
 def test_eq_workflow():
@@ -361,8 +391,16 @@ def test_eq_workflow():
     nqe.run_openmm_npt(modeller, forcefield)
 
     os.remove('minimized.pdb')
-    os.remove('equilibrated.pdb')
+
+    os.remove('equilibrate.chk')
+    os.remove('equilibrate.log')
+    os.remove('equilibrate.pdb')
+    os.remove('equilibrate_steps.pdb')
+
+    os.remove('npt_equilibrated.chk')
+    os.remove('npt_equilibrated.log')
     os.remove('npt_equilibrated.pdb')
+    os.remove('npt_equilibrated_steps.pdb')
 
 
 def test_eq_workflow_mixed():
@@ -391,8 +429,16 @@ def test_eq_workflow_mixed():
     nqe.run_openmm_npt(modeller, forcefield, potential=potential, ml_idx=ml_atoms)
 
     os.remove('minimized.pdb')
-    os.remove('equilibrated.pdb')
+
+    os.remove('equilibrate.chk')
+    os.remove('equilibrate.log')
+    os.remove('equilibrate.pdb')
+    os.remove('equilibrate_steps.pdb')
+
+    os.remove('npt_equilibrated.chk')
+    os.remove('npt_equilibrated.log')
     os.remove('npt_equilibrated.pdb')
+    os.remove('npt_equilibrated_steps.pdb')
 
 
 def test_openmm_rpmd():
@@ -442,7 +488,6 @@ def test_openmm_qtb():
     n_steps = 1_000
     report_every = 100
     in_pdb = "tests/data/pdb/input_aaa.pdb"
-    n_beads = 2
     temperature = 300.0 * unit.kelvin
     friction = 1.0 / unit.picosecond
     dt = 0.5 * unit.femtosecond
@@ -467,10 +512,12 @@ def test_openmm_qtb():
         removeCMMotion=True,
     )
 
-    integrator = openmm.QTBIntegrator(n_beads, temperature, friction, dt)
+    integrator = openmm.QTBIntegrator(temperature, friction, dt)
 
     platform = openmm.Platform.getPlatformByName("CUDA")
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
+    simulation.context.setPositions(modeller.positions)
+
     simulation.reporters.append(app.StateDataReporter(stdout,
                                                       report_every,
                                                       step=True,
