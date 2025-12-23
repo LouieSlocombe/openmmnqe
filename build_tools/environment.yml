@@ -23,3 +23,6 @@ dependencies:
   - pdbfixer
   - rdkit
   - mdanalysis
+  - nnpops
+  - pip:
+      - mace-torch
