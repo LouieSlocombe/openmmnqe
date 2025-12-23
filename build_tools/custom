@@ -24,7 +24,6 @@ export PLUMED_INCLUDE_DIR=$CONDA_PREFIX/include/plumed
 export PLUMED_LIBRARY_DIR=$CONDA_PREFIX/lib
 # Apply patch to Plumed.h. It inserts #include <memory> after #include <array>
 sed -i '/#include <array> \/\* array \*\//a #include <memory>' $CONDA_PREFIX/include/plumed/wrapper/Plumed.h
-# Return to sources directory
 cd ..
 
 git clone https://github.com/openmm/openmm-plumed.git && cd openmm-plumed
@@ -42,49 +41,20 @@ pip install . --no-build-isolation
 cd ../../..
 
 # openmm-torch
-git clone https://github.com/openmm/openmm-torch.git
-cd openmm-torch
+git clone https://github.com/openmm/openmm-torch.git && cd openmm-torch
 mkdir build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-         -DOPENMM_DIR=$CONDA_PREFIX \
-         -DCMAKE_PREFIX_PATH=$CONDA_PREFIX/lib/python3.13/site-packages/torch/share/cmake
+         -DOPENMM_DIR=$CONDA_PREFIX
 make -j$(nproc)
 make install
 make PythonInstall
-
-
-Torch_DIR=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
-
-Torch_DIR=/home/louie/anaconda3/envs/openmmnqe_custom/lib/python3.13/site-packages/torch/share/cmake/Torch/
-
-
-cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-         -DOPENMM_DIR=$CONDA_PREFIX \
-         -DCMAKE_PREFIX_PATH=$Torch_DIR \
-         -DCMAKE_BUILD_TYPE=Release
-
-
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-    -DOPENMM_DIR=$CONDA_PREFIX \
-    -DTorch_DIR=/home/louie/anaconda3/envs/openmmnqe_custom/lib/python3.13/site-packages/torch/share/cmake/Torch/ \
-    -DCMAKE_BUILD_TYPE=Release
-
-# working
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-    -DOPENMM_DIR=$CONDA_PREFIX
-
-
+cd python
+pip install . --no-build-isolation
+cd ../../..
 
 # OpenMM-ML
-cd ../..
-git clone https://github.com/openmm/openmm-ml.git
-cd openmm-ml
+git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
 pip install .
-
-# Alternatively, install via conda-forge
-conda install -c conda-forge openmm-torch openmm-ml -y
 
 # OpenMM Force Fields and Tools
 conda install -c conda-forge openmmforcefields openmmtools -y
