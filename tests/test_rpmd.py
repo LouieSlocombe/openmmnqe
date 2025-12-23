@@ -325,7 +325,7 @@ def test_rpmd_centroid_reporter():
     os.remove('centroid.pdb')
 
 
-def test_openmm_qtb():
+def test_openmm_adqtb():
     # Simple run parameters
     n_steps = 1_000
     report_every = 100
@@ -355,6 +355,8 @@ def test_openmm_qtb():
     )
 
     integrator = openmm.QTBIntegrator(temperature, friction, dt)
+    integrator.setSegmentLength(0.5 * unit.picosecond)
+    integrator.setDefaultAdaptationRate(0.5)
 
     platform = openmm.Platform.getPlatformByName("CUDA")
     simulation = app.Simulation(modeller.topology, system, integrator, platform)

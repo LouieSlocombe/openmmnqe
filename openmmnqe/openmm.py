@@ -1995,6 +1995,116 @@ class RPMDCentroidReporter(object):
             pass
 
 
+def run_openmm_adqtb_prod(modeller,
+                          forcefield,
+                          plumed_script_path=None,
+                          pressure=1.0 * unit.bar,
+                          temperature=300.0 * unit.kelvin,
+                          gamma=1.0 / unit.picosecond,
+                          time_step=1.0 * unit.femtoseconds,
+                          segment_length=0.5 * unit.picosecond,
+                          adaptation_rate=0.5,
+                          barostat_freq=50,
+                          n_report=1_000,
+                          steps=500_000,
+                          output_prefix='prod',
+                          platform_name='CPU',
+                          deuterate=False,
+                          deuterate_option='water',
+                          potential=None,
+                          ml_idx=None,
+                          ):
+    if potential is not None and ml_idx is not None:
+        print("Adding ML potential to the system...", flush=True)
+        run_mixed = True
+        platform_name = 'CUDA'  # Force CUDA for mixed potential
+    else:
+        run_mixed = False
+
+    platform = openmm.Platform.getPlatformByName(platform_name)
+    has_box = modeller.topology.getUnitCellDimensions() is not None
+
+    if run_mixed:
+        mm_system = forcefield.createSystem(
+            modeller.topology,
+            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=None,
+            rigidWater=False,
+            removeCMMotion=True,
+        )
+        system = potential.createMixedSystem(
+            modeller.topology,
+            mm_system,
+            ml_idx,
+            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=None,
+            rigidWater=False,
+            removeCMMotion=True,
+        )
+    else:
+        system = forcefield.createSystem(
+            modeller.topology,
+            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=None,
+            rigidWater=False,
+            removeCMMotion=True,
+        )
+
+    if deuterate:
+        print("Deuterating system...", flush=True)
+        deuterate_system(modeller, system, option=deuterate_option)
+
+    system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+
+    if plumed_script_path is not None:
+        print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
+
+        with open(plumed_script_path, 'r') as f:
+            script_content = f.read()
+
+        plumed_force = PlumedForce(script_content)
+        system.addForce(plumed_force)
+
+    integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
+    integrator.setSegmentLength(segment_length)
+    integrator.setDefaultAdaptationRate(adaptation_rate)
+
+
+    simulation = app.Simulation(modeller.topology, system, integrator, platform)
+    simulation.context.setPositions(modeller.positions)
+    simulation.context.setVelocitiesToTemperature(temperature)
+
+    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
+    simulation.reporters.append(app.StateDataReporter(sys.stdout,
+                                                      n_report,
+                                                      step=True,
+                                                      potentialEnergy=True,
+                                                      temperature=True,
+                                                      speed=True))
+    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
+                                                      n_report,
+                                                      step=True,
+                                                      time=True,
+                                                      potentialEnergy=True,
+                                                      kineticEnergy=True,
+                                                      totalEnergy=True,
+                                                      temperature=True,
+                                                      volume=True))
+
+    simulation.reporters.append(app.CheckpointReporter(f'{output_prefix}.chk', n_report * 10))
+    print(f"Starting production run for {steps} steps...", flush=True)
+    simulation.step(steps)
+    print("Production run complete.", flush=True)
+
+    simulation.saveCheckpoint(f'{output_prefix}.chk')
+    state = simulation.context.getState(getPositions=True, getVelocities=True)
+    with open(f'{output_prefix}.pdb', 'w') as f:
+        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+
+
 def count_dna_and_estimate_charge(topology):
     dna_residue_names = {
         "DA", "DC", "DG", "DT",  # internal
