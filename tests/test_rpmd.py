@@ -325,6 +325,106 @@ def test_rpmd_centroid_reporter():
     os.remove('centroid.pdb')
 
 
+
+from typing import Dict, Optional, Sequence, Any
+
+
+def set_adqtb_particle_types_by_element(
+    integrator: Any,
+    *,
+    topology: Optional[Any] = None,
+    system: Optional[Any] = None,
+    particle_elements: Optional[Sequence[Any]] = None,
+    start_type: int = 0,
+    unknown_symbol: str = "X",
+) -> Dict[str, int]:
+    """
+    Assign OpenMM adQTB (QTBIntegrator) particle types so that all particles with the same
+    chemical element share the same integer type.
+
+    IMPORTANT: call this BEFORE creating a Context/Simulation; particle types are fixed at
+    Context creation time for QTBIntegrator.
+
+    Parameters
+    ----------
+    integrator
+        An OpenMM QTBIntegrator (adQTB). Must provide setParticleType(index, type).
+    topology
+        openmm.app.Topology used to infer element per particle (atom.element), if
+        particle_elements is not provided.
+    system
+        openmm.System (optional) used to sanity-check that the number of particles matches.
+    particle_elements
+        Optional explicit per-particle element spec (length == system.getNumParticles()).
+        Each entry can be an openmm.app.element.Element, a symbol string like "C", or None.
+        Use this if your System has extra particles not present in the Topology (e.g., Drudes).
+    start_type
+        First type id to use (default 0).
+    unknown_symbol
+        Symbol to use when an element is missing/None (all such particles share a type).
+
+    Returns
+    -------
+    element_to_type
+        Mapping from element symbol (e.g., "H", "C") to assigned integer type id.
+    """
+
+    if not hasattr(integrator, "setParticleType"):
+        raise TypeError(
+            "integrator must support setParticleType(index, type); expected an OpenMM QTBIntegrator."
+        )
+
+    def _sym_and_Z(el: Any) -> tuple[str, int]:
+        # OpenMM Element has .symbol and .atomic_number; allow strings too.
+        if el is None:
+            return unknown_symbol, 10**9
+        sym = getattr(el, "symbol", None)
+        if sym is None:
+            sym = str(el)
+        Z = getattr(el, "atomic_number", 10**9)
+        try:
+            Z = int(Z)
+        except Exception:
+            Z = 10**9
+        return sym, Z
+
+    # Infer per-particle elements
+    if particle_elements is None:
+        if topology is None:
+            raise ValueError("Provide topology or particle_elements.")
+        atoms = list(topology.atoms())
+        particle_elements = [a.element for a in atoms]
+
+    n = len(particle_elements)
+
+    # Optional sanity check against the System particle count
+    if system is not None:
+        n_sys = system.getNumParticles()
+        if n_sys != n:
+            raise ValueError(
+                f"Element list has length {n}, but System has {n_sys} particles. "
+                "If your System includes extra particles (Drudes/virtual sites/etc.), "
+                "pass particle_elements with one entry per System particle."
+            )
+
+    # Build a stable symbol -> type_id mapping (sorted by atomic number, then symbol)
+    symbol_to_Z: dict[str, int] = {}
+    for el in particle_elements:
+        sym, Z = _sym_and_Z(el)
+        symbol_to_Z.setdefault(sym, Z)
+
+    ordered_symbols = sorted(symbol_to_Z.items(), key=lambda kv: (kv[1], kv[0]))
+    element_to_type = {sym: start_type + i for i, (sym, _) in enumerate(ordered_symbols)}
+
+    # Assign types to particles
+    for idx, el in enumerate(particle_elements):
+        sym, _ = _sym_and_Z(el)
+        integrator.setParticleType(idx, int(element_to_type[sym]))
+
+    return element_to_type
+
+
+
 def test_openmm_adqtb():
     # Simple run parameters
     n_steps = 1_000
@@ -356,6 +456,9 @@ def test_openmm_adqtb():
 
     integrator = openmm.QTBIntegrator(temperature, friction, dt)
     integrator.setSegmentLength(0.5 * unit.picosecond)
+
+    set_adqtb_particle_types_by_element(integrator, topology=modeller.topology, system=system)
+
     integrator.setDefaultAdaptationRate(0.5)
 
     platform = openmm.Platform.getPlatformByName("CUDA")
