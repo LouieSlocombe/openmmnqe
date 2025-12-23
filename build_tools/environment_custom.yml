@@ -11,13 +11,15 @@ dependencies:
   - pandas
   - matplotlib
   - sympy
+  - pytorch
   - ase
-  - gxx_linux-64
   - cmake
   - make
-  - git
   - swig
   - cython
+  - compilers
+  - git
+  - pybind11
   - doxygen
   - ambertools
   - pdbfixer

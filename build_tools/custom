@@ -2,31 +2,21 @@
 conda env create -f environment_custom.yml
 conda activate openmmnqe_custom
 
-# Install PyTorch (CUDA 13.0 specific)
-pip3 install torch --index-url https://download.pytorch.org/whl/cu130
-
-# Create a directory to keep source codes organized (optional but recommended)
 mkdir -p sources && cd sources
 
 # Clone and Build OpenMM
-git clone https://github.com/openmm/openmm.git
-cd openmm
+git clone https://github.com/openmm/openmm.git && cd openmm
 mkdir -p build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
          -DPYTHON_EXECUTABLE=$(which python)
 make -j$(nproc)
 make install
 make PythonInstall
-# Return to sources directory
 cd ../..
 
 # Clone PLUMED
-git clone https://github.com/plumed/plumed2.git && cd plumed2
 git clone --branch v2.9.4 https://github.com/plumed/plumed2.git && cd plumed2
-# Configure with OPES module
 ./configure --prefix=$CONDA_PREFIX --enable-modules=opes
-./configure --prefix=$CONDA_PREFIX --enable-modules=all
-make -j8 CXXFLAGS="-O3 -Wno-error"
 make -j$(nproc)
 make install
 # Export required environment variables
@@ -37,8 +27,7 @@ sed -i '/#include <array> \/\* array \*\//a #include <memory>' $CONDA_PREFIX/inc
 # Return to sources directory
 cd ..
 
-git clone https://github.com/openmm/openmm-plumed.git
-cd openmm-plumed
+git clone https://github.com/openmm/openmm-plumed.git && cd openmm-plumed
 mkdir -p build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
          -DOPENMM_DIR=$CONDA_PREFIX \
@@ -48,23 +37,45 @@ cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
 make -j$(nproc)
 make install
 make PythonInstall
-# Install the Python wrapper
 cd python
 pip install . --no-build-isolation
-# Return to sources directory
-cd ../..
+cd ../../..
 
 # openmm-torch
-cd
 git clone https://github.com/openmm/openmm-torch.git
 cd openmm-torch
 mkdir build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
          -DOPENMM_DIR=$CONDA_PREFIX \
-         -DCMAKE_PREFIX_PATH=/home/louie/anaconda3/envs/openmm_custom/lib/python3.14/site-packages/torch/share/cmake
+         -DCMAKE_PREFIX_PATH=$CONDA_PREFIX/lib/python3.13/site-packages/torch/share/cmake
 make -j$(nproc)
 make install
 make PythonInstall
+
+
+Torch_DIR=$(python -c 'import torch; print(torch.utils.cmake_prefix_path)')
+
+Torch_DIR=/home/louie/anaconda3/envs/openmmnqe_custom/lib/python3.13/site-packages/torch/share/cmake/Torch/
+
+
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+         -DOPENMM_DIR=$CONDA_PREFIX \
+         -DCMAKE_PREFIX_PATH=$Torch_DIR \
+         -DCMAKE_BUILD_TYPE=Release
+
+
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+    -DOPENMM_DIR=$CONDA_PREFIX \
+    -DTorch_DIR=/home/louie/anaconda3/envs/openmmnqe_custom/lib/python3.13/site-packages/torch/share/cmake/Torch/ \
+    -DCMAKE_BUILD_TYPE=Release
+
+# working
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+    -DOPENMM_DIR=$CONDA_PREFIX
+
+
 
 # OpenMM-ML
 cd ../..
@@ -73,7 +84,7 @@ cd openmm-ml
 pip install .
 
 # Alternatively, install via conda-forge
-conda install -c conda-forge openmm-torch openmm-ml
+conda install -c conda-forge openmm-torch openmm-ml -y
 
 # OpenMM Force Fields and Tools
-conda install -c conda-forge openmmforcefields openmmtools
+conda install -c conda-forge openmmforcefields openmmtools -y
