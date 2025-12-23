@@ -1,6 +1,7 @@
 # Create and activate the environment
 conda env create -f environment_custom.yml
 conda activate openmmnqe_custom
+conda install -c nvidia cuda-toolkit
 
 mkdir -p sources && cd sources
 
@@ -43,18 +44,21 @@ cd ../../..
 # openmm-torch
 git clone https://github.com/openmm/openmm-torch.git && cd openmm-torch
 mkdir build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-         -DOPENMM_DIR=$CONDA_PREFIX
+export CUDA_HOME="$CONDA_PREFIX"
+cmake .. -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
+         -DOPENMM_DIR="$CONDA_PREFIX" \
+         -DPYTORCH_DIR="$CONDA_PREFIX" \
+         -DCUDA_TOOLKIT_ROOT_DIR="$CUDA_HOME" \
+         -DCUDAToolkit_ROOT="$CUDA_HOME"
 make -j$(nproc)
 make install
 make PythonInstall
-cd python
-pip install . --no-build-isolation
-cd ../../..
+cd ../..
 
 # OpenMM-ML
 git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
 pip install .
+cd ..
 
 # OpenMM Force Fields and Tools
 conda install -c conda-forge openmmforcefields openmmtools -y

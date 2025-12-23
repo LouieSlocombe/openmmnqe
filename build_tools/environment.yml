@@ -13,7 +13,7 @@ dependencies:
   - sympy
   - ase
   - pytorch
-  - openmm
+  - openmm>=8.4.0
   - openmm-ml
   - openmm-torch
   - openmmforcefields

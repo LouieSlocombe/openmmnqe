@@ -290,7 +290,7 @@ def test_run_openmm_relaxation():
     modeller.addSolvent(forcefield,
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')
-    nqe.run_openmm_relaxation(modeller, forcefield)
+    nqe.run_openmm_relaxation(modeller, forcefield, platform_name='CUDA')
     os.remove('minimized.pdb')
 
 

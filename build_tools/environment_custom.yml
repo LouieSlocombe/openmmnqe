@@ -21,6 +21,7 @@ dependencies:
   - git
   - pybind11
   - doxygen
+  - setuptools
   - ambertools
   - pdbfixer
   - rdkit
