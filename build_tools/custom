@@ -1,7 +1,10 @@
+conda remove -n openmmnqe_custom --all
+nvidia-smi
+
 # Create and activate the environment
 conda env create -f environment_custom.yml
 conda activate openmmnqe_custom
-conda install -c nvidia cuda-toolkit=13.1 -y
+conda install -c nvidia cuda-toolkit=13.0 -y
 mkdir -p sources && cd sources
 
 # OpenMM
@@ -42,7 +45,6 @@ cd ../../..
 
 # openmm-torch
 git clone https://github.com/openmm/openmm-torch.git && cd openmm-torch
-sed -i '/find_package(Torch REQUIRED)/i find_package(CUDAToolkit REQUIRED)' CMakeLists.txt
 mkdir build && cd build
 export CUDA_HOME="$CONDA_PREFIX"
 cmake .. -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
