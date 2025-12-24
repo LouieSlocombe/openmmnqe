@@ -325,18 +325,35 @@ def test_rpmd_centroid_reporter():
     os.remove('centroid.pdb')
 
 
+def test_run_openmm_rpmd_equilibration():
+    print(flush=True)
+    n_beads = 4
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_rpmd_equilibration(modeller, forcefield, n_beads=n_beads, n_2=1_000)
+
+    os.remove('rpmd_ready.chk')
+    os.remove('rpmd_ready.log')
+    os.remove('rpmd_ready_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'rpmd_ready_{i}.pdb')
+
 
 from typing import Dict, Optional, Sequence, Any
 
 
 def set_adqtb_particle_types_by_element(
-    integrator: Any,
-    *,
-    topology: Optional[Any] = None,
-    system: Optional[Any] = None,
-    particle_elements: Optional[Sequence[Any]] = None,
-    start_type: int = 0,
-    unknown_symbol: str = "X",
+        integrator: Any,
+        *,
+        topology: Optional[Any] = None,
+        system: Optional[Any] = None,
+        particle_elements: Optional[Sequence[Any]] = None,
+        start_type: int = 0,
+        unknown_symbol: str = "X",
 ) -> Dict[str, int]:
     """
     Assign OpenMM adQTB (QTBIntegrator) particle types so that all particles with the same
@@ -377,15 +394,15 @@ def set_adqtb_particle_types_by_element(
     def _sym_and_Z(el: Any) -> tuple[str, int]:
         # OpenMM Element has .symbol and .atomic_number; allow strings too.
         if el is None:
-            return unknown_symbol, 10**9
+            return unknown_symbol, 10 ** 9
         sym = getattr(el, "symbol", None)
         if sym is None:
             sym = str(el)
-        Z = getattr(el, "atomic_number", 10**9)
+        Z = getattr(el, "atomic_number", 10 ** 9)
         try:
             Z = int(Z)
         except Exception:
-            Z = 10**9
+            Z = 10 ** 9
         return sym, Z
 
     # Infer per-particle elements
@@ -422,7 +439,6 @@ def set_adqtb_particle_types_by_element(
         integrator.setParticleType(idx, int(element_to_type[sym]))
 
     return element_to_type
-
 
 
 def test_openmm_adqtb():
