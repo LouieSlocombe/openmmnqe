@@ -327,20 +327,68 @@ def test_rpmd_centroid_reporter():
 
 def test_run_openmm_rpmd_equilibration():
     print(flush=True)
-    n_beads = 4
+    n_beads = 2
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
     modeller = app.Modeller(pdb.topology, pdb.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    nqe.run_openmm_rpmd_equilibration(modeller, forcefield, n_beads=n_beads, n_2=1_000)
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      n_beads=n_beads,
+                                      n_1=100,
+                                      n_2=100)
 
     os.remove('rpmd_ready.chk')
     os.remove('rpmd_ready.log')
     os.remove('rpmd_ready_centroid.pdb')
     for i in range(n_beads):
-        os.remove(f'rpmd_ready_{i}.pdb')
+        os.remove(f'rpmd_ready_bead_{i}.pdb')
+
+
+def test_run_openmm_rpmd_prod():
+    print(flush=True)
+    n_beads = 2
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      n_beads=n_beads,
+                                      n_1=100,
+                                      n_2=100)
+
+    nqe.run_openmm_rpmd_prod(modeller,
+                             forcefield,
+                             n_beads=n_beads,
+                             steps=100,
+                             checkpoint_file='rpmd_ready.chk')
+
+
+def test_run_openmm_rpmd_contracted():
+    print(flush=True)
+    n_beads = 2
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      n_beads=n_beads,
+                                      n_1=100,
+                                      n_2=100)
+
+    nqe.run_openmm_rpmd_contracted(modeller,
+                                   forcefield,
+                                   n_beads=n_beads,
+                                   steps=100,
+                                   checkpoint_file='rpmd_ready.chk')
 
 
 from typing import Dict, Optional, Sequence, Any
