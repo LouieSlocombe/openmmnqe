@@ -1,0 +1,66 @@
+#conda remove -n openmmnqe_custom --all
+#nvidia-smi
+
+# Create and activate the environment
+conda env create -f environment_custom.yml
+conda activate openmmnqe_custom
+conda install -c nvidia cuda-toolkit=13.0 -y
+mkdir -p sources && cd sources
+
+# OpenMM
+git clone https://github.com/openmm/openmm.git && cd openmm
+mkdir -p build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+         -DPYTHON_EXECUTABLE=$(which python)
+make -j$(nproc)
+make install
+make PythonInstall
+cd ../..
+
+# PLUMED
+git clone --branch v2.9.4 https://github.com/plumed/plumed2.git && cd plumed2
+./configure --prefix=$CONDA_PREFIX --enable-modules=opes
+make -j$(nproc)
+make install
+export PLUMED_INCLUDE_DIR=$CONDA_PREFIX/include/plumed
+export PLUMED_LIBRARY_DIR=$CONDA_PREFIX/lib
+# Apply patch to Plumed.h. It inserts #include <memory> after #include <array>
+sed -i '/#include <array> \/\* array \*\//a #include <memory>' $CONDA_PREFIX/include/plumed/wrapper/Plumed.h
+cd ..
+
+# openmm-plumed
+git clone https://github.com/openmm/openmm-plumed.git && cd openmm-plumed
+mkdir -p build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+         -DOPENMM_DIR=$CONDA_PREFIX \
+         -DPLUMED_INCLUDE_DIR=$PLUMED_INCLUDE_DIR \
+         -DPLUMED_LIBRARY_DIR=$PLUMED_LIBRARY_DIR \
+         -DPYTHON_EXECUTABLE=$(which python)
+make -j$(nproc)
+make install
+make PythonInstall
+cd python
+pip install . --no-build-isolation
+cd ../../..
+
+# openmm-torch
+git clone https://github.com/openmm/openmm-torch.git && cd openmm-torch
+mkdir build && cd build
+export CUDA_HOME="$CONDA_PREFIX"
+cmake .. -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
+         -DOPENMM_DIR="$CONDA_PREFIX" \
+         -DPYTORCH_DIR="$CONDA_PREFIX" \
+         -DCUDA_TOOLKIT_ROOT_DIR="$CUDA_HOME" \
+         -DCUDAToolkit_ROOT="$CUDA_HOME"
+make -j$(nproc)
+make install
+make PythonInstall
+cd ../..
+
+# OpenMM-ML
+git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
+pip install .
+cd ..
+
+# OpenMM Force Fields and Tools
+conda install -c conda-forge openmmforcefields openmmtools -y
