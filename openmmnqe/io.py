@@ -6,7 +6,9 @@ from typing import List
 
 import numpy as np
 import openmm.unit as unit
+from openmm import app
 from openmm.app import PDBFile, Modeller
+from pdbfixer import PDBFixer
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 from scipy.constants import physical_constants as const
@@ -725,3 +727,39 @@ def remove_water_residues_in_pdb(input_pdb, output_pdb, water_names=None):
         water_names = {"HOH", "WAT"}
     print(f"Removing water residues.")
     remove_residues_in_pdb(input_pdb, output_pdb, water_names)
+
+
+def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
+    """Fixes a PDB file using PDBFixer.
+
+    This function processes a PDB file to correct common issues like
+    missing residues, non-standard residues, missing atoms, and missing
+    hydrogens.
+
+    Parameters
+    ----------
+    file_in : str
+        Path to the input PDB file.
+    file_out : str
+        Path to write the fixed PDB file.
+    ph : float, optional
+        The pH to use when adding missing hydrogens. Default is 7.0.
+    rm_heterogens : bool, optional
+        If True, remove heterogen atoms like water, ions, and ligands.
+        Default is True.
+
+    Returns
+    -------
+    None
+    """
+    fixer = PDBFixer(filename=file_in)
+    fixer.findMissingResidues()
+    fixer.findNonstandardResidues()
+    fixer.replaceNonstandardResidues()
+    if rm_heterogens:
+        fixer.removeHeterogens(True)
+    fixer.findMissingAtoms()
+    fixer.addMissingAtoms()
+    fixer.addMissingHydrogens(ph)
+    app.PDBFile.writeFile(fixer.topology, fixer.positions, open(file_out, 'w'))
+    return None

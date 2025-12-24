@@ -12,7 +12,8 @@ from .io import (remove_directory,
                  clean_ions_in_pdb,
                  relabel_residues_in_pdb,
                  remove_residues_in_pdb,
-                 remove_water_residues_in_pdb
+                 remove_water_residues_in_pdb,
+                 fix_pdb
                  )
 
 from .plotting import (n_plot,
@@ -26,13 +27,15 @@ from .plotting import (n_plot,
                        plot_fes_sep,
                        )
 
+from .tools import (zero_velocities,
+                    write_multimodel_pdb,
+                    centroid_positions,
+                    init_beads,
+                    get_thermal_de_broglie_wavelength,
+                    init_beads_scaled
+                    )
+
 from .openmm import (fix_pdb,
-                     zero_velocities,
-                     write_multimodel_pdb,
-                     centroid_positions,
-                     init_beads,
-                     get_thermal_de_broglie_wavelength,
-                     init_beads_scaled,
                      md_workflow,
                      md_analysis,
                      make_sdf,
