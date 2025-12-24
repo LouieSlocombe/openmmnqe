@@ -1,11 +1,10 @@
 # Create and activate the environment
 conda env create -f environment_custom.yml
 conda activate openmmnqe_custom
-conda install -c nvidia cuda-toolkit
-
+conda install -c nvidia cuda-toolkit=13.1 -y
 mkdir -p sources && cd sources
 
-# Clone and Build OpenMM
+# OpenMM
 git clone https://github.com/openmm/openmm.git && cd openmm
 mkdir -p build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
@@ -15,18 +14,18 @@ make install
 make PythonInstall
 cd ../..
 
-# Clone PLUMED
+# PLUMED
 git clone --branch v2.9.4 https://github.com/plumed/plumed2.git && cd plumed2
 ./configure --prefix=$CONDA_PREFIX --enable-modules=opes
 make -j$(nproc)
 make install
-# Export required environment variables
 export PLUMED_INCLUDE_DIR=$CONDA_PREFIX/include/plumed
 export PLUMED_LIBRARY_DIR=$CONDA_PREFIX/lib
 # Apply patch to Plumed.h. It inserts #include <memory> after #include <array>
 sed -i '/#include <array> \/\* array \*\//a #include <memory>' $CONDA_PREFIX/include/plumed/wrapper/Plumed.h
 cd ..
 
+# openmm-plumed
 git clone https://github.com/openmm/openmm-plumed.git && cd openmm-plumed
 mkdir -p build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
@@ -43,6 +42,7 @@ cd ../../..
 
 # openmm-torch
 git clone https://github.com/openmm/openmm-torch.git && cd openmm-torch
+sed -i '/find_package(Torch REQUIRED)/i find_package(CUDAToolkit REQUIRED)' CMakeLists.txt
 mkdir build && cd build
 export CUDA_HOME="$CONDA_PREFIX"
 cmake .. -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" \
