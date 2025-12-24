@@ -1361,13 +1361,11 @@ def run_openmm_rpmd_equilibration(modeller,
                                   output_prefix='rpmd_ready',
                                   n_beads=32,
                                   temperature=300 * unit.kelvin,
-                                  pressure=1.0 * unit.bar,
-                                  barostat_freq=50,
                                   friction=1.0 / unit.picosecond,
                                   timestep=0.5 * unit.femtoseconds,
                                   n_report=1_000,
-                                  n_1=2_000,
-                                  n_2=10_000,
+                                  n_1=1_000,
+                                  n_2=5_000,
                                   platform_name='CPU',
                                   deuterate=False,
                                   deuterate_option='water',
@@ -1417,7 +1415,6 @@ def run_openmm_rpmd_equilibration(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
@@ -1443,7 +1440,6 @@ def run_openmm_rpmd_equilibration(modeller,
         reportInterval=n_report,
         num_beads=n_beads,
     ))
-
     simulation.reporters.append(app.StateDataReporter(sys.stdout,
                                                       n_report,
                                                       step=True,
@@ -1720,9 +1716,9 @@ def run_openmm_rpmd_prod(modeller,
 
         plumed_force = PlumedForce(script_content)
         system.addForce(plumed_force)
-    integrator = openmm.RPMDIntegrator(temperature,
-                                       gamma,
-                                       time_step)
+    integrator = openmm.RPMDMonteCarloBarostat(temperature,
+                                               gamma,
+                                               time_step)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     if not os.path.exists(checkpoint_file):
         print(f"Error: Checkpoint {checkpoint_file} not found. Run equilibration first.", flush=True)
@@ -1995,16 +1991,111 @@ class RPMDCentroidReporter(object):
             pass
 
 
+def run_openmm_adqtb_eq(modeller,
+                        forcefield,
+                        temperature=300.0 * unit.kelvin,
+                        gamma=1.0 / unit.picosecond,
+                        time_step=1.0 * unit.femtoseconds,
+                        segment_length=0.5 * unit.picosecond,
+                        adaptation_rate=0.5,
+                        n_report=1_000,
+                        steps=500_000,
+                        output_prefix='prod',
+                        platform_name='CPU',
+                        deuterate=False,
+                        deuterate_option='water',
+                        potential=None,
+                        ml_idx=None,
+                        ):
+    if potential is not None and ml_idx is not None:
+        print("Adding ML potential to the system...", flush=True)
+        run_mixed = True
+        platform_name = 'CUDA'  # Force CUDA for mixed potential
+    else:
+        run_mixed = False
+
+    platform = openmm.Platform.getPlatformByName(platform_name)
+    has_box = modeller.topology.getUnitCellDimensions() is not None
+
+    if run_mixed:
+        mm_system = forcefield.createSystem(
+            modeller.topology,
+            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=None,
+            rigidWater=False,
+            removeCMMotion=True,
+        )
+        system = potential.createMixedSystem(
+            modeller.topology,
+            mm_system,
+            ml_idx,
+            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=None,
+            rigidWater=False,
+            removeCMMotion=True,
+        )
+    else:
+        system = forcefield.createSystem(
+            modeller.topology,
+            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=None,
+            rigidWater=False,
+            removeCMMotion=True,
+        )
+
+    if deuterate:
+        print("Deuterating system...", flush=True)
+        deuterate_system(modeller, system, option=deuterate_option)
+
+    integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
+    integrator.setSegmentLength(segment_length)
+    integrator.setDefaultAdaptationRate(adaptation_rate)
+
+    simulation = app.Simulation(modeller.topology, system, integrator, platform)
+    simulation.context.setPositions(modeller.positions)
+    simulation.context.setVelocitiesToTemperature(temperature)
+
+    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
+    simulation.reporters.append(app.StateDataReporter(sys.stdout,
+                                                      n_report,
+                                                      step=True,
+                                                      potentialEnergy=True,
+                                                      temperature=True,
+                                                      speed=True))
+    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
+                                                      n_report,
+                                                      step=True,
+                                                      time=True,
+                                                      potentialEnergy=True,
+                                                      kineticEnergy=True,
+                                                      totalEnergy=True,
+                                                      temperature=True,
+                                                      volume=True))
+
+    simulation.reporters.append(app.CheckpointReporter(f'{output_prefix}.chk', n_report * 10))
+    print(f"Starting production run for {steps} steps...", flush=True)
+    simulation.step(steps)
+    print("Production run complete.", flush=True)
+
+    simulation.saveCheckpoint(f'{output_prefix}.chk')
+    state = simulation.context.getState(getPositions=True, getVelocities=True)
+    with open(f'{output_prefix}.pdb', 'w') as f:
+        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+
+
 def run_openmm_adqtb_prod(modeller,
                           forcefield,
                           plumed_script_path=None,
                           pressure=1.0 * unit.bar,
+                          barostat_freq=50,
                           temperature=300.0 * unit.kelvin,
                           gamma=1.0 / unit.picosecond,
                           time_step=1.0 * unit.femtoseconds,
                           segment_length=0.5 * unit.picosecond,
                           adaptation_rate=0.5,
-                          barostat_freq=50,
                           n_report=1_000,
                           steps=500_000,
                           output_prefix='prod',
@@ -2071,7 +2162,6 @@ def run_openmm_adqtb_prod(modeller,
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
-
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)

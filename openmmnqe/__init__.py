@@ -54,5 +54,7 @@ from .openmm import (fix_pdb,
                      RPMDQuantumSpreadReporter,
                      RPMDBeadReporter,
                      RPMDCentroidReporter,
-                     count_dna_and_estimate_charge
+                     count_dna_and_estimate_charge,
+                     run_openmm_adqtb_eq,
+                     run_openmm_adqtb_prod
                      )
