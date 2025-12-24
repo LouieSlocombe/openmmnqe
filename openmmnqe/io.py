@@ -4,10 +4,13 @@ import re
 import shutil
 from typing import List
 
+import MDAnalysis as mda
 import numpy as np
 import openmm.unit as unit
-from openmm import app
+from openff.toolkit import Molecule
+from openmm import openmm, app
 from openmm.app import PDBFile, Modeller
+from openmmforcefields.generators import GAFFTemplateGenerator
 from pdbfixer import PDBFixer
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
@@ -763,3 +766,279 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
     fixer.addMissingHydrogens(ph)
     app.PDBFile.writeFile(fixer.topology, fixer.positions, open(file_out, 'w'))
     return None
+
+
+def make_sdf(pdb_file, lig_name='LIG'):
+    """
+    Converts a ligand from a PDB file to an SDF file.
+
+    This function reads a PDB file, extracts the ligand specified by its residue name,
+    and writes it to an SDF file. The ligand's atomic elements are guessed and added
+    to the topology before conversion.
+
+    Parameters
+    ----------
+    pdb_file : str
+        Path to the input PDB file.
+    lig_name : str, optional
+        Residue name of the ligand to extract. Default is 'LIG'.
+
+    Returns
+    -------
+    None
+    """
+    u = mda.Universe(pdb_file)
+    elements = mda.topology.guessers.guess_types(u.atoms.names)
+    u.add_TopologyAttr('elements', elements)
+    lig = u.select_atoms(f"resname {lig_name}")
+    mol = lig.convert_to("RDKIT")
+    # write to sdf file
+    Chem.MolToMolFile(mol, f"{lig_name}.sdf", kekulize=False)
+    return None
+
+
+def pdb_patcher(pdb_file, lig_name='LIG'):
+    """
+    Modifies a PDB file to replace placeholder residue names and characters.
+
+    This function reads a PDB file, replaces occurrences of the character 'x' with a space,
+    and changes the residue name 'UNK' to the specified ligand name. The modified PDB
+    content is then written back to the same file.
+
+    Parameters
+    ----------
+    pdb_file : str
+        Path to the PDB file to be modified.
+    lig_name : str, optional
+        The new residue name to replace 'UNK'. Default is 'LIG'.
+
+    Returns
+    -------
+    None
+    """
+    with open(pdb_file, 'r') as f:
+        pdb_data = f.read()
+    pdb_data = pdb_data.replace('x', ' ')
+    pdb_data = pdb_data.replace('UNK', lig_name)
+    with open(pdb_file, 'w') as f:
+        f.write(pdb_data)
+    return None
+
+
+def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
+    """
+    Combines a ligand from an SDF file with a receptor from a PDB file into a single PDB file.
+
+    This function reads a receptor structure from a PDB file and a ligand structure from an SDF file,
+    then combines them into a single PDB file. Optionally, it can patch the resulting PDB file to
+    replace placeholder residue names and characters.
+
+    Parameters
+    ----------
+    input_pdb : str
+        Path to the input PDB file containing the receptor structure.
+    lig_name : str, optional
+        Residue name of the ligand to be added. Default is 'LIG'.
+    patch : bool, optional
+        If True, applies the `pdb_patcher` function to the combined PDB file. Default is True.
+
+    Returns
+    -------
+    None
+    """
+    # Combine ligand and receptor into one pdb
+    pdb = app.PDBFile(input_pdb)
+    molecule = Molecule.from_file(f'{lig_name}.sdf')
+    ligand_ff_topology = molecule.to_topology()
+    ligand_omm_topology = ligand_ff_topology.to_openmm()
+    ligand_positions = ligand_ff_topology.get_positions().to_openmm()
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.add(ligand_omm_topology, ligand_positions)
+    with open(input_pdb, 'w') as f:
+        app.PDBFile.writeFile(modeller.topology, modeller.positions, f)
+    if patch:
+        pdb_patcher(input_pdb, lig_name=lig_name)
+    return None
+
+
+def prepare_lig_system(input_pdb,
+                       combined_pdb='combined_system.pdb',
+                       clean_pdb='cleaned.pdb',
+                       rm_ions=None,
+                       residue_map=None,
+                       rm_files=True,
+                       save_lig_sdf=False,
+                       lig_name='LIG'):
+    """
+    Prepares a ligand-receptor system for molecular simulations.
+
+    This function processes a PDB file to clean up water residues, optionally remove ions,
+    relabel residues, and extract the ligand. The ligand is saved as an SDF file, and the
+    cleaned receptor and ligand are combined into a single PDB file. Temporary files can
+    optionally be removed after processing.
+
+    Parameters
+    ----------
+    input_pdb : str
+        Path to the input PDB file containing the ligand-receptor system.
+    combined_pdb : str, optional
+        Path to save the combined ligand-receptor PDB file. Default is 'combined_system.pdb'.
+    clean_pdb : str, optional
+        Path to save the cleaned PDB file. Default is 'cleaned.pdb'.
+    rm_ions : set of str, optional
+        A set of ion residue names to remove from the PDB file. Default is None.
+    residue_map : dict, optional
+        A mapping of residue names to relabel in the PDB file. Default is None.
+    rm_files : bool, optional
+        If True, removes intermediate files generated during processing. Default is True.
+    lig_name : str, optional
+        Residue name of the ligand to extract. Default is 'LIG'.
+    save_lig_sdf: str, optional
+        If True, saves the ligand as an SDF file. Default is False.
+
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - pdb_data (openmm.app.PDBFile): The combined ligand-receptor PDB data.
+        - molecule (openff.toolkit.Molecule): The ligand molecule object.
+    """
+    remove_water_residues_in_pdb(input_pdb, clean_pdb)
+
+    if rm_ions is not None:
+        clean_ions_in_pdb(clean_pdb, rm_ions, clean_pdb)
+    if residue_map is not None:
+        relabel_residues_in_pdb(clean_pdb, residue_map, clean_pdb)
+
+    # Save ligand as sdf
+    make_sdf(clean_pdb, lig_name=lig_name)
+
+    # Strip out the ligand and fix the pdb
+    fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
+    # Remove the ligand
+    remove_residues_in_pdb(combined_pdb, combined_pdb, names=[lig_name])
+
+    combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
+
+    pdb_data = app.PDBFile(combined_pdb)
+    molecule = Molecule.from_file(f'{lig_name}.sdf')
+
+    if rm_files:
+        os.remove(clean_pdb)
+        os.remove(combined_pdb)
+    if not save_lig_sdf:
+        os.remove(f'{lig_name}.sdf')
+    return pdb_data, molecule
+
+
+def prepare_ligand_ff(standard_ff,
+                      molecule,
+                      gen_cache=False,
+                      use_cache=False,
+                      cache="gaff-molecules.json",
+                      n_conf=10,
+                      pc_methods='mmff94',
+                      gaff_ver='gaff-2.11'):  # gaff-2.2.20
+    """
+    Prepares a ligand-specific force field using the General Amber Force Field (GAFF).
+
+    This function generates or loads GAFF parameters for a given molecule and integrates
+    them into a standard force field. It supports caching of GAFF parameters for faster
+    reuse and allows the generation of conformers and assignment of partial charges.
+
+    Parameters
+    ----------
+    standard_ff : list of str
+        A list of file paths or names of the standard force field XML files.
+    molecule : openff.toolkit.Molecule
+        The molecule for which GAFF parameters are to be prepared.
+    gen_cache : bool, optional
+        If True, generates a cache file for the GAFF parameters. Default is False.
+    use_cache : bool, optional
+        If True, loads GAFF parameters from the specified cache file. Default is False.
+    cache : str, optional
+        Path to the cache file for GAFF parameters. Default is 'gaff-molecules.json'.
+    n_conf : int, optional
+        The number of conformers to generate for the molecule. Default is 10.
+    pc_methods : str, optional
+        The method to use for assigning partial charges. Default is 'mmff94'.
+        Other options include 'am1bcc' and 'am1-mulliken'.
+    gaff_ver : str, optional
+        The version of the General Amber Force Field to use. Default is 'gaff-2.11'.
+
+    Returns
+    -------
+    openmm.app.ForceField
+        The prepared force field object with GAFF parameters integrated.
+    """
+    # mmff94 am1bcc am1-mulliken
+
+    if use_cache:
+        print('Using cached GAFF parameters...', flush=True)
+        gaff = GAFFTemplateGenerator(molecules=molecule, cache=cache, forcefield=gaff_ver)
+        forcefield = app.ForceField(*standard_ff)
+        forcefield.registerTemplateGenerator(gaff.generator)
+    else:
+        print('Generating GAFF parameters...', flush=True)
+        molecule.generate_conformers(n_conformers=n_conf)
+        molecule.assign_partial_charges(partial_charge_method=pc_methods,
+                                        use_conformers=molecule.conformers)
+        if gen_cache:
+            print('Generating GAFF cache file...', flush=True)
+            gaff = GAFFTemplateGenerator(molecules=molecule, cache=cache, forcefield=gaff_ver)
+            forcefield = app.ForceField(*standard_ff)
+            forcefield.registerTemplateGenerator(gaff.generator)
+            forcefield.createSystem(topology=molecule.to_topology().to_openmm())
+        else:
+            gaff = GAFFTemplateGenerator(molecules=molecule, forcefield=gaff_ver)
+            forcefield = app.ForceField(*standard_ff)
+            forcefield.registerTemplateGenerator(gaff.generator)
+
+    return forcefield
+
+
+def save_pdb_selection(input_pdb_path, atom_indices, output_pdb_path):
+    """
+    Saves a subset of atoms from a PDB file to a new PDB file.
+
+    This function reads a PDB file, selects a subset of atoms based on their indices,
+    and writes the selected atoms to a new PDB file. Atoms not in the specified indices
+    are removed from the output.
+
+    Parameters
+    ----------
+    input_pdb_path : str
+        Path to the input PDB file.
+    atom_indices : list of int
+        A list of atom indices to keep in the output PDB file.
+    output_pdb_path : str
+        Path to save the output PDB file containing the selected atoms.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    - If the selection is empty, a warning is printed, and the output PDB file will be empty.
+    - The atom indices should correspond to the indices in the input PDB file.
+    """
+    pdb = app.PDBFile(input_pdb_path)
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    keep_indices = set(atom_indices)
+    atoms_to_delete = []
+    all_atoms = list(modeller.topology.atoms())
+
+    for atom in all_atoms:
+        if atom.index not in keep_indices:
+            atoms_to_delete.append(atom)
+
+    num_deleted = len(atoms_to_delete)
+    if num_deleted == len(all_atoms):
+        print("Warning: Your selection is empty! The output PDB will be empty.")
+
+    modeller.delete(atoms_to_delete)
+
+    print(f"Writing selection ({len(all_atoms) - num_deleted} atoms) to {output_pdb_path}...")
+    with open(output_pdb_path, 'w') as f:
+        app.PDBFile.writeFile(modeller.topology, modeller.positions, f)

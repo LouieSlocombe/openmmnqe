@@ -206,3 +206,198 @@ def init_beads(modeller, simulation, n_beads, perturb=0.002):
                     for p, (dx, dy, dz) in zip(pos0, jiggle)]
         simulation.integrator.setPositions(b, bead_pos * unit.nanometer)
         simulation.integrator.setVelocities(b, zero_velocities(n_atoms))
+
+
+def count_dna_and_estimate_charge(topology):
+    dna_residue_names = {
+        "DA", "DC", "DG", "DT",  # internal
+        "DA5", "DC5", "DG5", "DT5",  # 5'-terminal
+        "DA3", "DC3", "DG3", "DT3",  # 3'-terminal
+    }
+
+    num_dna_residues = 0
+
+    for residue in topology.residues():
+        if residue.name.strip() in dna_residue_names:
+            num_dna_residues += 1
+
+    # Estimate: -1 e per nucleotide
+    estimated_charge = -num_dna_residues
+
+    return estimated_charge
+
+
+def deuterate_system(modeller, system, option='all', target_resname=None):
+    """
+    Replaces hydrogen atoms with deuterium in a molecular system.
+
+    This function modifies the masses of hydrogen atoms in the system to the mass of deuterium
+    based on the specified option. It supports deuteration of all hydrogens, or specific subsets
+    such as water, protein, DNA, RNA, nucleic acids, or a specific ligand.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM modeller object containing the system topology and positions.
+    system : openmm.System
+        The OpenMM system object to be modified.
+    option : str, optional
+        Specifies the subset of the system to deuterate. Options include:
+        'all', 'water', 'protein', 'dna', 'rna', 'nucleic', or 'ligand'. Default is 'all'.
+    target_resname : str, optional
+        The residue name of the ligand to deuterate. Required if `option` is 'ligand'.
+
+    Raises
+    ------
+    ValueError
+        If `option` is 'ligand' and `target_resname` is not provided.
+        If `option` is not one of the supported values.
+
+    Notes
+    -----
+    - If `option` is 'all', all hydrogen atoms in the system are deuterated.
+    - If `option` is 'ligand' and no residues match `target_resname`, a warning is printed.
+    - If no residues match the specified `option`, a warning is printed.
+
+    Returns
+    -------
+    None
+    """
+    deuterium_mass = app.element.deuterium.mass
+
+    # Define residue sets for different options
+    protein_residues = {
+        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
+        'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP',
+        'TYR', 'VAL', 'HID', 'HIE', 'HIP', 'CYX', 'LYN', 'ASH', 'GLH',
+        'ACE', 'NME', 'NAC'
+    }
+
+    dna_residues = {
+        'DA', 'DC', 'DG', 'DT',
+        'DA5', 'DC5', 'DG5', 'DT5',  # 5' terminals
+        'DA3', 'DC3', 'DG3', 'DT3'  # 3' terminals
+    }
+
+    rna_residues = {
+        'A', 'C', 'G', 'U',
+        'RA', 'RC', 'RG', 'RU',  # Common in Amber force fields
+        'A5', 'C5', 'G5', 'U5',  # 5' terminals
+        'A3', 'C3', 'G3', 'U3'  # 3' terminals
+    }
+
+    water_residues = {'HOH', 'H2O', 'TIP3', 'WAT', 'SOL'}
+
+    nucleic_residues = dna_residues.union(rna_residues)
+
+    # Determine target residues based on the option
+    target_residues = set()
+    if option == 'all':
+        pass
+    elif option == 'water':
+        target_residues = water_residues
+    elif option == 'protein':
+        target_residues = protein_residues
+    elif option == 'dna':
+        target_residues = dna_residues
+    elif option == 'rna':
+        target_residues = rna_residues
+    elif option == 'nucleic':
+        target_residues = nucleic_residues
+    elif option == 'ligand':
+        if target_resname is None:
+            raise ValueError("If option is 'ligand', you must provide a 'target_resname'.")
+        target_residues = {target_resname}
+    else:
+        raise ValueError("Option must be 'all', 'water', 'protein', 'dna', 'rna', 'nucleic', or 'ligand'")
+
+    # Deuterate all hydrogens if option is 'all'
+    if option == 'all':
+        for atom in modeller.topology.atoms():
+            if atom.element and atom.element.symbol == 'H':
+                system.setParticleMass(atom.index, deuterium_mass)
+    else:
+        # Deuterate hydrogens in the specified residue set
+        found_target = False
+        for residue in modeller.topology.residues():
+            if residue.name in target_residues:
+                found_target = True
+                for atom in residue.atoms():
+                    if atom.element and atom.element.symbol == 'H':
+                        system.setParticleMass(atom.index, deuterium_mass)
+
+        # Print warnings if no matching residues are found
+        if not found_target and option == 'ligand':
+            print(f"Warning: No ligand named '{target_resname}' was found.")
+        elif not found_target and option != 'all':
+            print(f"Warning: No residues matching option '{option}' were found.")
+
+
+def get_atoms_in_residue(pdb_file_path, residue_index, chain_id=None):
+    """
+    Retrieves the atom indices of a specific residue in a PDB file.
+
+    This function reads a PDB file, identifies the specified residue by its index
+    and optionally its chain ID, and returns the indices of all atoms in that residue.
+
+    Parameters
+    ----------
+    pdb_file_path : str
+        Path to the PDB file to be read.
+    residue_index : int
+        The index of the residue whose atom indices are to be retrieved.
+    chain_id : str, optional
+        The ID of the chain containing the residue. If None, the residue is
+        searched in the global topology. Default is None.
+
+    Returns
+    -------
+    list of int or None
+        A list of atom indices in the specified residue. Returns None if the
+        residue or chain is not found, or if the residue index is out of bounds.
+
+    Notes
+    -----
+    - If `chain_id` is provided, the residue is searched within the specified chain.
+    - If `chain_id` is None, the residue is searched in the global topology.
+    - Prints error messages if the chain or residue index is invalid.
+    """
+    pdb = app.PDBFile(pdb_file_path)
+    topology = pdb.topology
+    if chain_id is not None:
+        found_chain = None
+        for chain in topology.chains():
+            if chain.id == chain_id:
+                found_chain = chain
+                break
+
+        if found_chain is None:
+            available_chains = [c.id for c in topology.chains()]
+            print(f"Error: Chain '{chain_id}' not found. Available chains: {available_chains}")
+            return None
+
+        residues = list(found_chain.residues())
+        if residue_index < 0 or residue_index >= len(residues):
+            print(f"Error: Residue index {residue_index} is out of bounds for Chain {chain_id}.")
+            print(f"Chain {chain_id} contains {len(residues)} residues.")
+            return None
+
+        target_residue = residues[residue_index]
+        print(f"Looking in Chain {chain_id}, Residue Index {residue_index}...")
+
+    else:
+        residues = list(topology.residues())
+
+        if residue_index < 0 or residue_index >= len(residues):
+            print(f"Error: Residue index {residue_index} is out of bounds.")
+            print(f"The file contains {len(residues)} residues (indices 0 to {len(residues) - 1}).")
+            return None
+
+        target_residue = residues[residue_index]
+        print(f"Looking in global topology, Residue Index {residue_index}...")
+
+    atom_indices = [atom.index for atom in target_residue.atoms()]
+
+    print(
+        f"Successfully retrieved residue: {target_residue.name} (Chain: {target_residue.chain.id}, Index: {target_residue.index}, PDB ID: {target_residue.id})")
+    return atom_indices
