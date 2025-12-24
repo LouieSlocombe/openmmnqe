@@ -31,9 +31,6 @@ from .openmm import (md_workflow,
                      run_openmm_rpmd_equilibration,
                      run_openmm_rpmd_contracted,
                      run_openmm_rpmd_prod,
-                     RPMDQuantumSpreadReporter,
-                     RPMDBeadReporter,
-                     RPMDCentroidReporter,
                      run_openmm_adqtb_eq,
                      run_openmm_adqtb_prod
                      )
@@ -47,6 +44,10 @@ from .plotting import (n_plot,
                        plot_fes_contour_compare,
                        plot_fes_sep,
                        )
+from .reporters import (RPMDQuantumSpreadReporter,
+                        RPMDBeadReporter,
+                        RPMDCentroidReporter,
+                        )
 from .tools import (zero_velocities,
                     write_multimodel_pdb,
                     centroid_positions,
