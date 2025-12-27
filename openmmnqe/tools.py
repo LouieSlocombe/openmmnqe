@@ -210,6 +210,24 @@ def init_beads(modeller, simulation, n_beads, perturb=0.002):
 
 
 def count_dna_and_estimate_charge(topology):
+    """
+    Counts the number of DNA residues in a topology and estimates the total charge.
+
+    This function identifies DNA residues in the given topology based on their residue names
+    and calculates the total charge of the DNA. Each DNA residue is assumed to contribute
+    a charge of -1 e.
+
+    Parameters
+    ----------
+    topology : openmm.app.Topology
+        The topology object containing the system's residues.
+
+    Returns
+    -------
+    int
+        The estimated total charge of the DNA in the topology.
+        Negative value indicates the total charge contributed by the DNA residues.
+    """
     dna_residue_names = {
         "DA", "DC", "DG", "DT",  # internal
         "DA5", "DC5", "DG5", "DT5",  # 5'-terminal

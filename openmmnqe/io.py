@@ -35,12 +35,19 @@ eVperA2_to_kJpermolpernm2 = eV_to_kJpermol / A_to_nm ** 2
 
 def remove_directory(directory):
     """
-    Removes a directory if it exists, otherwise prints a message.
+    Removes a directory if it exists.
 
-    Parameters:
-    directory (str): The path to the directory to be removed.
+    This function checks if the specified directory exists. If it does, the directory
+    and all its contents are removed. If the directory does not exist, the function
+    does nothing.
 
-    Returns:
+    Parameters
+    ----------
+    directory : str
+        The path to the directory to be removed.
+
+    Returns
+    -------
     None
     """
     if os.path.exists(directory):
@@ -52,14 +59,22 @@ def remove_directory(directory):
 
 def copy_and_rename_file(src, dst_dir, new_name):
     """
-    Copies a file to a new directory and renames it.
+    Copies a file to a specified directory and renames it.
 
-    Parameters:
-    src (str): The path to the source file.
-    dst_dir (str): The path to the destination directory.
-    new_name (str): The new name for the copied file.
+    This function takes the path to a source file, copies it to a destination directory,
+    and renames the copied file to the specified new name.
 
-    Returns:
+    Parameters
+    ----------
+    src : str
+        The path to the source file.
+    dst_dir : str
+        The path to the destination directory.
+    new_name : str
+        The new name for the copied file.
+
+    Returns
+    -------
     None
     """
     shutil.copy(src, os.path.join(dst_dir, new_name))
@@ -70,12 +85,21 @@ def list_files_with_pattern(directory, pattern):
     """
     Lists files in a directory that match a given pattern.
 
-    Parameters:
-    directory (str): The path to the directory to search in.
-    pattern (str): The pattern to match files against.
+    This function searches the specified directory for files that match the given pattern
+    and returns a list of their file paths. The pattern matching is performed using the
+    `glob` module.
 
-    Returns:
-    list: A list of file paths that match the given pattern.
+    Parameters
+    ----------
+    directory : str
+        The path to the directory to search in.
+    pattern : str
+        The pattern to match files against (e.g., '*.txt' for all text files).
+
+    Returns
+    -------
+    list
+        A list of file paths that match the given pattern.
     """
     return glob.glob(os.path.join(directory, pattern))
 
@@ -84,19 +108,30 @@ def search_fes_files(target_directory: str) -> list[str]:
     """
     Searches for files in the target directory with names matching the pattern 'FES*', where '*' is an integer.
 
-    Parameters:
-    target_directory (str): The directory to search in.
+    This function scans the specified directory for files whose names match the pattern 'FES\d+\.dat',
+    where '\d+' represents one or more digits. It returns a list of all matching file names.
 
-    Returns:
-    list[str]: A list of matching file names.
+    Parameters
+    ----------
+    target_directory : str
+        The directory to search in.
+
+    Returns
+    -------
+    list[str]
+        A list of matching file names.
     """
+    # Compile a regular expression pattern to match file names like 'FES<number>.dat'
     pattern = re.compile(r'^FES\d+\.dat$')
     matching_files = []
 
+    # Iterate through all files in the target directory
     for filename in os.listdir(target_directory):
+        # Check if the file name matches the pattern
         if pattern.match(filename):
             matching_files.append(filename)
 
+    # Return the list of matching file names
     return matching_files
 
 
@@ -104,30 +139,48 @@ def load_fes_data(directory: str, bins: int) -> list[np.ndarray]:
     """
     Find FES files in the directory and load their data into numpy arrays.
 
-    Parameters:
-    directory (str): Directory containing the FES files.
-    bins (int): Number of bins for reshaping the data.
+    This function searches for FES files in the specified directory, reads their data,
+    and transforms it into numpy arrays. The transformation involves scaling the data
+    based on predefined conversion factors. The number of bins is incremented by 1
+    before processing.
 
-    Returns:
-    list[np.ndarray]: List of numpy arrays, each containing the transformed FES data.
+    Parameters
+    ----------
+    directory : str
+        Directory containing the FES files.
+    bins : int
+        Number of bins for reshaping the data.
+
+    Returns
+    -------
+    list[np.ndarray]
+        A list of numpy arrays, each containing the transformed FES data.
     """
+    # Search for FES files in the specified directory
     fes_files = search_fes_files(directory)
     fes_arrays = []
-    bins += 1
+    bins += 1  # Increment the number of bins
 
+    # Process each FES file
     for file in sorted(fes_files):
         file_path = os.path.join(directory, file)
 
-        # Read first line to detect number of CVs
+        # Read the first line to detect the number of collective variables (CVs)
         with open(file_path, 'r') as f:
             first_line = f.readline().strip()
             n_cv = len(first_line.split()[2:])  # Skip #! FIELDS and time
         print(f"Loading {file_path} with {n_cv} FIELDS")
+
+        # Load the data from the file, ignoring lines starting with '#'
         data = np.loadtxt(file_path, comments="#")
+
+        # Transform the data based on the number of CVs
         if n_cv == 2:
             transformed_data = np.array([1.0, 1.0 / eV_to_kJpermol])[:, np.newaxis] * data[:, :2].T
         else:
             transformed_data = np.array([1.0, 1.0 / eV_to_kJpermol])[:, np.newaxis] * data[:, :2].T
+
+        # Append the transformed data to the result list
         fes_arrays.append(transformed_data)
 
     return fes_arrays
