@@ -165,8 +165,8 @@ def test_eq_workflow_plumed_dihedral():
     modeller.addHydrogens()
 
     # Solvate
-    padding = 2.0
-    box_shape = 'cube'
+    padding = 1.5
+    box_shape = 'dodecahedron'
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
@@ -176,7 +176,7 @@ def test_eq_workflow_plumed_dihedral():
     plumed_input = f"""
 phi: TORSION ATOMS={idx_str}
 # Units: default length=nm, energy=kJ/mol, time=ps (depends on your MD engine interface)
-metad: METAD ARG=phi PACE=500 HEIGHT=2.0 SIGMA=0.35 BIASFACTOR=12 TEMP=300 GRID_MIN=-pi GRID_MAX=pi GRID_BIN=300 FILE=HILLS
+metad: METAD ARG=phi PACE=500 HEIGHT=4.0 SIGMA=0.35 BIASFACTOR=12 TEMP=300 GRID_MIN=-pi GRID_MAX=pi GRID_BIN=300 FILE=HILLS
 PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 """
     # Write PLUMED script to a temporary file
@@ -200,13 +200,38 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         forcefield,
                         plumed_script_path=plumed_script_path,
                         platform_name='CUDA',
-                        steps=100_000)
+                        steps=10_000)
 
     # Run PLUMED sum_hills to get FES
     os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
     # Plot FES
-    fig, ax = nqe.plot_plumed_fes("fes.dat")
+    nqe.plot_plumed_fes("fes.dat")
     plt.show()
+
+    n_beads = 4
+    pdb = app.PDBFile("npt_equilibrated.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      platform_name='CUDA',
+                                      n_beads=n_beads,
+                                      n_1=100,
+                                      n_2=100)
+
+    # nqe.run_openmm_rpmd_prod(modeller,
+    #                          forcefield,
+    #                          n_beads=n_beads,
+    #                          steps=10_000,
+    #                          #plumed_script_path=plumed_script_path,
+    #                          platform_name='CUDA',
+    #                          checkpoint_file='rpmd_ready.chk')
+    #
+    # # Run PLUMED sum_hills to get FES
+    # os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
+    # # Plot FES
+    # nqe.plot_plumed_fes("fes.dat")
+    # plt.show()
+
 
     os.remove('minimized.chk')
     os.remove('minimized.log')
