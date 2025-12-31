@@ -121,7 +121,7 @@ def test_smd():
                                      constraints=app.HBonds,
                                      hydrogenMass=1.5 * unit.amu)
 
-    integrator = openmm.LangevinMiddleIntegrator(300 * unit.kelvin,
+    integrator = openmm.LangevinMiddleIntegrator(300.0 * unit.kelvin,
                                                  1 / unit.picosecond,
                                                  0.004 * unit.picoseconds)
     simulation = app.Simulation(pdb.topology, system, integrator)
@@ -142,9 +142,9 @@ def test_smd():
 
     # Equilibrate
     simulation.context.setVelocitiesToTemperature(300 * unit.kelvin)
-    simulation.step(10_000)
+    simulation.step(100_000)
 
-    by_serial = {int(a.id): a for a in pdb.topology.atoms()}
+    by_serial = {int(a.id): a for a in simulation.topology.atoms()}
 
     a1 = by_serial[4]
     a2 = by_serial[94]
@@ -165,13 +165,17 @@ def test_smd():
     cv.addBond(index1, index2)
 
     # starting value
-    r0 = dist
+    r0 = round(dist.value_in_unit(unit.nanometer), 1) * unit.nanometer
+    r_start = r0.value_in_unit(unit.nanometer)
+    r_end = 2.0
+    n_windows = 24
+    print("Starting distance r0 =", r_start, "nm")
 
     # force constant
     fc_pull = 1_000.0 * unit.kilojoules_per_mole / unit.nanometers ** 2
 
     # pulling speed
-    v_pulling = 0.02 * unit.nanometers / unit.picosecond  # nm/ps
+    v_pulling = 0.01 * unit.nanometers / unit.picosecond  # nm/ps
 
     # simulation time step
     dt = simulation.integrator.getStepSize()
@@ -194,14 +198,16 @@ def test_smd():
 
     # define the windows
     # during the pulling loop we will save specific configurations corresponding to the windows
-    windows = np.linspace(r0, 3.3, 24)
+    windows = np.linspace(r_start, r_end, n_windows)
     window_coords = []
     window_index = 0
 
     # SMD pulling loop
+    smd_cv_values = []
     for i in range(total_steps // increment_steps):
         simulation.step(increment_steps)
         current_cv_value = pullingForce.getCollectiveVariableValues(simulation.context)
+        smd_cv_values.append([i, current_cv_value[0]])
 
         if (i * increment_steps) % 5_000 == 0:
             print("r0 = ", r0, "r = ", current_cv_value)
@@ -222,6 +228,15 @@ def test_smd():
         app.PDBFile.writeFile(simulation.topology, coords, outfile)
         outfile.close()
 
+    # Save the simulation
+    simulation.saveCheckpoint(f'eq.chk')
+
+    smd_cv_values = np.array(smd_cv_values)
+    plt.plot(smd_cv_values[:, 0] * increment_steps, smd_cv_values[:, 1])
+    plt.xlabel("Steps")
+    plt.ylabel("CV value (nm)")
+    plt.show()
+
     def run_window(window_index):
         print('running window', window_index)
 
@@ -231,9 +246,8 @@ def test_smd():
         # we can reuse the existing Simulation
         simulation.context.setPositions(pdb.positions)
 
-        # set the fixed location of the harmonic restraint for this window
-        r0 = windows[window_index]
-        simulation.context.setParameter('r0', r0)
+        # Set the fixed location of the harmonic restraint for this window
+        simulation.context.setParameter('r0', windows[window_index])
 
         # run short equilibration with new positions and r0
         simulation.context.setVelocitiesToTemperature(300.0 * unit.kelvin)
@@ -261,7 +275,7 @@ def test_smd():
 
         print('Completed window', window_index)
 
-    for n in range(24):
+    for n in range(n_windows):
         run_window(n)
 
     # plot the histograms
@@ -284,7 +298,8 @@ def test_smd():
     # tar xf wham-release-2.0.11.tgz
     # cd wham/wham && make
 
-    os.system('/home/louie/skunkworks/wham/wham/wham/wham 1.3 3.3 50 1e-6 300 0 metafile.txt pmf.txt > wham_log.txt')
+    os.system(
+        f'/home/louie/skunkworks/wham/wham/wham/wham {r_start} {r_end} 50 1e-6 300 0 metafile.txt pmf.txt > wham_log.txt')
 
     # plot the PMF
     pmf = np.loadtxt("pmf.txt")
