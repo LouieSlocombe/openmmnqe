@@ -1,8 +1,10 @@
+import re
+from typing import Dict, Sequence, Any, List, Union, Literal, Optional
+
 import numpy as np
 import openmm.unit as unit
 from openmm import openmm, app
 from scipy import constants
-from typing import Dict, Optional, Sequence, Any
 
 
 def zero_velocities(n_atoms):
@@ -515,3 +517,97 @@ def set_adqtb_particle_types_by_element(
         integrator.setParticleType(idx, int(element_to_type[sym]))
 
     return element_to_type
+
+
+_VMD_PICK_RE = re.compile(
+    r"^\s*([A-Za-z]+)\s*(-?\d+)\s*([A-Za-z]?)\s*:\s*([A-Za-z0-9'_*]+)\s*$"
+)
+
+
+def atom_indices_from_vmd_picks(
+        modeller,
+        picks: List[str],
+        *,
+        match_mode: Literal["unique", "first", "all"] = "unique",
+        chain_id: Optional[str] = None,
+) -> List[Union[int, List[int]]]:
+    """
+    Map VMD pick strings like "HIE258:CD2" to OpenMM Topology atom indices.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The Modeller whose topology will be searched.
+    picks : list[str]
+        VMD pick strings, e.g. ["HIE258:CD2", "ALA12:CA"].
+        Optional insertion code supported: "HIE258A:CD2".
+    match_mode : {"unique", "first", "all"}, default "unique"
+        - "unique": require exactly one match per pick; raise ValueError otherwise
+        - "first" : if multiple matches, take the first
+        - "all"   : return list[list[int]] (indices for each pick)
+    chain_id : str | None, default None
+        If provided, restrict matches to residues in this chain (Topology chain.id).
+
+    Returns
+    -------
+    list[int | list[int]]
+        Atom indices (0-based) in the same order as `picks`.
+
+    Raises
+    ------
+    ValueError
+        If a pick is malformed, or no matches, or multiple matches in "unique" mode.
+    """
+    topo = modeller.topology
+
+    # Build lookup: (chain_id_or_None, resname, resid_str, atomname) -> [atom.index,...]
+    lookup = {}
+    for atom in topo.atoms():
+        res = atom.residue
+        key = (res.chain.id, res.name, str(res.id), atom.name)
+        lookup.setdefault(key, []).append(atom.index)
+
+    out: List[Union[int, List[int]]] = []
+
+    for s in picks:
+        m = _VMD_PICK_RE.match(s)
+        if not m:
+            raise ValueError(
+                f"Pick '{s}' is malformed; expected like 'HIE258:CD2' (optionally 'HIE258A:CD2')."
+            )
+
+        resname, resid_num, ins_code, atomname = m.groups()
+        resid_str = f"{resid_num}{ins_code or ''}"
+
+        # collect matches across chains unless chain_id specified
+        matches: List[int] = []
+        if chain_id is not None:
+            matches = lookup.get((chain_id, resname, resid_str, atomname), [])
+        else:
+            for (ch, rn, rid, an), idxs in lookup.items():
+                if rn == resname and rid == resid_str and an == atomname:
+                    matches.extend(idxs)
+
+        if not matches:
+            msg = f"No atom matches pick '{s}' -> (resname='{resname}', resid='{resid_str}', atomname='{atomname}')"
+            if chain_id is not None:
+                msg += f" in chain '{chain_id}'"
+            msg += "."
+            raise ValueError(msg)
+
+        if match_mode == "all":
+            out.append(matches)
+        elif match_mode == "first":
+            out.append(matches[0])
+        elif match_mode == "unique":
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Pick '{s}' matched {len(matches)} atoms; expected exactly 1. "
+                    f"This usually means multiple chains/segments share the same residue id/name. "
+                    f"Use chain_id='A' (etc.), or match_mode='first'/'all'."
+                )
+            out.append(matches[0])
+        else:
+            raise ValueError(f"Unknown match_mode '{match_mode}'.")
+
+    return out

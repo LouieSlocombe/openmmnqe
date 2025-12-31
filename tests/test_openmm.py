@@ -398,3 +398,15 @@ def test_fep():
     delta_f = result['Delta_f'][0, -1]
     delta_f_error = result['dDelta_f'][0, -1]
     print(f"Free Energy Difference (Complex Leg): {delta_f:.3f} +/- {delta_f_error:.3f} kT")
+
+
+def test_atom_indices_from_vmd_picks():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/input.pdb'
+    pdb = app.PDBFile(input_pdb)
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    vmd_pick_str = ['PHE6:HE2', 'LYS29:CG']
+    indexes = nqe.atom_indices_from_vmd_picks(modeller, vmd_pick_str)
+    print(indexes, flush=True)
+    ref_indexes = [86, 461]
+    assert indexes == ref_indexes

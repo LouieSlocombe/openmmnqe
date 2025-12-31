@@ -57,5 +57,6 @@ from .tools import (zero_velocities,
                     count_dna_and_estimate_charge,
                     deuterate_system,
                     get_atoms_in_residue,
-                    set_adqtb_particle_types_by_element
+                    set_adqtb_particle_types_by_element,
+                    atom_indices_from_vmd_picks
                     )
