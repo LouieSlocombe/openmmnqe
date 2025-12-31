@@ -1,5 +1,10 @@
+import os
+from sys import stdout
+
 import matplotlib.pyplot as plot
+import matplotlib.pyplot as plt
 import numpy as np
+import openmm.app as app
 import openmm.unit as unit
 from openmm import openmm
 
@@ -102,3 +107,198 @@ def test_parahydrogen():
     plot.plot(qtb_rdf, label="adQTB")
     plot.legend()
     plot.show()
+
+
+def test_smd():
+    print(flush=True)
+    pdb = app.PDBFile('tests/data/pdb/deca-ala.pdb')
+
+    forcefield = app.ForceField('amber14-all.xml')
+
+    # We have a single molecule in vacuum so we use no cutoff.
+    system = forcefield.createSystem(pdb.topology,
+                                     nonbondedMethod=app.NoCutoff,
+                                     constraints=app.HBonds,
+                                     hydrogenMass=1.5 * unit.amu)
+
+    integrator = openmm.LangevinMiddleIntegrator(300 * unit.kelvin,
+                                                 1 / unit.picosecond,
+                                                 0.004 * unit.picoseconds)
+    simulation = app.Simulation(pdb.topology, system, integrator)
+    simulation.context.setPositions(pdb.positions)
+
+    # Minimize
+    openmm.LocalEnergyMinimizer.minimize(simulation.context)
+
+    simulation.reporters.append(app.DCDReporter('smd_traj.dcd', 1_000))
+    simulation.reporters.append(app.PDBReporter('smd_traj.pdb', 1_000))
+    simulation.reporters.append(app.StateDataReporter(stdout,
+                                                      10_000,
+                                                      step=True,
+                                                      time=True,
+                                                      potentialEnergy=True,
+                                                      temperature=True,
+                                                      speed=True))
+
+    # Equilibrate
+    simulation.context.setVelocitiesToTemperature(300 * unit.kelvin)
+    simulation.step(10_000)
+
+    by_serial = {int(a.id): a for a in pdb.topology.atoms()}
+
+    a1 = by_serial[4]
+    a2 = by_serial[94]
+
+    i, j = a1.index, a2.index
+    print("OpenMM indices:", i, j, "| names:", a1.name, a2.name)
+
+    # Distance from the loaded coordinates
+    pos = pdb.positions
+    delta = (pos[i] - pos[j]).value_in_unit(unit.nanometer)
+    dist = np.linalg.norm([delta.x, delta.y, delta.z]) * unit.nanometer
+    print("Distance:", f"{dist.value_in_unit(unit.nanometer):.3g} nm")
+
+    # define the CV as the distance between the CAs of the two end residues
+    index1 = i
+    index2 = j
+    cv = openmm.CustomBondForce('r')
+    cv.addBond(index1, index2)
+
+    # starting value
+    r0 = dist
+
+    # force constant
+    fc_pull = 1_000.0 * unit.kilojoules_per_mole / unit.nanometers ** 2
+
+    # pulling speed
+    v_pulling = 0.02 * unit.nanometers / unit.picosecond  # nm/ps
+
+    # simulation time step
+    dt = simulation.integrator.getStepSize()
+
+    # total number of steps
+    total_steps = 30_000  # 120ps
+
+    # number of steps to run between incrementing r0 (1 makes the simulation slow)
+    increment_steps = 10
+
+    # define a harmonic restraint on the CV
+    # the location of the restrain will be moved as we run the simulation
+    # this is constant velocity steered MD
+    pullingForce = openmm.CustomCVForce('0.5 * fc_pull * (cv-r0)^2')
+    pullingForce.addGlobalParameter('fc_pull', fc_pull)
+    pullingForce.addGlobalParameter('r0', r0)
+    pullingForce.addCollectiveVariable("cv", cv)
+    system.addForce(pullingForce)
+    simulation.context.reinitialize(preserveState=True)
+
+    # define the windows
+    # during the pulling loop we will save specific configurations corresponding to the windows
+    windows = np.linspace(r0, 3.3, 24)
+    window_coords = []
+    window_index = 0
+
+    # SMD pulling loop
+    for i in range(total_steps // increment_steps):
+        simulation.step(increment_steps)
+        current_cv_value = pullingForce.getCollectiveVariableValues(simulation.context)
+
+        if (i * increment_steps) % 5_000 == 0:
+            print("r0 = ", r0, "r = ", current_cv_value)
+
+        # increment the location of the CV based on the pulling velocity
+        r0 += v_pulling * dt * increment_steps
+        simulation.context.setParameter('r0', r0)
+
+        # check if we should save this config as a window starting structure
+        if (window_index < len(windows) and current_cv_value >= windows[window_index]):
+            window_coords.append(
+                simulation.context.getState(getPositions=True, enforcePeriodicBox=False).getPositions())
+            window_index += 1
+
+    # save the window structures
+    for i, coords in enumerate(window_coords):
+        outfile = open(f'window_{i}.pdb', 'w')
+        app.PDBFile.writeFile(simulation.topology, coords, outfile)
+        outfile.close()
+
+    def run_window(window_index):
+        print('running window', window_index)
+
+        # load in the starting configuration for this window
+        pdb = app.PDBFile(f'window_{window_index}.pdb')
+
+        # we can reuse the existing Simulation
+        simulation.context.setPositions(pdb.positions)
+
+        # set the fixed location of the harmonic restraint for this window
+        r0 = windows[window_index]
+        simulation.context.setParameter('r0', r0)
+
+        # run short equilibration with new positions and r0
+        simulation.context.setVelocitiesToTemperature(300.0 * unit.kelvin)
+        simulation.step(1_000)
+
+        # run the data collection
+
+        # total number of steps
+        total_steps = 100_000  # 400 ps
+
+        # frequency to record the current CV value
+        record_steps = 1_000
+
+        # run the simulation and record the value of the CV.
+        cv_values = []
+        for i in range(total_steps // record_steps):
+            simulation.step(record_steps)
+
+            # get the current value of the cv
+            current_cv_value = pullingForce.getCollectiveVariableValues(simulation.context)
+            cv_values.append([i, current_cv_value[0]])
+
+        # save the CV timeseries to a file so we can postprocess
+        np.savetxt(f'cv_values_window_{window_index}.txt', np.array(cv_values))
+
+        print('Completed window', window_index)
+
+    for n in range(24):
+        run_window(n)
+
+    # plot the histograms
+    metafilelines = []
+    for i in range(len(windows)):
+        data = np.loadtxt(f'cv_values_window_{i}.txt')
+        plt.hist(data[:, 1])
+        metafileline = f'cv_values_window_{i}.txt {windows[i]} 1000\n'
+        metafilelines.append(metafileline)
+
+    plt.xlabel("r (nm)")
+    plt.ylabel("count")
+    plt.show()
+
+    with open("metafile.txt", "w") as f:
+        f.writelines(metafilelines)
+
+    # execute WHAM to get the PMF using os
+    # wget http://membrane.urmc.rochester.edu/sites/default/files/wham/wham-release-2.1.0.tgz
+    # tar xf wham-release-2.0.11.tgz
+    # cd wham/wham && make
+
+    os.system('/home/louie/skunkworks/wham/wham/wham/wham 1.3 3.3 50 1e-6 300 0 metafile.txt pmf.txt > wham_log.txt')
+
+    # plot the PMF
+    pmf = np.loadtxt("pmf.txt")
+    plt.plot(pmf[:, 0], pmf[:, 1])
+    plt.xlabel("r (nm)")
+    plt.ylabel("PMF (kJ/mol)")
+    plt.show()
+
+    # Clean up
+    for i in range(len(windows)):
+        os.remove(f'cv_values_window_{i}.txt')
+        os.remove(f'window_{i}.pdb')
+    os.remove("metafile.txt")
+    os.remove("pmf.txt")
+    os.remove("smd_traj.dcd")
+    os.remove("smd_traj.pdb")
+    os.remove("wham_log.txt")
