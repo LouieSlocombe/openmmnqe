@@ -43,6 +43,7 @@ from .plotting import (n_plot,
                        plot_fes_contourf,
                        plot_fes_contour_compare,
                        plot_fes_sep,
+                       plot_plumed_fes,
                        )
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
