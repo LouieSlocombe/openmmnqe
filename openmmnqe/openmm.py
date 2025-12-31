@@ -9,11 +9,11 @@ from openmmplumed import PlumedForce
 from openmmtools.integrators import GeodesicBAOABIntegrator
 
 from .plotting import n_plot
-from .tools import deuterate_system
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
                         )
+from .tools import deuterate_system
 
 
 def md_workflow(file_in,
@@ -850,7 +850,7 @@ def run_openmm_rpmd_contracted(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+    system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
@@ -1012,7 +1012,7 @@ def run_openmm_rpmd_prod(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+    system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
@@ -1022,9 +1022,10 @@ def run_openmm_rpmd_prod(modeller,
 
         plumed_force = PlumedForce(script_content)
         system.addForce(plumed_force)
-    integrator = openmm.RPMDMonteCarloBarostat(temperature,
-                                               gamma,
-                                               time_step)
+    integrator = openmm.RPMDIntegrator(n_beads,
+                                       temperature,
+                                       gamma,
+                                       time_step)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     if not os.path.exists(checkpoint_file):
         print(f"Error: Checkpoint {checkpoint_file} not found. Run equilibration first.", flush=True)
@@ -1078,8 +1079,6 @@ def run_openmm_rpmd_prod(modeller,
     state = simulation.context.getState(getPositions=True, getVelocities=True)
     with open(f'{output_prefix}.pdb', 'w') as f:
         app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
-
-
 
 
 def run_openmm_adqtb_eq(modeller,
