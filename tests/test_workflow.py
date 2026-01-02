@@ -171,7 +171,7 @@ def test_eq_workflow_plumed_dihedral():
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['ALA1:C', 'ALA2:N', 'ALA2:CA', 'ALA2:C'])
-    idx_str = ",".join([str(i) for i in idx])
+    idx_str = ",".join([str(i-1) for i in idx])
 
     plumed_input = f"""
 phi: TORSION ATOMS={idx_str}
