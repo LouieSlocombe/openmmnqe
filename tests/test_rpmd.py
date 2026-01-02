@@ -10,8 +10,11 @@ from openmmml import MLPotential
 
 import openmmnqe as nqe
 
+device = "CUDA"
+
 
 def test_openmm_rpmd():
+    print(flush=True)
     # Simple run parameters
     n_steps = 1_000
     report_every = 100
@@ -39,7 +42,7 @@ def test_openmm_rpmd():
     )
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, dt)
-    platform = openmm.Platform.getPlatformByName("CUDA")
+    platform = openmm.Platform.getPlatformByName(device)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     simulation.reporters.append(app.StateDataReporter(stdout,
@@ -54,6 +57,7 @@ def test_openmm_rpmd():
 
 
 def test_openmm_rpmd_solvated():
+    print(flush=True)
     # Simple run parameters
     n_steps = 200
     report_every = 100
@@ -86,7 +90,7 @@ def test_openmm_rpmd_solvated():
     )
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, dt)
-    platform = openmm.Platform.getPlatformByName("CUDA")
+    platform = openmm.Platform.getPlatformByName(device)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.reporters.append(app.StateDataReporter(stdout,
                                                       report_every,
@@ -100,6 +104,7 @@ def test_openmm_rpmd_solvated():
 
 
 def test_openmm_rpmd_ml():
+    print(flush=True)
     # Simple run parameters
     n_steps = 200
     report_every = 100
@@ -126,7 +131,7 @@ def test_openmm_rpmd_ml():
     )
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, dt)
-    platform = openmm.Platform.getPlatformByName("CUDA")
+    platform = openmm.Platform.getPlatformByName(device)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     simulation.reporters.append(app.StateDataReporter(stdout,
@@ -187,7 +192,7 @@ def test_openmm_rpmd_mixed():
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, dt)
 
-    platform = openmm.Platform.getPlatformByName("CUDA")
+    platform = openmm.Platform.getPlatformByName(device)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     simulation.reporters.append(app.StateDataReporter(stdout,
@@ -202,6 +207,7 @@ def test_openmm_rpmd_mixed():
 
 
 def test_rpmd_quantum_spread_reporter():
+    print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
 
@@ -217,12 +223,16 @@ def test_rpmd_quantum_spread_reporter():
     )
 
     n_beads = 32
+    temperature = 300.0 * unit.kelvin
+    friction = 1.0 / unit.picosecond
+    dt = 0.5 * unit.femtosecond
     integrator = openmm.RPMDIntegrator(n_beads,
-                                       300 * unit.kelvin,
-                                       1.0 / unit.picosecond,
-                                       0.5 * unit.femtosecond)
+                                       temperature,
+                                       friction,
+                                       dt)
 
-    simulation = app.Simulation(modeller.topology, system, integrator)
+    platform = openmm.Platform.getPlatformByName(device)
+    simulation = app.Simulation(modeller.topology, system, integrator, platform)
     for i in range(n_beads):
         integrator.setPositions(i, modeller.positions)
     nqe.init_beads(modeller, simulation, n_beads)
@@ -253,6 +263,7 @@ def test_rpmd_quantum_spread_reporter():
 
 
 def test_rpmd_bead_reporter():
+    print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
 
@@ -268,12 +279,16 @@ def test_rpmd_bead_reporter():
     )
 
     n_beads = 4
+    temperature = 300.0 * unit.kelvin
+    friction = 1.0 / unit.picosecond
+    dt = 0.5 * unit.femtosecond
     integrator = openmm.RPMDIntegrator(n_beads,
-                                       300 * unit.kelvin,
-                                       1.0 / unit.picosecond,
-                                       0.5 * unit.femtosecond)
+                                       temperature,
+                                       friction,
+                                       dt)
 
-    simulation = app.Simulation(modeller.topology, system, integrator)
+    platform = openmm.Platform.getPlatformByName(device)
+    simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     nqe.init_beads(modeller, simulation, n_beads)
 
@@ -290,6 +305,7 @@ def test_rpmd_bead_reporter():
 
 
 def test_rpmd_centroid_reporter():
+    print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
 
@@ -304,13 +320,17 @@ def test_rpmd_centroid_reporter():
         removeCMMotion=True,
     )
 
-    n_beads = 4
+    n_beads = 32
+    temperature = 300.0 * unit.kelvin
+    friction = 1.0 / unit.picosecond
+    dt = 0.5 * unit.femtosecond
     integrator = openmm.RPMDIntegrator(n_beads,
-                                       300 * unit.kelvin,
-                                       1.0 / unit.picosecond,
-                                       0.5 * unit.femtosecond)
+                                       temperature,
+                                       friction,
+                                       dt)
 
-    simulation = app.Simulation(modeller.topology, system, integrator)
+    platform = openmm.Platform.getPlatformByName(device)
+    simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     nqe.init_beads(modeller, simulation, n_beads)
 
@@ -325,73 +345,8 @@ def test_rpmd_centroid_reporter():
     os.remove('centroid.pdb')
 
 
-def test_run_openmm_rpmd_equilibration():
-    print(flush=True)
-    n_beads = 2
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    nqe.run_openmm_rpmd_equilibration(modeller,
-                                      forcefield,
-                                      n_beads=n_beads,
-                                      n_1=100,
-                                      n_2=100)
-
-    os.remove('rpmd_ready.chk')
-    os.remove('rpmd_ready.log')
-    os.remove('rpmd_ready_centroid.pdb')
-    for i in range(n_beads):
-        os.remove(f'rpmd_ready_bead_{i}.pdb')
-
-
-def test_run_openmm_rpmd_prod():
-    print(flush=True)
-    n_beads = 2
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    nqe.run_openmm_rpmd_equilibration(modeller,
-                                      forcefield,
-                                      n_beads=n_beads,
-                                      n_1=100,
-                                      n_2=100)
-
-    nqe.run_openmm_rpmd_prod(modeller,
-                             forcefield,
-                             n_beads=n_beads,
-                             steps=100,
-                             checkpoint_file='rpmd_ready.chk')
-
-
-def test_run_openmm_rpmd_contracted():
-    print(flush=True)
-    n_beads = 2
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    nqe.run_openmm_rpmd_equilibration(modeller,
-                                      forcefield,
-                                      n_beads=n_beads,
-                                      n_1=100,
-                                      n_2=100)
-
-    nqe.run_openmm_rpmd_contracted(modeller,
-                                   forcefield,
-                                   n_beads=n_beads,
-                                   steps=100,
-                                   checkpoint_file='rpmd_ready.chk')
-
-
 def test_openmm_adqtb():
+    print(flush=True)
     # Simple run parameters
     n_steps = 1_000
     report_every = 100
@@ -429,7 +384,7 @@ def test_openmm_adqtb():
 
     integrator.setDefaultAdaptationRate(0.5)
 
-    platform = openmm.Platform.getPlatformByName("CUDA")
+    platform = openmm.Platform.getPlatformByName(device)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
 
@@ -441,3 +396,88 @@ def test_openmm_adqtb():
                                                       speed=True))
 
     simulation.step(n_steps)
+
+
+def test_run_openmm_rpmd_equilibration():
+    print(flush=True)
+    n_beads = 2
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      n_beads=n_beads,
+                                      n_report=1,
+                                      platform_name=device,
+                                      n_1=10,
+                                      n_2=10)
+
+    os.remove('rpmd_ready.chk')
+    os.remove('rpmd_ready.log')
+    os.remove('rpmd_ready_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'rpmd_ready_bead_{i}.pdb')
+
+
+def test_run_openmm_rpmd_prod():
+    print(flush=True)
+    n_beads = 2
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      n_beads=n_beads,
+                                      n_report=1,
+                                      platform_name=device,
+                                      n_1=10,
+                                      n_2=10)
+
+    nqe.run_openmm_rpmd_prod(modeller,
+                             forcefield,
+                             n_beads=n_beads,
+                             platform_name=device,
+                             steps=100,
+                             checkpoint_file='rpmd_ready.chk')
+
+    os.remove('rpmd_ready.chk')
+    os.remove('rpmd_ready.log')
+    os.remove('rpmd_ready_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'rpmd_ready_bead_{i}.pdb')
+
+
+def test_run_openmm_rpmd_contracted():
+    print(flush=True)
+    n_beads = 2
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      n_beads=n_beads,
+                                      platform_name=device,
+                                      n_1=100,
+                                      n_2=100)
+
+    nqe.run_openmm_rpmd_contracted(modeller,
+                                   forcefield,
+                                   n_beads=n_beads,
+                                   platform_name=device,
+                                   steps=100,
+                                   checkpoint_file='rpmd_ready.chk')
+
+    os.remove('rpmd_ready.chk')
+    os.remove('rpmd_ready.log')
+    os.remove('rpmd_ready_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'rpmd_ready_bead_{i}.pdb')
