@@ -13,7 +13,7 @@ from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
                         )
-from .tools import deuterate_system, set_adqtb_particle_types_by_element
+from .tools import deuterate_system
 
 
 def md_workflow(file_in,
@@ -1143,9 +1143,9 @@ def run_openmm_adqtb_eq(modeller,
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
-    set_adqtb_particle_types_by_element(integrator,
-                                        topology=modeller.topology,
-                                        system=system)
+    # set_adqtb_particle_types_by_element(integrator,
+    #                                     topology=modeller.topology,
+    #                                     system=system)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
@@ -1255,9 +1255,9 @@ def run_openmm_adqtb_prod(modeller,
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
-    set_adqtb_particle_types_by_element(integrator,
-                                        topology=modeller.topology,
-                                        system=system)
+    # set_adqtb_particle_types_by_element(integrator,
+    #                                     topology=modeller.topology,
+    #                                     system=system)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
