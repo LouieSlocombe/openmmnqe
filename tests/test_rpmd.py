@@ -451,12 +451,12 @@ def test_run_openmm_rpmd_prod():
     for i in range(n_beads):
         os.remove(f'rpmd_ready_bead_{i}.pdb')
 
-    os.remove('prod.pdb')
-    os.remove('prod.chk')
-    os.remove('prod.log')
-    os.remove('prod_centroid.pdb')
+    os.remove('rpmd_prod.pdb')
+    os.remove('rpmd_prod.chk')
+    os.remove('rpmd_prod.log')
+    os.remove('rpmd_prod_centroid.pdb')
     for i in range(n_beads):
-        os.remove(f'prod_bead_{i}.pdb')
+        os.remove(f'rpmd_prod_bead_{i}.pdb')
 
 
 def test_run_openmm_rpmd_contracted():
@@ -478,9 +478,9 @@ def test_run_openmm_rpmd_contracted():
     nqe.run_openmm_rpmd_contracted(modeller,
                                    forcefield,
                                    n_beads=n_beads,
-                                   platform_name=device,
+                                   steps=100,
                                    n_report=1,
-                                   steps=100)
+                                   platform_name=device)
 
     os.remove('rpmd_ready.chk')
     os.remove('rpmd_ready.log')
@@ -488,11 +488,11 @@ def test_run_openmm_rpmd_contracted():
     for i in range(n_beads):
         os.remove(f'rpmd_ready_bead_{i}.pdb')
 
-    os.remove('prod_contracted.chk')
-    os.remove('prod_contracted.log')
-    os.remove('prod_contracted_centroid.pdb')
+    os.remove('rpmd_prod_contracted.chk')
+    os.remove('rpmd_prod_contracted.log')
+    os.remove('rpmd_prod_contracted_centroid.pdb')
     for i in range(n_beads):
-        os.remove(f'prod_contracted_bead_{i}.pdb')
+        os.remove(f'rpmd_prod_contracted_bead_{i}.pdb')
 
 
 def test_run_openmm_adqtb_eq():
