@@ -443,8 +443,7 @@ def test_run_openmm_rpmd_prod():
                              forcefield,
                              n_beads=n_beads,
                              platform_name=device,
-                             steps=100,
-                             checkpoint_file='rpmd_ready.chk')
+                             steps=100)
 
     os.remove('rpmd_ready.chk')
     os.remove('rpmd_ready.log')
@@ -452,10 +451,17 @@ def test_run_openmm_rpmd_prod():
     for i in range(n_beads):
         os.remove(f'rpmd_ready_bead_{i}.pdb')
 
+    os.remove('prod.pdb')
+    os.remove('prod.chk')
+    os.remove('prod.log')
+    os.remove('prod_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'prod_bead_{i}.pdb')
+
 
 def test_run_openmm_rpmd_contracted():
     print(flush=True)
-    n_beads = 2
+    n_beads = 8
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -473,11 +479,72 @@ def test_run_openmm_rpmd_contracted():
                                    forcefield,
                                    n_beads=n_beads,
                                    platform_name=device,
-                                   steps=100,
-                                   checkpoint_file='rpmd_ready.chk')
+                                   n_report=1,
+                                   steps=100)
 
     os.remove('rpmd_ready.chk')
     os.remove('rpmd_ready.log')
     os.remove('rpmd_ready_centroid.pdb')
     for i in range(n_beads):
         os.remove(f'rpmd_ready_bead_{i}.pdb')
+
+    os.remove('prod_contracted.chk')
+    os.remove('prod_contracted.log')
+    os.remove('prod_contracted_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'prod_contracted_bead_{i}.pdb')
+
+
+def test_run_openmm_adqtb_eq():
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_adqtb_eq(modeller,
+                            forcefield,
+                            platform_name=device,
+                            n_report=1,
+                            steps=100)
+
+    os.remove('adqtb_ready.chk')
+    os.remove('adqtb_ready.log')
+    os.remove('adqtb_ready.pdb')
+    os.remove('adqtb_ready_steps.pdb')
+
+def test_run_openmm_adqtb_prod():
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    # Solvate
+    modeller.addSolvent(forcefield,
+                        padding=1.5 * unit.nanometer,
+                        boxShape='dodecahedron')
+
+    nqe.run_openmm_adqtb_eq(modeller,
+                            forcefield,
+                            platform_name=device,
+                            n_report=1,
+                            steps=100)
+
+    nqe.run_openmm_adqtb_prod(modeller,
+                              forcefield,
+                              platform_name=device,
+                              n_report=1,
+                              steps=100)
+
+    os.remove('adqtb_ready.chk')
+    os.remove('adqtb_ready.log')
+    os.remove('adqtb_ready.pdb')
+    os.remove('adqtb_ready_steps.pdb')
+
+    os.remove('adqtb_prod.chk')
+    os.remove('adqtb_prod.log')
+    os.remove('adqtb_prod.pdb')
+    os.remove('adqtb_prod_steps.pdb')
