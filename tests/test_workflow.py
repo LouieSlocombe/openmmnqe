@@ -165,8 +165,8 @@ def test_eq_workflow_plumed_dihedral():
     modeller.addHydrogens()
 
     # Solvate
-    padding = 1.5
-    box_shape = 'dodecahedron'
+    padding = 1.0
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
@@ -200,7 +200,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         forcefield,
                         plumed_script_path=plumed_script_path,
                         platform_name='CUDA',
-                        steps=10_000)
+                        steps=50_000)
 
     # Run PLUMED sum_hills to get FES
     os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
@@ -215,23 +215,38 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                                       forcefield,
                                       platform_name='CUDA',
                                       n_beads=n_beads,
-                                      n_1=100,
-                                      n_2=100)
+                                      n_report=100,
+                                      n_1=1_000,
+                                      n_2=1_000)
 
-    # nqe.run_openmm_rpmd_prod(modeller,
-    #                          forcefield,
-    #                          n_beads=n_beads,
-    #                          steps=10_000,
-    #                          #plumed_script_path=plumed_script_path,
-    #                          platform_name='CUDA',
-    #                          checkpoint_file='rpmd_ready.chk')
-    #
-    # # Run PLUMED sum_hills to get FES
-    # os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
-    # # Plot FES
-    # nqe.plot_plumed_fes("fes.dat")
-    # plt.show()
+    pdb = app.PDBFile("rpmd_ready_centroid.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_rpmd_prod(modeller,
+                             forcefield,
+                             n_beads=n_beads,
+                             steps=50_000,
+                             plumed_script_path=plumed_script_path,
+                             platform_name='CUDA',
+                             checkpoint_file='rpmd_ready.chk')
 
+    # Run PLUMED sum_hills to get FES
+    os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
+    # Plot FES
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    os.remove('rpmd_ready.chk')
+    os.remove('rpmd_ready.log')
+    os.remove('rpmd_ready_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'rpmd_ready_bead_{i}.pdb')
+
+    os.remove('rpmd_prod.pdb')
+    os.remove('rpmd_prod.chk')
+    os.remove('rpmd_prod.log')
+    os.remove('rpmd_prod_centroid.pdb')
+    for i in range(n_beads):
+        os.remove(f'rpmd_prod_bead_{i}.pdb')
 
     os.remove('minimized.chk')
     os.remove('minimized.log')
@@ -257,6 +272,10 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     os.remove('HILLS')
     os.remove('fes.dat')
     os.remove('plumed.dat')
+
+    os.remove('bck.0.COLVAR')
+    os.remove('bck.0.HILLS')
+    os.remove('bck.0.fes.dat')
 
 
 def test_eq_workflow_plumed_pt():
