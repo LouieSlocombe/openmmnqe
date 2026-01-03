@@ -171,7 +171,7 @@ def test_eq_workflow_plumed_dihedral():
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['ALA1:C', 'ALA2:N', 'ALA2:CA', 'ALA2:C'])
-    idx_str = ",".join([str(i-1) for i in idx])
+    idx_str = ",".join([str(i - 1) for i in idx])
 
     plumed_input = f"""
 phi: TORSION ATOMS={idx_str}
@@ -280,44 +280,98 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 
 def test_eq_workflow_plumed_pt():
     print(flush=True)
-    pdb_in = "tests/data/pdb/gt_wob_solv.pdb"
-    pdb_clean = "tests/data/pdb/gt_wob_solv_clean.pdb"
-    # Remove the waters and ions
-    nqe.remove_residues_in_pdb(pdb_in, pdb_clean, ['WAT', 'HOH', 'Na+', 'Cl-'])
-
-    pdb = app.PDBFile(pdb_clean)
-    potential = MLPotential('mace-off23-small')
+    pdb = app.PDBFile("tests/data/pdb/gt_wob_solv_clean.pdb")
+    forcefield = MLPotential('mace-off23-small')
     modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
 
-    # Equilibration workflow
-    nqe.run_openmm_relaxation_simple(modeller, potential, platform_name='CUDA')
-    # nqe.run_openmm_heating(modeller, potential, platform_name='CUDA')
-    # nqe.run_openmm_npt(modeller, potential, platform_name='CUDA')
+    # A..H-D: 'DGN1:O6', 'DTN1:H3', 'DTN1:N3'
+    # A..H-D: 'DTN1:O2', 'DGN1:H1', 'DGN1:N1'
+    picks = ['DTN1:H3', 'DTN1:N3']
+    idx = nqe.atom_indices_from_vmd_picks(modeller, picks)
+    idx_str = ",".join([str(i - 1) for i in idx])
 
-    # Plumed MD
-    pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-
-    plumed = """# PLUMED input file for metadynamics on proton transfer in guanine-cytosine base pair
-d1: DISTANCE ATOMS=10,24,11,23
-METAD LABEL=metad ARG=d1 PACE=500 HEIGHT=1.2 SIGMA=0.1 FILE=HILLS
-PRINT ARG=d1,metad.bias FILE=COLVAR STRIDE=100
-"""
-
+    plumed_input = f"""
+    r: DISTANCE ATOMS={idx_str}
+    metad: METAD ARG=r PACE=500 HEIGHT=10.0 SIGMA=0.35 BIASFACTOR=12 TEMP=300 FILE=HILLS
+    PRINT STRIDE=200 ARG=r,metad.bias FILE=COLVAR
+    """
     # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
-        f.write(plumed)
+        f.write(plumed_input)
 
-    # nqe.run_openmm_prod(modeller, potential)
+    # Minimise the system first
+    nqe.run_openmm_relaxation_simple(modeller, forcefield, platform_name='CUDA')
 
-    # Clean up
-    os.remove(pdb_clean)
-    os.remove('minimized.chk')
-    os.remove('minimized.log')
-    os.remove('minimized.pdb')
-    os.remove('minimized_steps.pdb')
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_heating(modeller, forcefield, platform_name='CUDA')
 
+    pdb = app.PDBFile("equilibrate.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_npt(modeller, forcefield, platform_name='CUDA')
+
+    pdb = app.PDBFile("npt_equilibrated.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_prod(modeller,
+                        forcefield,
+                        plumed_script_path=plumed_script_path,
+                        platform_name='CUDA',
+                        steps=50_000)
+
+    # Run PLUMED sum_hills to get FES
+    os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
+    # Plot FES
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+    #
+    # n_beads = 4
+    # pdb = app.PDBFile("npt_equilibrated.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_rpmd_equilibration(modeller,
+    #                                   forcefield,
+    #                                   platform_name='CUDA',
+    #                                   n_beads=n_beads,
+    #                                   n_report=100,
+    #                                   n_1=1_000,
+    #                                   n_2=1_000)
+    #
+    # pdb = app.PDBFile("rpmd_ready_centroid.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_rpmd_prod(modeller,
+    #                          forcefield,
+    #                          n_beads=n_beads,
+    #                          steps=50_000,
+    #                          plumed_script_path=plumed_script_path,
+    #                          platform_name='CUDA',
+    #                          checkpoint_file='rpmd_ready.chk')
+    #
+    # # Run PLUMED sum_hills to get FES
+    # os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
+    # # Plot FES
+    # nqe.plot_plumed_fes("fes.dat")
+    # plt.show()
+    #
+    # os.remove('rpmd_ready.chk')
+    # os.remove('rpmd_ready.log')
+    # os.remove('rpmd_ready_centroid.pdb')
+    # for i in range(n_beads):
+    #     os.remove(f'rpmd_ready_bead_{i}.pdb')
+    #
+    # os.remove('rpmd_prod.pdb')
+    # os.remove('rpmd_prod.chk')
+    # os.remove('rpmd_prod.log')
+    # os.remove('rpmd_prod_centroid.pdb')
+    # for i in range(n_beads):
+    #     os.remove(f'rpmd_prod_bead_{i}.pdb')
+    #
+    # os.remove('minimized.chk')
+    # os.remove('minimized.log')
+    # os.remove('minimized.pdb')
+    # os.remove('minimized_steps.pdb')
+    #
     # os.remove('equilibrate.chk')
     # os.remove('equilibrate.log')
     # os.remove('equilibrate.pdb')
@@ -327,3 +381,17 @@ PRINT ARG=d1,metad.bias FILE=COLVAR STRIDE=100
     # os.remove('npt_equilibrated.log')
     # os.remove('npt_equilibrated.pdb')
     # os.remove('npt_equilibrated_steps.pdb')
+    #
+    # os.remove('prod.chk')
+    # os.remove('prod.log')
+    # os.remove('prod.pdb')
+    # os.remove('prod_steps.pdb')
+    #
+    # os.remove('COLVAR')
+    # os.remove('HILLS')
+    # os.remove('fes.dat')
+    # os.remove('plumed.dat')
+    #
+    # os.remove('bck.0.COLVAR')
+    # os.remove('bck.0.HILLS')
+    # os.remove('bck.0.fes.dat')
