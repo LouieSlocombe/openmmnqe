@@ -171,7 +171,7 @@ def test_eq_workflow_plumed_dihedral():
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['ALA1:C', 'ALA2:N', 'ALA2:CA', 'ALA2:C'])
-    idx_str = ",".join([str(i - 1) for i in idx])
+    idx_str = ",".join([str(i + 1) for i in idx])
 
     plumed_input = f"""
 phi: TORSION ATOMS={idx_str}
@@ -280,6 +280,21 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 
 def test_eq_workflow_plumed_pt():
     print(flush=True)
+    temperature = 300.0 * unit.kelvin
+    temperature_str = str(temperature.value_in_unit(unit.kelvin))
+    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
+    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+
+    r_0 = 0.14  # nm
+    w_1 = 0.37  # nm
+    pace = 500
+    height = 10.0  # kJ/mol
+    sigma = 0.05  # nm
+    bias = 10.0
+    grid_min = -1.5
+    grid_max = 1.5
+    grid_bin = 200
+
     pdb = app.PDBFile("tests/data/pdb/gt_wob_solv_clean.pdb")
     forcefield = MLPotential('mace-off23-small')
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -288,14 +303,17 @@ def test_eq_workflow_plumed_pt():
 
     # A..H-D: 'DGN1:O6', 'DTN1:H3', 'DTN1:N3'
     # A..H-D: 'DTN1:O2', 'DGN1:H1', 'DGN1:N1'
-    picks = ['DTN1:H3', 'DTN1:N3']
+    picks = ['DGN1:O6', 'DTN1:H3', 'DTN1:N3']
     idx = nqe.atom_indices_from_vmd_picks(modeller, picks)
-    idx_str = ",".join([str(i - 1) for i in idx])
-
+    idx = nqe.atom_indices_to_plumed(idx)
     plumed_input = f"""
-    r: DISTANCE ATOMS={idx_str}
-    metad: METAD ARG=r PACE=500 HEIGHT=10.0 SIGMA=0.35 BIASFACTOR=12 TEMP=300 FILE=HILLS
-    PRINT STRIDE=200 ARG=r,metad.bias FILE=COLVAR
+c_d1: COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}
+c_a1: COORDINATION GROUPA={idx[2]} GROUPB={idx[1]} R_0={r_0}
+cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
+dist_da: DISTANCE ATOMS={idx[2]},{idx[0]}
+uwall: UPPER_WALLS ARG=dist_da AT={w_1} KAPPA=3000
+metad: METAD ARG=cv_diff1 PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
+PRINT ARG=c_d1,c_a1,cv_diff1,metad.bias STRIDE={pace} FILE=COLVAR
     """
     # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
@@ -306,23 +324,24 @@ def test_eq_workflow_plumed_pt():
     nqe.run_openmm_relaxation_simple(modeller, forcefield, platform_name='CUDA')
 
     pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_heating(modeller, forcefield, platform_name='CUDA')
-
-    pdb = app.PDBFile("equilibrate.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_npt(modeller, forcefield, platform_name='CUDA')
-
-    pdb = app.PDBFile("npt_equilibrated.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_heating(modeller, forcefield, platform_name='CUDA')
+    #
+    # pdb = app.PDBFile("equilibrate.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_npt(modeller, forcefield, platform_name='CUDA')
+    #
+    # pdb = app.PDBFile("npt_equilibrated.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
                         platform_name='CUDA',
-                        steps=50_000)
+                        temperature=temperature,
+                        steps=10_000)
 
     # Run PLUMED sum_hills to get FES
-    os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
+    os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}')
     # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
