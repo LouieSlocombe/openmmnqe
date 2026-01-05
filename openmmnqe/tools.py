@@ -532,31 +532,34 @@ def atom_indices_from_vmd_picks(
         chain_id: Optional[str] = None,
 ) -> List[Union[int, List[int]]]:
     """
-    Map VMD pick strings like "HIE258:CD2" to OpenMM Topology atom indices.
+    Maps VMD pick strings to OpenMM Topology atom indices.
+
+    This function parses VMD-style atom selection strings (e.g., "HIE258:CD2")
+    and returns the corresponding atom indices from an OpenMM topology.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        The Modeller whose topology will be searched.
-    picks : list[str]
-        VMD pick strings, e.g. ["HIE258:CD2", "ALA12:CA"].
-        Optional insertion code supported: "HIE258A:CD2".
-    match_mode : {"unique", "first", "all"}, default "unique"
-        - "unique": require exactly one match per pick; raise ValueError otherwise
-        - "first" : if multiple matches, take the first
-        - "all"   : return list[list[int]] (indices for each pick)
-    chain_id : str | None, default None
-        If provided, restrict matches to residues in this chain (Topology chain.id).
+        The OpenMM Modeller object whose topology will be searched.
+    picks : list of str
+        VMD pick strings specifying residue and atom names.
+        Format: "RESNAME<RESID>[INSERTION_CODE]:ATOMNAME"
+        Examples: ["HIE258:CD2", "ALA12:CA", "HIE258A:CD2"]
+    match_mode : {"unique", "first", "all"}, optional
+        Controls behavior when multiple atoms match a pick string:
+        - "unique": Requires exactly one match; raises ValueError otherwise.
+        - "first": Returns the first matching atom index if multiple matches exist.
+        - "all": Returns a list of all matching indices for each pick.
+        Default is "unique".
+    chain_id : str or None, optional
+        If provided, restricts the search to residues in the specified chain.
+        Default is None (searches all chains).
 
     Returns
     -------
-    list[int | list[int]]
-        Atom indices (0-based) in the same order as `picks`.
-
-    Raises
-    ------
-    ValueError
-        If a pick is malformed, or no matches, or multiple matches in "unique" mode.
+    list of int or list of list of int
+        Atom indices corresponding to each pick string. If match_mode is "all",
+        returns a list of lists.
     """
     topo = modeller.topology
 
