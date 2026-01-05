@@ -611,3 +611,23 @@ def atom_indices_from_vmd_picks(
             raise ValueError(f"Unknown match_mode '{match_mode}'.")
 
     return out
+
+
+def atom_indices_to_plumed(atom_indices: List[int]) -> List[int]:
+    """
+    Converts OpenMM atom indices to PLUMED atom indices.
+
+    PLUMED uses 1-based indexing, while OpenMM uses 0-based indexing.
+    This function adds 1 to each atom index to convert between the two conventions.
+
+    Parameters
+    ----------
+    atom_indices : list of int
+        A list of 0-based atom indices from OpenMM.
+
+    Returns
+    -------
+    list of int
+        A list of 1-based atom indices compatible with PLUMED.
+    """
+    return [idx + 1 for idx in atom_indices]
