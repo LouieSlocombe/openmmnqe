@@ -12,12 +12,12 @@ def plumed_input_1pt(idx,
                      temperature,
                      r_0=0.14,  # nm
                      wall=0.4,  # nm
-                     pace=100,
+                     pace=500,
                      height=50.0,  # kJ/mol
                      sigma=0.05,  # nm
                      bias=20.0,
-                     grid_min=-1.2,
-                     grid_max=1.2,
+                     grid_min=-1.1,
+                     grid_max=1.1,
                      grid_bin=200):
     idx = atom_indices_to_plumed(idx)
     temperature_str = str(temperature.value_in_unit(unit.kelvin))
@@ -43,12 +43,12 @@ def plumed_input_2pt_1d(idx1,
                         temperature,
                         r_0=0.14,  # nm
                         wall=0.4,  # nm
-                        pace=100,
+                        pace=500,
                         height=50.0,  # kJ/mol
                         sigma=0.05,  # nm
                         bias=20.0,
-                        grid_min=-1.2,
-                        grid_max=1.2,
+                        grid_min=-1.1,
+                        grid_max=1.1,
                         grid_bin=200):
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
@@ -85,12 +85,12 @@ def plumed_input_2pt_2d(idx1,
                         temperature,
                         r_0=0.14,  # nm
                         wall=0.4,  # nm
-                        pace=100,
+                        pace=500,
                         height=50.0,  # kJ/mol
                         sigma=0.05,  # nm
                         bias=20.0,
-                        grid_min=-1.2,
-                        grid_max=1.2,
+                        grid_min=-1.1,
+                        grid_max=1.1,
                         grid_bin=200):
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
