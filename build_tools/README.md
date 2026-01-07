@@ -23,7 +23,7 @@ Before you begin, ensure you have met the following requirements:
     - For Windows it is recommended to use the Linux Subsystem for Windows (WSL) for better compatibility.
 4. **Create a Conda environment**:
     ```bash
-    conda create -f environment.yml
+    conda env create -f environment.yml
     ```
 5. **Activate the Conda environment**:
     ```bash
