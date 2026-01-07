@@ -11,8 +11,8 @@ dependencies:
   - pandas
   - matplotlib
   - sympy
-  - pytorch
   - ase
+  - pytorch
   - cmake
   - make
   - swig
@@ -25,7 +25,6 @@ dependencies:
   - ambertools
   - pdbfixer
   - rdkit
-  - mdanalysis
   - nnpops
   - pip:
       - mace-torch

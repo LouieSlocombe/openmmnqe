@@ -22,7 +22,6 @@ dependencies:
   - ambertools
   - pdbfixer
   - rdkit
-  - mdanalysis
   - nnpops
   - pip:
       - mace-torch
