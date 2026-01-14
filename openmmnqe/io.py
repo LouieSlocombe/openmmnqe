@@ -1095,3 +1095,44 @@ def save_pdb_selection(input_pdb_path, atom_indices, output_pdb_path):
     print(f"Writing selection ({len(all_atoms) - num_deleted} atoms) to {output_pdb_path}...")
     with open(output_pdb_path, 'w') as f:
         app.PDBFile.writeFile(modeller.topology, modeller.positions, f)
+
+
+def remove_file_pattern(pattern: str):
+    """
+    Remove all files matching a specific glob pattern.
+
+    Parameters
+    ----------
+    pattern : str
+        The glob pattern to match files (e.g., "*.txt" for all text files).
+
+    Returns
+    -------
+    None
+        This function does not return a value.
+    """
+    for path in glob.glob(pattern):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def remove_file(file_path: str):
+    """
+    Remove a file if it exists.
+
+    Parameters
+    ----------
+    file_path : str
+        The path to the file to be removed.
+
+    Returns
+    -------
+    None
+        This function does not return a value.
+    """
+    try:
+        os.remove(file_path)
+    except OSError:
+        pass

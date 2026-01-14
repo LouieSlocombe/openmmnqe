@@ -20,6 +20,8 @@ from .io import (remove_directory,
                  prepare_lig_system,
                  prepare_ligand_ff,
                  save_pdb_selection,
+                 remove_file_pattern,
+                 remove_file,
                  )
 from .openmm import (md_workflow,
                      md_analysis,
