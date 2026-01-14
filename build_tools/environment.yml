@@ -10,6 +10,7 @@ dependencies:
   - scipy
   - pandas
   - matplotlib
+  - mdanalysis
   - sympy
   - ase
   - pytorch
