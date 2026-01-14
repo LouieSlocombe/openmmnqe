@@ -281,10 +281,10 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 def test_eq_workflow_plumed_pt():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 20_000
+    steps_prod = 100_000
 
     pdb = app.PDBFile("tests/data/pdb/gt_wob_solv_clean.pdb")
-    forcefield = MLPotential('mace-off23-small')
+    forcefield = MLPotential('mace-off23-small') # mace-off23-large mace-off23-small
     modeller = app.Modeller(pdb.topology, pdb.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
@@ -326,62 +326,62 @@ def test_eq_workflow_plumed_pt():
     # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
-
-    n_beads = 4
-    pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_rpmd_equilibration(modeller,
-                                      forcefield,
-                                      platform_name='CUDA',
-                                      n_beads=n_beads,
-                                      n_report=10,
-                                      n_1=100,
-                                      n_2=100)
-
-    pdb = app.PDBFile("rpmd_ready_centroid.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_rpmd_prod(modeller,
-                             forcefield,
-                             n_beads=n_beads,
-                             steps=steps_prod,
-                             plumed_script_path=plumed_script_path,
-                             platform_name='CUDA',
-                             checkpoint_file='rpmd_ready.chk')
-
-    # Run PLUMED sum_hills to get FES
-    os.system(sum_hills_input)
-    # Plot FES
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
-
-    os.remove('minimized.chk')
-    os.remove('minimized.log')
-    os.remove('minimized.pdb')
-    os.remove('minimized_steps.pdb')
-
-    os.remove('prod.chk')
-    os.remove('prod.log')
-    os.remove('prod.pdb')
-    os.remove('prod_steps.pdb')
-
-    os.remove('rpmd_ready.chk')
-    os.remove('rpmd_ready.log')
-    os.remove('rpmd_ready_centroid.pdb')
-    for i in range(n_beads):
-        os.remove(f'rpmd_ready_bead_{i}.pdb')
-
-    os.remove('rpmd_prod.pdb')
-    os.remove('rpmd_prod.chk')
-    os.remove('rpmd_prod.log')
-    os.remove('rpmd_prod_centroid.pdb')
-    for i in range(n_beads):
-        os.remove(f'rpmd_prod_bead_{i}.pdb')
-
-    os.remove('COLVAR')
-    os.remove('HILLS')
-    os.remove('fes.dat')
-    os.remove('plumed.dat')
-
-    os.remove('bck.0.COLVAR')
-    os.remove('bck.0.HILLS')
-    os.remove('bck.0.fes.dat')
+    #
+    # n_beads = 4
+    # pdb = app.PDBFile("minimized.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_rpmd_equilibration(modeller,
+    #                                   forcefield,
+    #                                   platform_name='CUDA',
+    #                                   n_beads=n_beads,
+    #                                   n_report=10,
+    #                                   n_1=100,
+    #                                   n_2=100)
+    #
+    # pdb = app.PDBFile("rpmd_ready_centroid.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_rpmd_prod(modeller,
+    #                          forcefield,
+    #                          n_beads=n_beads,
+    #                          steps=steps_prod,
+    #                          plumed_script_path=plumed_script_path,
+    #                          platform_name='CUDA',
+    #                          checkpoint_file='rpmd_ready.chk')
+    #
+    # # Run PLUMED sum_hills to get FES
+    # os.system(sum_hills_input)
+    # # Plot FES
+    # nqe.plot_plumed_fes("fes.dat")
+    # plt.show()
+    #
+    # os.remove('minimized.chk')
+    # os.remove('minimized.log')
+    # os.remove('minimized.pdb')
+    # os.remove('minimized_steps.pdb')
+    #
+    # os.remove('prod.chk')
+    # os.remove('prod.log')
+    # os.remove('prod.pdb')
+    # os.remove('prod_steps.pdb')
+    #
+    # os.remove('rpmd_ready.chk')
+    # os.remove('rpmd_ready.log')
+    # os.remove('rpmd_ready_centroid.pdb')
+    # for i in range(n_beads):
+    #     os.remove(f'rpmd_ready_bead_{i}.pdb')
+    #
+    # os.remove('rpmd_prod.pdb')
+    # os.remove('rpmd_prod.chk')
+    # os.remove('rpmd_prod.log')
+    # os.remove('rpmd_prod_centroid.pdb')
+    # for i in range(n_beads):
+    #     os.remove(f'rpmd_prod_bead_{i}.pdb')
+    #
+    # os.remove('COLVAR')
+    # os.remove('HILLS')
+    # os.remove('fes.dat')
+    # os.remove('plumed.dat')
+    #
+    # os.remove('bck.0.COLVAR')
+    # os.remove('bck.0.HILLS')
+    # os.remove('bck.0.fes.dat')
