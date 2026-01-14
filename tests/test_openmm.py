@@ -22,7 +22,7 @@ def test_openmm_ml():
     nqe.run_openmm_relaxation(modeller,
                               forcefield,
                               platform_name='CUDA')
-    os.remove('minimized.pdb')
+    nqe.remove_file('minimized.pdb')
 
 
 def test_openmm_ml_mixed_system():
@@ -49,7 +49,7 @@ def test_openmm_ml_mixed_system():
                               platform_name='CUDA',
                               potential=potential,
                               ml_idx=ml_atoms)
-    os.remove('minimized.pdb')
+    nqe.remove_file('minimized.pdb')
 
 
 def test_prepare_ligand_ff():
@@ -85,7 +85,7 @@ def test_prepare_ligand_ff():
                                        cache=cache_name)
     forcefield.createSystem(modeller.topology)
 
-    os.remove(cache_name)
+    nqe.remove_file(cache_name)
 
 
 def test_nonstandard_ligand():
@@ -113,7 +113,7 @@ def test_nonstandard_ligand():
     nqe.run_openmm_relaxation(modeller,
                               forcefield,
                               platform_name='CUDA')
-    os.remove('minimized.pdb')
+    nqe.remove_file('minimized.pdb')
 
 
 def _get_total_mass(system):

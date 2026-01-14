@@ -8,6 +8,8 @@ import openmm.app as app
 import openmm.unit as unit
 from openmm import openmm
 
+import openmmnqe as nqe
+
 
 def compute_rdf(context, particles, box_size):
     bins = 100
@@ -310,10 +312,10 @@ def test_smd():
 
     # Clean up
     for i in range(len(windows)):
-        os.remove(f'cv_values_window_{i}.txt')
-        os.remove(f'window_{i}.pdb')
-    os.remove("metafile.txt")
-    os.remove("pmf.txt")
-    os.remove("smd_traj.dcd")
-    os.remove("smd_traj.pdb")
-    os.remove("wham_log.txt")
+        nqe.remove_file(f'cv_values_window_{i}.txt')
+        nqe.remove_file(f'window_{i}.pdb')
+    nqe.remove_file("metafile.txt")
+    nqe.remove_file("pmf.txt")
+    nqe.remove_file("smd_traj.dcd")
+    nqe.remove_file("smd_traj.pdb")
+    nqe.remove_file("wham_log.txt")
