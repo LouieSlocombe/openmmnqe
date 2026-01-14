@@ -45,6 +45,10 @@ from .plotting import (n_plot,
                        plot_fes_sep,
                        plot_plumed_fes,
                        )
+from .plumed import (plumed_input_1pt,
+                     plumed_input_2pt_1d,
+                     plumed_input_2pt_2d,
+                     )
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
@@ -62,7 +66,3 @@ from .tools import (zero_velocities,
                     atom_indices_from_vmd_picks,
                     atom_indices_to_plumed,
                     )
-from .plumed import (plumed_input_1pt,
-                     plumed_input_2pt_1d,
-                     plumed_input_2pt_2d,
-                     )

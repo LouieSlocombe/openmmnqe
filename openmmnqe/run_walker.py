@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import random
 
 import openmm as mm
@@ -21,7 +20,7 @@ def build_toy_dimer():
 
     bond = mm.HarmonicBondForce()
     bond.addBond(0, 1, 0.55 * unit.nanometer,
-                 2000 * unit.kilojoule_per_mole / unit.nanometer**2)
+                 2000 * unit.kilojoule_per_mole / unit.nanometer ** 2)
     system.addForce(bond)
 
     # Minimal topology
@@ -63,7 +62,7 @@ def main():
     args = ap.parse_args()
 
     # Distinct RNG per walker
-    seed = (12345 + 1000 * args.walker_id) % 2**31
+    seed = (12345 + 1000 * args.walker_id) % 2 ** 31
     random.seed(seed)
 
     # Build system

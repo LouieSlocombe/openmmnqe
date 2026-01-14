@@ -8,7 +8,7 @@ import MDAnalysis as mda
 import numpy as np
 import openmm.unit as unit
 from openff.toolkit import Molecule
-from openmm import openmm, app
+from openmm import app
 from openmm.app import PDBFile, Modeller
 from openmmforcefields.generators import GAFFTemplateGenerator
 from pdbfixer import PDBFixer

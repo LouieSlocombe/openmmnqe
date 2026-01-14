@@ -2,6 +2,7 @@ import numpy as np
 import openmm.unit as unit
 from openmm import app
 
+
 def _calculate_quantum_spread(integrator, atom_indices=None):
     """
     Calculates the root-mean-square distance of beads from the ring polymer centroid.
@@ -41,7 +42,6 @@ def _calculate_quantum_spread(integrator, atom_indices=None):
     mean_sq_dist = np.mean(sq_dist, axis=0)
     quantum_rg = np.sqrt(mean_sq_dist)
     return quantum_rg * unit.nanometers
-
 
 
 class RPMDQuantumSpreadReporter(object):

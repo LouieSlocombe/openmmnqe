@@ -1,9 +1,4 @@
-import os
-
-import matplotlib.pyplot as plt
-import openmm.app as app
 import openmm.unit as unit
-from openmmml import MLPotential
 
 from .tools import atom_indices_to_plumed
 
@@ -13,7 +8,7 @@ def plumed_input_1pt(idx,
                      r_0=0.14,  # nm
                      wall=0.4,  # nm
                      pace=500,
-                     height=50.0,  # kJ/mol
+                     height=15.0,  # kJ/mol
                      sigma=0.05,  # nm
                      bias=20.0,
                      grid_min=-1.1,
@@ -44,7 +39,7 @@ def plumed_input_2pt_1d(idx1,
                         r_0=0.14,  # nm
                         wall=0.4,  # nm
                         pace=500,
-                        height=50.0,  # kJ/mol
+                        height=15.0,  # kJ/mol
                         sigma=0.05,  # nm
                         bias=20.0,
                         grid_min=-1.1,
@@ -86,7 +81,7 @@ def plumed_input_2pt_2d(idx1,
                         r_0=0.14,  # nm
                         wall=0.4,  # nm
                         pace=500,
-                        height=50.0,  # kJ/mol
+                        height=15.0,  # kJ/mol
                         sigma=0.05,  # nm
                         bias=20.0,
                         grid_min=-1.1,
