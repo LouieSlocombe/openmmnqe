@@ -281,7 +281,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 def test_eq_workflow_plumed_pt():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 20_000
+    steps_prod = 10_000
 
     pdb = app.PDBFile("tests/data/pdb/gt_wob_solv_clean.pdb")
     forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -289,22 +289,20 @@ def test_eq_workflow_plumed_pt():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    # A..H-D: 'DGN1:O6', 'DTN1:H3', 'DTN1:N3'
-    # A..H-D: 'DTN1:O2', 'DGN1:H1', 'DGN1:N1'
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(idx, temperature)
+    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller, idx, temperature)
 
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:O2', 'DGN1:H1', 'DGN1:N1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(idx1, idx2, temperature)
+    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller, idx1, idx2, temperature)
 
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:O2', 'DGN1:H1', 'DGN1:N1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_2d(idx1, idx2, temperature)
+    plumed_input, sum_hills_input = nqe.plumed_input_2pt_2d(modeller, idx1, idx2, temperature)
 
-    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
-    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:O4'])
-    plumed_input, sum_hills_input = nqe.plumed_input_wob_1(idx1, idx2, temperature)
+    # idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
+    # idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:O4'])
+    # plumed_input, sum_hills_input = nqe.plumed_input_wob_1(idx1, idx2, temperature)
 
     # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
@@ -371,3 +369,45 @@ def test_eq_workflow_plumed_pt():
     nqe.remove_file('bck.0.COLVAR')
     nqe.remove_file('bck.0.HILLS')
     nqe.remove_file('bck.0.fes.dat')
+
+
+def test_malonaldehyde_pt():
+    print(flush=True)
+    temperature = 300.0 * unit.kelvin
+    steps_prod = 10_000
+
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    pdb = app.PDBFile(input_pdb)
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    forcefield = MLPotential('mace-off23-medium')  # mace-off23-large mace-off23-small
+
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['MOL1:O2', 'MOL1:H5', 'MOL1:O1'])
+    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller, idx, temperature)
+
+    # Write PLUMED script to a temporary file
+    plumed_script_path = "plumed.dat"
+    with open(plumed_script_path, 'w') as f:
+        f.write(plumed_input)
+
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     platform_name='CUDA')
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_prod(modeller,
+                        forcefield,
+                        plumed_script_path=plumed_script_path,
+                        platform_name='CUDA',
+                        temperature=temperature,
+                        barostat_freq=None,
+                        steps=steps_prod)
+
+    # Run PLUMED sum_hills to get FES
+    os.system(sum_hills_input)
+    # Plot FES
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()

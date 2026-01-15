@@ -1,13 +1,14 @@
 import openmm.unit as unit
 import numpy as np
-from .tools import atom_indices_to_plumed
+from .tools import atom_indices_to_plumed, distance_between_atoms
 
 
-def plumed_input_1pt(idx,
+def plumed_input_1pt(modeller,
+                     idx,
                      temperature,
-                     r_0=0.14,  # nm
-                     wall=0.3,  # nm
-                     angle_lim=150.0,
+                     r_0=1.1,
+                     wall=1.5,
+                     angle_lim=130.0,
                      pace=500,
                      height=15.0,  # kJ/mol
                      sigma=0.05,  # nm
@@ -15,6 +16,12 @@ def plumed_input_1pt(idx,
                      grid_min=-1.1,
                      grid_max=1.1,
                      grid_bin=200):
+    r_01 = distance_between_atoms(modeller, idx[0], idx[1])
+    r_21 = distance_between_atoms(modeller, idx[2], idx[1])
+    r_02 = distance_between_atoms(modeller, idx[0], idx[2])
+    r_0 = np.round(min(r_01, r_21) * r_0, decimals=2)
+    wall = np.round(r_02 * wall, decimals=2)
+
     # Convert atom indices to PLUMED format
     idx = atom_indices_to_plumed(idx)
 
@@ -42,12 +49,13 @@ def plumed_input_1pt(idx,
     return plumed_input, sum_hills_input
 
 
-def plumed_input_2pt_1d(idx1,
+def plumed_input_2pt_1d(modeller,
+                        idx1,
                         idx2,
                         temperature,
-                        r_0=0.14,  # nm
-                        wall=0.3,  # nm
-                        angle_lim=150.0,
+                        r_0=1.1,
+                        wall=1.5,
+                        angle_lim=130.0,
                         pace=500,
                         height=15.0,  # kJ/mol
                         sigma=0.05,  # nm
@@ -55,6 +63,18 @@ def plumed_input_2pt_1d(idx1,
                         grid_min=-1.1,
                         grid_max=1.1,
                         grid_bin=200):
+    r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
+    r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
+    r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
+    r1_0 = np.round(min(r1_01, r1_21) * r_0, decimals=2)
+
+    r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1])
+    r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1])
+    r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2])
+    r2_0 = np.round(min(r2_01, r2_21) * r_0, decimals=2)
+
+    wall = np.round(max(r1_02, r2_02) * wall, decimals=2)
+
     # Convert atom indices to PLUMED format
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
@@ -65,23 +85,23 @@ def plumed_input_2pt_1d(idx1,
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
     plumed_input = f"""
-    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r_0}
-    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r_0}
+    # Proton transfer 1
+    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
+    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
     cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
-
+    # Limits
     dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
     u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
-    
     ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
     w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
 
-    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r_0}
-    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r_0}
+    # Proton transfer 2
+    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
+    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
     cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
-
+    # Limits
     dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
     u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
-    
     ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
     w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
 
@@ -94,12 +114,13 @@ def plumed_input_2pt_1d(idx1,
     return plumed_input, sum_hills_input
 
 
-def plumed_input_2pt_2d(idx1,
+def plumed_input_2pt_2d(modeller,
+                        idx1,
                         idx2,
                         temperature,
-                        r_0=0.14,  # nm
-                        wall=0.3,  # nm
-                        angle_lim=150.0,
+                        r_0=1.1,
+                        wall=1.5,
+                        angle_lim=130.0,
                         pace=500,
                         height=15.0,  # kJ/mol
                         sigma=0.05,  # nm
@@ -107,6 +128,18 @@ def plumed_input_2pt_2d(idx1,
                         grid_min=-1.1,
                         grid_max=1.1,
                         grid_bin=200):
+    r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
+    r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
+    r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
+    r1_0 = np.round(min(r1_01, r1_21) * r_0, decimals=2)
+
+    r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1])
+    r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1])
+    r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2])
+    r2_0 = np.round(min(r2_01, r2_21) * r_0, decimals=2)
+
+    wall = np.round(max(r1_02, r2_02) * wall, decimals=2)
+
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
     # Convert angle limit to radians and round
@@ -116,23 +149,22 @@ def plumed_input_2pt_2d(idx1,
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
     plumed_input = f"""
-    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r_0}
-    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r_0}
+    # Proton transfer 1
+    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
+    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
     cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
-
+    # Limits
     dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
     u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
-    
     ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
     w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
-
-    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r_0}
-    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r_0}
+    
+    # Proton transfer 2
+    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
+    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
     cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
-
     dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
     u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
-    
     ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
     w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
 
