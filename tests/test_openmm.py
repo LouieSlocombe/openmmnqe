@@ -410,3 +410,16 @@ def test_atom_indices_from_vmd_picks():
     print(indexes, flush=True)
     ref_indexes = [86, 461]
     assert indexes == ref_indexes
+
+
+def test_distance_between_atoms():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/gt_wob_solv_clean.pdb'
+    pdb = app.PDBFile(input_pdb)
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:H3', 'DGN1:O6'])
+    print(indexes, flush=True)
+    distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
+    print(f"Distance between atoms: {distance:.4f} nm", flush=True)
+    ref_distance = 0.179  # in nm
+    assert abs(distance - ref_distance) < 0.01

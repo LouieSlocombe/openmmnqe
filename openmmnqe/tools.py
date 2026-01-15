@@ -650,7 +650,7 @@ def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
     Returns
     -------
     openmm.unit.Quantity
-        Distance with units (typically nanometers).
+        Distance in nanometers.
     """
 
     positions = getattr(modeller, "positions", None)
