@@ -617,7 +617,8 @@ def run_openmm_prod(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+    if barostat_freq is not None:
+        system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
 
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
