@@ -69,4 +69,5 @@ from .tools import (zero_velocities,
                     atom_indices_from_vmd_picks,
                     atom_indices_to_plumed,
                     distance_between_atoms,
+                    angle_between_atoms,
                     )

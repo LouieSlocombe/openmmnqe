@@ -418,8 +418,19 @@ def test_distance_between_atoms():
     pdb = app.PDBFile(input_pdb)
     modeller = app.Modeller(pdb.topology, pdb.positions)
     indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:H3', 'DGN1:O6'])
-    print(indexes, flush=True)
     distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
     print(f"Distance between atoms: {distance:.4f} nm", flush=True)
     ref_distance = 0.179  # in nm
     assert abs(distance - ref_distance) < 0.01
+
+
+def test_angle_between_atoms():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/gt_wob_solv_clean.pdb'
+    pdb = app.PDBFile(input_pdb)
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:N3', 'DTN1:H3', 'DGN1:O6'])
+    angle = nqe.angle_between_atoms(modeller, indexes[0], indexes[1], indexes[2], degrees=True)
+    print(f"Angle between atoms: {angle:.4f} degrees", flush=True)
+    ref_angle = 149.89  # in degrees
+    assert abs(angle - ref_angle) < 0.01

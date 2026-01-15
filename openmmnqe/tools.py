@@ -1,3 +1,4 @@
+import math
 import re
 from typing import Dict, Sequence, Any, List, Union, Literal, Optional
 
@@ -659,3 +660,49 @@ def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
 
     dr = positions[atom_index_1] - positions[atom_index_2]
     return unit.sqrt(dr.x * dr.x + dr.y * dr.y + dr.z * dr.z)
+
+
+def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
+    """
+    Compute the angle i–j–k (at vertex j) from an OpenMM Modeller.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller containing positions.
+    i, j, k : int
+        Atom indices (0-based) for atoms i-j-k. The angle is at atom j.
+    degrees : bool
+        If True, return angle in degrees. Otherwise radians.
+
+    Returns
+    -------
+    float
+        Angle in radians (default) or degrees.
+    """
+    # Positions are Vec3 with units (typically nanometers)
+    pos = modeller.positions
+
+    ri = pos[i].value_in_unit(unit.nanometer)
+    rj = pos[j].value_in_unit(unit.nanometer)
+    rk = pos[k].value_in_unit(unit.nanometer)
+
+    # Vectors from j to i and j to k
+    v1 = (ri[0] - rj[0], ri[1] - rj[1], ri[2] - rj[2])
+    v2 = (rk[0] - rj[0], rk[1] - rj[1], rk[2] - rj[2])
+
+    # Dot product and norms
+    dot = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]
+    n1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2 + v1[2] ** 2)
+    n2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2 + v2[2] ** 2)
+
+    if n1 == 0.0 or n2 == 0.0:
+        raise ValueError("Cannot compute angle: one of the vectors has zero length.")
+
+    cos_theta = dot / (n1 * n2)
+
+    # Clamp for numerical stability
+    cos_theta = max(-1.0, min(1.0, cos_theta))
+
+    theta = math.acos(cos_theta)
+    return math.degrees(theta) if degrees else theta
