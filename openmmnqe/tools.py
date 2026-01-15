@@ -634,3 +634,28 @@ def atom_indices_to_plumed(atom_indices: List[int]) -> List[int]:
         A list of 1-based atom indices compatible with PLUMED.
     """
     return [idx + 1 for idx in atom_indices]
+
+
+def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
+    """
+    Return the distance between two atoms in an OpenMM Modeller.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        An OpenMM Modeller object with positions set.
+    atom_index_1, atom_index_2 : int
+        0-based indices into modeller.positions (same order as modeller.topology.atoms()).
+
+    Returns
+    -------
+    openmm.unit.Quantity
+        Distance with units (typically nanometers).
+    """
+
+    positions = getattr(modeller, "positions", None)
+    if positions is None:
+        raise ValueError("modeller.positions is None. Make sure positions are set on the Modeller.")
+
+    dr = positions[atom_index_1] - positions[atom_index_2]
+    return unit.sqrt(dr.x * dr.x + dr.y * dr.y + dr.z * dr.z)

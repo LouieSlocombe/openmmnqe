@@ -68,4 +68,5 @@ from .tools import (zero_velocities,
                     set_adqtb_particle_types_by_element,
                     atom_indices_from_vmd_picks,
                     atom_indices_to_plumed,
+                    distance_between_atoms,
                     )
