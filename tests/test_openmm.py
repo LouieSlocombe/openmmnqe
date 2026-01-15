@@ -434,3 +434,13 @@ def test_angle_between_atoms():
     print(f"Angle between atoms: {angle:.4f} degrees", flush=True)
     ref_angle = 149.89  # in degrees
     assert abs(angle - ref_angle) < 0.01
+
+
+def test_ase_load():
+    print(flush=True)
+    from ase.io import read, write
+    from ase.visualize import view
+    atoms = read('malonaldehyde.traj')
+    write('malonaldehyde.xyz', atoms)
+    print(atoms)
+    view(atoms)
