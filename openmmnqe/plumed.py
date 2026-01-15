@@ -141,3 +141,131 @@ def plumed_input_2pt_2d(idx1,
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min},{grid_min} --max {grid_max},{grid_max} --bin {grid_bin},{grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
+
+
+def plumed_input_wob_1(idx1,
+                       idx2,
+                       temperature,
+                       r_0=0.14,  # nm
+                       wall=0.4,  # nm
+                       angle_lim=100.0,
+                       pace=500,
+                       height=15.0,  # kJ/mol
+                       sigma=0.05,  # nm
+                       bias=20.0,
+                       grid_min=-1.1,
+                       grid_max=1.1,
+                       grid_bin=200):
+    # Convert atom indices to PLUMED format
+    idx1 = atom_indices_to_plumed(idx1)
+    idx2 = atom_indices_to_plumed(idx2)
+    # Convert angle limit to radians and round
+    angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
+
+    temperature_str = str(temperature.value_in_unit(unit.kelvin))
+    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
+    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    plumed_input = f"""
+    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r_0}
+    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r_0}
+    cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
+
+    dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
+    u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
+
+    ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
+    w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
+
+    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r_0}
+    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r_0}
+    cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
+
+    dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
+    u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
+
+    ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
+    w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+
+    pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
+
+    metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
+    PRINT ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
+        """
+    sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+    return plumed_input, sum_hills_input
+
+# def plumed_input_wob_2(idx_n3,
+#                        idx_h3,
+#                        idx_o6,
+#                        idx_o4,
+#                        idx_n1,
+#                        idx_h1,
+#                        idx_o2,
+#                        idx_n2,
+#                        temperature,
+#                        r_0=0.14,  # nm
+#                        wall=0.4,  # nm
+#                        angle_lim=100.0,
+#                        pace=500,
+#                        height=15.0,  # kJ/mol
+#                        sigma=0.05,  # nm
+#                        bias=20.0,
+#                        grid_min=-1.1,
+#                        grid_max=1.1,
+#                        grid_bin=200):
+#
+#
+#
+#
+#
+#     # Convert atom indices to PLUMED format
+#     idx_n3 = atom_indices_to_plumed(idx_n3)
+#     idx_h3 = atom_indices_to_plumed(idx_h3)
+#     idx_o6 = atom_indices_to_plumed(idx_o6)
+#     idx_o4 = atom_indices_to_plumed(idx_o4)
+#     idx_n1 = atom_indices_to_plumed(idx_n1)
+#     idx_h1 = atom_indices_to_plumed(idx_h1)
+#     idx_o2 = atom_indices_to_plumed(idx_o2)
+#     idx_n2 = atom_indices_to_plumed(idx_n2)
+#
+#
+#
+#
+#
+#
+#
+#
+#     # Convert angle limit to radians and round
+#     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
+#
+#     temperature_str = str(temperature.value_in_unit(unit.kelvin))
+#     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
+#     kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+#     plumed_input = f"""
+#     c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r_0}
+#     c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r_0}
+#     cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
+#
+#     dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
+#     u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
+#
+#     ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
+#     w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
+#
+#     c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r_0}
+#     c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r_0}
+#     cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
+#
+#     dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
+#     u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
+#
+#     ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
+#     w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+#
+#     pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
+#
+#     metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
+#     PRINT ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
+#         """
+#     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+#     return plumed_input, sum_hills_input

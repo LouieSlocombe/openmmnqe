@@ -50,6 +50,7 @@ from .plotting import (n_plot,
 from .plumed import (plumed_input_1pt,
                      plumed_input_2pt_1d,
                      plumed_input_2pt_2d,
+                     plumed_input_wob_1,
                      )
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,

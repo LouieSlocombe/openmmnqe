@@ -281,7 +281,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 def test_eq_workflow_plumed_pt():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 20_000
 
     pdb = app.PDBFile("tests/data/pdb/gt_wob_solv_clean.pdb")
     forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -301,6 +301,10 @@ def test_eq_workflow_plumed_pt():
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:O2', 'DGN1:H1', 'DGN1:N1'])
     plumed_input, sum_hills_input = nqe.plumed_input_2pt_2d(idx1, idx2, temperature)
+
+    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
+    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:O4'])
+    plumed_input, sum_hills_input = nqe.plumed_input_wob_1(idx1, idx2, temperature)
 
     # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
@@ -327,35 +331,35 @@ def test_eq_workflow_plumed_pt():
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
-    n_beads = 4
-    pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_rpmd_equilibration(modeller,
-                                      forcefield,
-                                      platform_name='CUDA',
-                                      n_beads=n_beads,
-                                      n_report=10,
-                                      n_1=100,
-                                      n_2=100)
-
-    pdb = app.PDBFile("rpmd_ready_centroid.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_rpmd_prod(modeller,
-                             forcefield,
-                             n_beads=n_beads,
-                             steps=steps_prod,
-                             plumed_script_path=plumed_script_path,
-                             platform_name='CUDA',
-                             checkpoint_file='rpmd_ready.chk')
-
-    # Run PLUMED sum_hills to get FES
-    os.system(sum_hills_input)
-    # Plot FES
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    # n_beads = 4
+    # pdb = app.PDBFile("minimized.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_rpmd_equilibration(modeller,
+    #                                   forcefield,
+    #                                   platform_name='CUDA',
+    #                                   n_beads=n_beads,
+    #                                   n_report=10,
+    #                                   n_1=100,
+    #                                   n_2=100)
+    #
+    # pdb = app.PDBFile("rpmd_ready_centroid.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_rpmd_prod(modeller,
+    #                          forcefield,
+    #                          n_beads=n_beads,
+    #                          steps=steps_prod,
+    #                          plumed_script_path=plumed_script_path,
+    #                          platform_name='CUDA',
+    #                          checkpoint_file='rpmd_ready.chk')
+    #
+    # # Run PLUMED sum_hills to get FES
+    # os.system(sum_hills_input)
+    # # Plot FES
+    # nqe.plot_plumed_fes("fes.dat")
+    # plt.show()
 
     nqe.remove_file_pattern('minimized*')
-    nqe.remove_file_pattern('prod*')
+    # nqe.remove_file_pattern('prod*')
     nqe.remove_file_pattern('rpmd_ready*')
     nqe.remove_file_pattern('rpmd_prod*')
 
