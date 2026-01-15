@@ -3,6 +3,7 @@ from typing import Optional, Tuple, List
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 
 def n_plot(xlab,
@@ -705,3 +706,59 @@ def plot_plumed_fes(
         cbar.set_label(lab(2, "FES"))
 
     return fig, ax
+
+
+def plot_plumed_colvar(filename, x_axis='time', figsize=(10, 8)):
+    col_names = None
+    with open(filename, 'r') as f:
+        for line in f:
+            if line.startswith("#! FIELDS"):
+                # Split the line and remove "#!" and "FIELDS" to get column names
+                col_names = line.split()[2:]
+                break
+
+    if col_names is None:
+        raise ValueError(f"Could not find '#! FIELDS' header in {filename}. Ensure it is a valid PLUMED file.")
+
+    try:
+        data = pd.read_csv(filename, sep=r'\s+', comment='#', names=col_names, engine='python')
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return None, None
+
+    # Check if x_axis exists
+    if x_axis not in data.columns:
+        print(f"Warning: '{x_axis}' column not found. Using index as X-axis.")
+        x_data = data.index
+        x_label = "Step (Index)"
+    else:
+        x_data = data[x_axis]
+        x_label = x_axis
+
+    plot_cols = [col for col in data.columns if col != x_axis]
+    n_plots = len(plot_cols)
+
+    if n_plots == 0:
+        print("No variables found to plot.")
+        return data, None
+
+    # Create subplots
+    fig, axes = plt.subplots(n_plots, 1, figsize=figsize, sharex=True)
+
+    # Handle the case where there is only one variable (axes is not a list)
+    if n_plots == 1:
+        axes = [axes]
+
+    for ax, col in zip(axes, plot_cols):
+        ax.plot(x_data, data[col], label=col, linewidth=1.5)
+        ax.set_ylabel(col)
+        ax.legend(loc='upper right')
+
+    # Set common X label on the bottom plot
+    axes[-1].set_xlabel(x_label)
+    plt.tight_layout()
+
+    # Show plot
+    plt.show()
+
+    return data, fig
