@@ -51,6 +51,7 @@ from .plumed import (plumed_input_1pt,
                      plumed_input_2pt_1d,
                      plumed_input_2pt_2d,
                      plumed_input_wob_1,
+                     plumed_input_wob_2,
                      )
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,

@@ -304,6 +304,32 @@ def test_eq_workflow_plumed_pt():
     # idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:O4'])
     # plumed_input, sum_hills_input = nqe.plumed_input_wob_1(idx1, idx2, temperature)
 
+    # idx_n3,
+    # idx_h3,
+    # idx_o6,
+    # idx_o4,
+    # idx_n1,
+    # idx_h1,
+    # idx_o2,
+    # idx_n2,
+    # DGN1 DTN1
+    picks = ['DTN1:N3',
+             'DTN1:H3',
+             'DGN1:O6',
+             'DTN1:O4',
+             'DGN1:N1',
+             'DGN1:H1',
+             'DTN1:O2',
+             'DGN1:N2',
+             ]
+
+    idx = nqe.atom_indices_from_vmd_picks(modeller, picks)
+
+    (plumed_input,
+     sum_hills_input) = nqe.plumed_input_wob_2(modeller,
+                                               idx,
+                                               temperature)
+
     # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
