@@ -116,6 +116,44 @@ def test_nonstandard_ligand():
     nqe.remove_file('minimized.pdb')
 
 
+def test_prepare_ligand_ff_multiple():
+    print(flush=True)
+    input_pdb = "tests/data/pdb/gt_wob_solv_clean.pdb"
+    cache_name = "gaff-molecules.json"
+    rm_ions = ['Na+',
+               'Cl-',
+               'NA']
+    residue_map = {'DG': 'DG',
+                   'DT': 'DT',
+                   'GTP': 'LIG'}
+
+    residue_map = None
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
+                                                rm_ions=rm_ions,
+                                                residue_map=residue_map,
+                                                lig_name='LIG')
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+    nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                          molecule,
+                          gen_cache=True,
+                          use_cache=False,
+                          cache=cache_name)
+
+    # Check that the cache files were created
+    assert os.path.exists(cache_name)
+
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule,
+                                       gen_cache=False,
+                                       use_cache=True,
+                                       cache=cache_name)
+    forcefield.createSystem(modeller.topology)
+
+    nqe.remove_file(cache_name)
+
+
 def _get_total_mass(system):
     total_mass = 0.0 * unit.dalton
     for i in range(system.getNumParticles()):
