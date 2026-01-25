@@ -240,7 +240,6 @@ def plumed_input_wob_2(modeller,
                        grid_min=-1.1,
                        grid_max=1.1,
                        grid_bin=200):
-
     # Unpack indices
     idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
 

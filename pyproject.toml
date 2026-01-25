@@ -11,23 +11,23 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 
 authors = [
-  { name = "Louie Slocombe", email = "louies@hotmail.co.uk" },
+    { name = "Louie Slocombe", email = "louies@hotmail.co.uk" },
 ]
 
 dependencies = [
-  "numpy",
+    "numpy",
 ]
 
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest",
-  "pytest-cov",
+    "pytest",
+    "pytest-cov",
 ]
 
 [project.urls]
