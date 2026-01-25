@@ -503,8 +503,9 @@ def run_openmm_npt(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    print("Adding MonteCarloBarostat...", flush=True)
-    system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+    if barostat_freq is not None:
+        system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+
     restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
     restraint.addGlobalParameter("k", k * unit.kilojoules_per_mole / (unit.nanometer ** 2))
     restraint.addPerParticleParameter("x0")
@@ -851,7 +852,8 @@ def run_openmm_rpmd_contracted(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
+    if barostat_freq is not None:
+        system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
@@ -1013,7 +1015,8 @@ def run_openmm_rpmd_prod(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
+    if barostat_freq is not None:
+        system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
@@ -1242,7 +1245,8 @@ def run_openmm_adqtb_prod(modeller,
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
-    system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+    if barostat_freq is not None:
+        system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
 
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
