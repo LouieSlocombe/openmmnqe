@@ -984,6 +984,52 @@ def prepare_lig_system(input_pdb,
     return pdb_data, molecule
 
 
+def prepare_multi_lig_system(input_pdb,
+                             combined_pdb='combined_system.pdb',
+                             clean_pdb='cleaned.pdb',
+                             rm_ions=None,
+                             residue_map=None,
+                             rm_files=True,
+                             lig_names=None):
+    # Removes water
+    remove_water_residues_in_pdb(input_pdb, clean_pdb)
+
+    if rm_ions is not None:
+        clean_ions_in_pdb(clean_pdb, rm_ions, clean_pdb)
+    if residue_map is not None:
+        relabel_residues_in_pdb(clean_pdb, residue_map, clean_pdb)
+
+    if lig_names is None:
+        # List the non-standard residues (ligands)
+        lig_names_found = list_non_standard_residues(clean_pdb)
+        print(f"Identified ligands: {lig_names_found}")
+
+    else:
+        lig_names_found = lig_names
+
+    molecule_list = []
+    for lig_name in lig_names_found:
+        # Save ligand as sdf
+        make_sdf(clean_pdb, lig_name=lig_name)
+
+        # Strip out the ligand and fix the pdb
+        fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
+        # Remove the ligand
+        remove_residues_in_pdb(combined_pdb, combined_pdb, names=[lig_name])
+
+        combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
+
+        molecule = Molecule.from_file(f'{lig_name}.sdf')
+        molecule_list.append(molecule)
+
+    pdb_data = app.PDBFile(combined_pdb)
+    if rm_files:
+        os.remove(clean_pdb)
+        os.remove(combined_pdb)
+        for lig_name in lig_names_found:
+            os.remove(f'{lig_name}.sdf')
+    return pdb_data, molecule_list
+
 def prepare_ligand_ff(standard_ff,
                       molecule,
                       gen_cache=False,
