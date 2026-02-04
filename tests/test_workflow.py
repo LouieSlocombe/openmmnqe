@@ -437,3 +437,52 @@ def test_malonaldehyde_pt():
     # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
+
+
+def test_malonaldehyde_pt_solvated():
+    print(flush=True)
+    temperature = 300.0 * unit.kelvin
+    steps_prod = 10_000
+
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    potential = MLPotential('mace-off23-large')  # mace-off23-large mace-off23-small
+
+    cache_name = "gaff-molecules.json"
+    rm_ions = ['Na+',
+               'Cl-',
+               'NA']
+    residue_map = {'MOL': 'LIG'}
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
+                                                rm_ions=rm_ions,
+                                                residue_map=residue_map,
+                                                lig_name='LIG',
+                                                )
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule,
+                                       gen_cache=False,
+                                       use_cache=False,
+                                       cache=cache_name)
+
+    # nqe.remove_file(cache_name)
+
+    # Solvate
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+
+    chains = list(modeller.topology.chains())
+    ml_atoms = [atom.index for atom in chains[0].atoms()]
+    nqe.run_openmm_relaxation_simple(modeller, forcefield, potential=potential, ml_idx=ml_atoms)
+
+    # pdb = app.PDBFile("minimized.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    # nqe.run_openmm_heating(modeller, forcefield, potential=potential, ml_idx=ml_atoms)
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_prod(modeller, forcefield, potential=potential, ml_idx=ml_atoms, steps=1_000, n_report=100)
