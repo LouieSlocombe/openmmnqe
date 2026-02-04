@@ -478,9 +478,12 @@ def test_ase_load():
     print(flush=True)
     from ase.io import read, write
     from ase.visualize import view
-    atoms = read('malonaldehyde.traj')
-    write('malonaldehyde.xyz', atoms)
-    print(atoms)
+    # atoms = read('malonaldehyde.traj')
+    # write('malonaldehyde.xyz', atoms)
+    # print(atoms)
+    # view(atoms)
+
+    atoms = read('tests/data/pdb/malonaldehyde.pdb')
     view(atoms)
 
 
