@@ -1,5 +1,5 @@
 import os
-
+import numpy as np
 import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
@@ -400,7 +400,7 @@ def test_eq_workflow_plumed_pt():
 def test_malonaldehyde_pt():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 100_000
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     pdb = app.PDBFile(input_pdb)
@@ -408,10 +408,14 @@ def test_malonaldehyde_pt():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    forcefield = MLPotential('mace-off23-medium')  # mace-off23-large mace-off23-small
+    forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    idx = nqe.atom_indices_from_vmd_picks(modeller, ['MOL1:O2', 'MOL1:H5', 'MOL1:O1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller, idx, temperature)
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
+    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
+                                                         idx,
+                                                         temperature,
+                                                         height=2.0,
+                                                         bias=5.0)
 
     # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
@@ -466,14 +470,52 @@ def test_malonaldehyde_pt_solvated():
                                        use_cache=False,
                                        cache=cache_name)
 
+
     # nqe.remove_file(cache_name)
 
     # Solvate
+    # padding = 1.5
+    # box_shape = 'cube'
+    # modeller.addSolvent(forcefield,
+    #                     padding=padding * unit.nanometer,
+    #                     boxShape=box_shape)
+
+
     padding = 1.5
     box_shape = 'cube'
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
+
+    # Center all particles in the box: shift positions so centroid -> box center
+    pos_list = modeller.positions.value_in_unit(unit.nanometer)
+    # Ensure a NumPy array of shape (N,3)
+    try:
+        pos_nm = np.asarray(pos_list, dtype=float)
+        if pos_nm.ndim != 2 or pos_nm.shape[1] != 3:
+            raise ValueError
+    except Exception:
+        pos_nm = np.array([[getattr(p, 'x', p[0]),
+                            getattr(p, 'y', p[1]),
+                            getattr(p, 'z', p[2])] for p in pos_list], dtype=float)
+
+    centroid = pos_nm.mean(axis=0)
+
+    box_vec = None
+    if hasattr(modeller.topology, 'getUnitCellDimensions'):
+        dims = modeller.topology.getUnitCellDimensions()
+        if dims is not None:
+            box_vec = np.array([dims.x, dims.y, dims.z])
+    if box_vec is None and hasattr(modeller.topology, 'getPeriodicBoxVectors'):
+        vecs = modeller.topology.getPeriodicBoxVectors()
+        if vecs is not None:
+            box_vec = np.array([vecs[0].x, vecs[1].y, vecs[2].z])
+
+    if box_vec is not None:
+        box_center = box_vec / 2.0
+        shift = box_center - centroid
+        new_pos = pos_nm + shift
+        modeller.positions = unit.Quantity(new_pos, unit.nanometer)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
@@ -485,4 +527,4 @@ def test_malonaldehyde_pt_solvated():
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_prod(modeller, forcefield, potential=potential, ml_idx=ml_atoms, steps=1_000, n_report=100)
+    nqe.run_openmm_prod(modeller, forcefield, potential=potential, ml_idx=ml_atoms, steps=10_000, n_report=1_000)
