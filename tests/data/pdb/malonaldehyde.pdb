@@ -1,15 +1,15 @@
-MODEL        1
-ATOM      1   O1 MOL A   1       1.260   0.852  -0.001  1.00  0.00           O
-ATOM      2   O2 MOL A   1      -1.206   0.882   0.002  1.00  0.00           O
-ATOM      3   C1 MOL A   1       0.012  -1.177   0.002  1.00  0.00           C
-ATOM      4   C2 MOL A   1       1.262  -0.407  -0.005  1.00  0.00           C
-ATOM      5   C3 MOL A   1      -1.233  -0.335  -0.004  1.00  0.00           C
-ATOM      6   H1 MOL A   1      -0.013  -1.849   0.872  1.00  0.00           H
-ATOM      7   H2 MOL A   1      -0.013  -1.876  -0.846  1.00  0.00           H
-ATOM      8   H3 MOL A   1       2.232  -0.903  -0.013  1.00  0.00           H
-ATOM      9   H4 MOL A   1      -2.187  -0.876  -0.014  1.00  0.00           H
-ATOM     10   H5 MOL A   1       0.255   1.172   0.004  1.00  0.00           H
-TER
+REMARK   1 CREATED WITH OPENMM 8.2, 2026-02-04
+HETATM    1  O1  MOL A   1       1.223   1.304  -0.001  1.00  0.00           O  
+HETATM    2  O2  MOL A   1      -1.243   1.334   0.002  1.00  0.00           O  
+HETATM    3  C1  MOL A   1      -0.025  -0.725   0.002  1.00  0.00           C  
+HETATM    4  C2  MOL A   1       1.225   0.045  -0.005  1.00  0.00           C  
+HETATM    5  C3  MOL A   1      -1.270   0.117  -0.004  1.00  0.00           C  
+HETATM    6  H1  MOL A   1      -0.050  -1.397   0.872  1.00  0.00           H  
+HETATM    7  H2  MOL A   1      -0.050  -1.424  -0.846  1.00  0.00           H  
+HETATM    8  H3  MOL A   1       2.195  -0.451  -0.013  1.00  0.00           H  
+HETATM    9  H4  MOL A   1      -2.224  -0.424  -0.014  1.00  0.00           H  
+HETATM   10  H5  MOL A   1       0.218   1.624   0.004  1.00  0.00           H  
+TER      11      MOL A   1
 CONECT    1    4   10
 CONECT    2    5
 CONECT    3    4    5    6    7
@@ -20,5 +20,4 @@ CONECT    7    3
 CONECT    8    4
 CONECT    9    5
 CONECT   10    1
-ENDMDL
 END

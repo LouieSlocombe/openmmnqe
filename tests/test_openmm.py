@@ -482,3 +482,12 @@ def test_ase_load():
     write('malonaldehyde.xyz', atoms)
     print(atoms)
     view(atoms)
+
+
+def test_move_pdb_to_origin():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    nqe.move_pdb_to_origin(input_pdb, 'tmp.pdb')
+    # Assert that the pdb file was created
+    assert os.path.isfile('tmp.pdb')
+    os.remove('tmp.pdb')
