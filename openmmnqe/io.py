@@ -879,26 +879,6 @@ def pdb_patcher(pdb_file, lig_name='LIG'):
 
 
 def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
-    """
-    Combines a ligand from an SDF file with a receptor from a PDB file into a single PDB file.
-
-    This function reads a receptor structure from a PDB file and a ligand structure from an SDF file,
-    then combines them into a single PDB file. Optionally, it can patch the resulting PDB file to
-    replace placeholder residue names and characters.
-
-    Parameters
-    ----------
-    input_pdb : str
-        Path to the input PDB file containing the receptor structure.
-    lig_name : str, optional
-        Residue name of the ligand to be added. Default is 'LIG'.
-    patch : bool, optional
-        If True, applies the `pdb_patcher` function to the combined PDB file. Default is True.
-
-    Returns
-    -------
-    None
-    """
     # Combine ligand and receptor into one pdb
     pdb = app.PDBFile(input_pdb)
     molecule = Molecule.from_file(f'{lig_name}.sdf')
@@ -922,40 +902,7 @@ def prepare_lig_system(input_pdb,
                        rm_files=True,
                        save_lig_sdf=False,
                        lig_name='LIG'):
-    """
-    Prepares a ligand-receptor system for molecular simulations.
-
-    This function processes a PDB file to clean up water residues, optionally remove ions,
-    relabel residues, and extract the ligand. The ligand is saved as an SDF file, and the
-    cleaned receptor and ligand are combined into a single PDB file. Temporary files can
-    optionally be removed after processing.
-
-    Parameters
-    ----------
-    input_pdb : str
-        Path to the input PDB file containing the ligand-receptor system.
-    combined_pdb : str, optional
-        Path to save the combined ligand-receptor PDB file. Default is 'combined_system.pdb'.
-    clean_pdb : str, optional
-        Path to save the cleaned PDB file. Default is 'cleaned.pdb'.
-    rm_ions : set of str, optional
-        A set of ion residue names to remove from the PDB file. Default is None.
-    residue_map : dict, optional
-        A mapping of residue names to relabel in the PDB file. Default is None.
-    rm_files : bool, optional
-        If True, removes intermediate files generated during processing. Default is True.
-    lig_name : str, optional
-        Residue name of the ligand to extract. Default is 'LIG'.
-    save_lig_sdf: str, optional
-        If True, saves the ligand as an SDF file. Default is False.
-
-    Returns
-    -------
-    tuple
-        A tuple containing:
-        - pdb_data (openmm.app.PDBFile): The combined ligand-receptor PDB data.
-        - molecule (openff.toolkit.Molecule): The ligand molecule object.
-    """
+    # 1. Standard Cleaning
     remove_water_residues_in_pdb(input_pdb, clean_pdb)
 
     if rm_ions is not None:
@@ -963,24 +910,56 @@ def prepare_lig_system(input_pdb,
     if residue_map is not None:
         relabel_residues_in_pdb(clean_pdb, residue_map, clean_pdb)
 
-    # Save ligand as sdf
+    # 2. Save ligand as SDF (Required for both pathways)
     make_sdf(clean_pdb, lig_name=lig_name)
 
-    # Strip out the ligand and fix the pdb
-    fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
-    # Remove the ligand
-    remove_residues_in_pdb(combined_pdb, combined_pdb, names=[lig_name])
+    # 3. Check if the PDB is *only* the ligand
+    # We load the cleaned topology to check residue counts
+    pdb_temp = app.PDBFile(clean_pdb)
+    residues = list(pdb_temp.topology.residues())
 
-    combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
+    # Count how many residues match the ligand name vs total residues
+    lig_count = sum(1 for r in residues if r.name == lig_name)
+    total_count = len(residues)
 
+    is_ligand_only = (total_count > 0 and lig_count == total_count)
+
+    if is_ligand_only:
+        # PATH A: Ligand Only
+        # Simply copy the cleaned PDB to the combined output.
+        # We do NOT want to strip the ligand, because that would leave an empty file.
+        shutil.copy(clean_pdb, combined_pdb)
+
+        # We still need to run the patcher (which is usually done inside combine_sdf_pdb)
+        # to ensure atom names/types are consistent.
+        pdb_patcher(combined_pdb, lig_name=lig_name)
+
+    else:
+        # PATH B: Receptor + Ligand (Original Workflow)
+        # Strip out the ligand and fix the pdb
+        fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
+
+        # Remove the ligand residues so we can re-add them clean from SDF
+        remove_residues_in_pdb(combined_pdb, combined_pdb, names=[lig_name])
+
+        # Re-combine the receptor with the clean SDF ligand
+        combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
+
+    # 4. Final Loading
     pdb_data = app.PDBFile(combined_pdb)
     molecule = Molecule.from_file(f'{lig_name}.sdf')
 
+    # 5. Cleanup
     if rm_files:
-        os.remove(clean_pdb)
-        os.remove(combined_pdb)
+        if os.path.exists(clean_pdb):
+            os.remove(clean_pdb)
+        if os.path.exists(combined_pdb):
+            os.remove(combined_pdb)
+
     if not save_lig_sdf:
-        os.remove(f'{lig_name}.sdf')
+        if os.path.exists(f'{lig_name}.sdf'):
+            os.remove(f'{lig_name}.sdf')
+
     return pdb_data, molecule
 
 
@@ -1029,6 +1008,7 @@ def prepare_multi_lig_system(input_pdb,
         for lig_name in lig_names_found:
             os.remove(f'{lig_name}.sdf')
     return pdb_data, molecule_list
+
 
 def prepare_ligand_ff(standard_ff,
                       molecule,
