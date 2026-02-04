@@ -1162,3 +1162,16 @@ def remove_file(file_path: str):
         os.remove(file_path)
     except OSError:
         pass
+
+
+def move_pdb_to_origin(input_pdb, output_filename):
+    pdb = PDBFile(input_pdb)
+    positions = pdb.getPositions(asNumpy=True)
+    center = np.mean(positions, axis=0)
+    new_positions = positions - center
+    with open(output_filename, 'w') as f:
+        PDBFile.writeFile(pdb.topology, new_positions, f)
+
+
+# Example usage:
+# move_pdb_to_origin('input.pdb', 'centered_output.pdb')
