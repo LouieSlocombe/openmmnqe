@@ -1172,6 +1172,5 @@ def move_pdb_to_origin(input_pdb, output_filename):
     with open(output_filename, 'w') as f:
         PDBFile.writeFile(pdb.topology, new_positions, f)
 
-
 # Example usage:
 # move_pdb_to_origin('input.pdb', 'centered_output.pdb')

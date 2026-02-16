@@ -1,6 +1,7 @@
 import os
-import numpy as np
+
 import matplotlib.pyplot as plt
+import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 from openmmml import MLPotential
@@ -470,7 +471,6 @@ def test_malonaldehyde_pt_solvated():
                                        use_cache=False,
                                        cache=cache_name)
 
-
     # nqe.remove_file(cache_name)
 
     # Solvate
@@ -479,7 +479,6 @@ def test_malonaldehyde_pt_solvated():
     # modeller.addSolvent(forcefield,
     #                     padding=padding * unit.nanometer,
     #                     boxShape=box_shape)
-
 
     padding = 1.5
     box_shape = 'cube'
