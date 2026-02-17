@@ -901,7 +901,7 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
         input_files = [input_files]
     all_mols = []
     for sdf_path in input_files:
-        suppl = Chem.SDMolSupplier(sdf_path, removeHs=False)
+        suppl = Chem.SDMolSupplier(sdf_path, removeHs=False, sanitize=True)
         for mol in suppl:
             if mol is not None:
                 all_mols.append(mol)
@@ -1026,7 +1026,7 @@ def prepare_ligand_ff(standard_ff,
     if not use_cache:
         print(f'Pre-calculating conformers and charges ({pc_method})...', flush=True)
         for mol in molecules:
-            print(f'  - Processing molecule: {mol.name}', flush=True)
+            print(f'  - Processing molecule: {mol}', flush=True)
             if mol.n_conformers == 0:
                 mol.generate_conformers(n_conformers=n_conf)
             if mol.partial_charges is None:

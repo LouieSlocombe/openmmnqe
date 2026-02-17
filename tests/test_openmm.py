@@ -122,27 +122,41 @@ def test_prepare_ligand_ff_multiple():
                'Cl-',
                'NA']
 
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, rm_files=False)
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, rm_files=False, rm_lig_sdf=False)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
+
+    # from openff.toolkit import Molecule
+    # from openmmforcefields.generators import GAFFTemplateGenerator
+    # from openmm.app import ForceField
+    # from openmm.app import PDBFile
+    # smis = ['[H][O][C]([H])([H])[C@@]1([H])[O][C@@]([H])([N]2[C]([H])=[N][C]3=[C]2[N]=[C]([N]([H])[H])[N]([H])[C]3=[O])[C]([H])([H])[C@]1([H])[O][H]',
+    #         '[H][O][C]([H])([H])[C@@]1([H])[O][C@@]([H])([N]2[C](=[O])[N]([H])[C](=[O])[C]([C]([H])([H])[H])=[C]2[H])[C]([H])([H])[C@]1([H])[O][H]']
+    # molecule = [Molecule.from_smiles(smi) for smi in smis]
+    # molecule = [Molecule.from_file(f) for f in ["DGN.sdf", "DTN.sdf"]]
+    # gaff = GAFFTemplateGenerator(molecules=molecule)
+    # forcefield = ForceField("amber14-all.xml", "amber14/tip3pfb.xml")
+    # forcefield.registerTemplateGenerator(gaff.generator)
+
+
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule[0],
+                                       molecule,
                                        gen_cache=True,
                                        use_cache=False,
                                        cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
-    # # Check that the cache files were created
-    # assert os.path.exists(cache_name)
+    # Check that the cache files were created
+    assert os.path.exists(cache_name)
 
-    # forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-    #                                    molecule,
-    #                                    gen_cache=False,
-    #                                    use_cache=False,
-    #                                    cache_name=cache_name)
-    # forcefield.createSystem(modeller.topology)
-    #
-    # nqe.remove_file(cache_name)
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule,
+                                       gen_cache=False,
+                                       use_cache=False,
+                                       cache_name=cache_name)
+    forcefield.createSystem(modeller.topology)
+
+    nqe.remove_file(cache_name)
 
 
 def _get_total_mass(system):
