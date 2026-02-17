@@ -907,11 +907,9 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
                 all_mols.append(mol)
     combined_topology = Topology()
     combined_positions = []
-
-    chain = combined_topology.addChain()
     for i, mol in enumerate(all_mols):
-        res_name = mol.GetProp("_Name") if mol.HasProp("_Name") else f"MOL{i + 1}"
-        residue = combined_topology.addResidue(res_name, chain)
+        res_name = input_files[i].split('.')[0]
+        residue = combined_topology.addResidue(res_name, combined_topology.addChain())
         rdkit_idx_to_atom = {}
         for atom in mol.GetAtoms():
             symbol = atom.GetSymbol()
@@ -930,7 +928,7 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
                 pos = conf.GetAtomPosition(j)
                 combined_positions.append(Vec3(pos.x, pos.y, pos.z) * 0.1)
         else:
-            print(f"Warning: Molecule {res_name} has no 3D coordinates.")
+            print(f"Warning: Molecule {res_name} has no 3D coordinates.", flush=True)
             combined_positions.extend([Vec3(0, 0, 0)] * mol.GetNumAtoms())
 
     with open(output_filename, 'w') as f:
@@ -943,7 +941,7 @@ def prepare_lig_system(input_pdb,
                        rm_ions=None,
                        residue_map=None,
                        rm_files=True,
-                       rm_lig_sdf=False,
+                       rm_lig_sdf=True,
                        lig_names=None):
     remove_water_residues_in_pdb(input_pdb, clean_pdb)
 
@@ -955,7 +953,7 @@ def prepare_lig_system(input_pdb,
     if lig_names is None:
         non_std_residues = list_non_standard_residues(clean_pdb)
         lig_names_list = list(set([key.split('_')[0].strip() for key in non_std_residues]))
-        print(f"Identified ligands: {lig_names_list}")
+        print(f"Identified ligands: {lig_names_list}", flush=True)
     elif isinstance(lig_names, str):
         lig_names_list = [lig_names]
     else:
@@ -977,11 +975,10 @@ def prepare_lig_system(input_pdb,
     lig_count = sum(1 for r in residues if r.name in lig_names_list)
     total_count = len(residues)
 
-    # Check if the PDB contains *only* the ligand(s)
     is_ligand_only = (total_count > 0 and lig_count == total_count)
 
     if is_ligand_only:
-        shutil.copy(clean_pdb, combined_pdb)
+        convert_sdfs_to_pdb(generated_sdfs, output_filename=combined_pdb)
         for lig_name in lig_names_list:
             pdb_patcher(combined_pdb, lig_name=lig_name)
     else:
@@ -1023,14 +1020,13 @@ def prepare_ligand_ff(standard_ff,
     else:
         molecules = molecule
 
-    print(molecules)
-
     if isinstance(standard_ff, str):
         standard_ff = [standard_ff]
 
     if not use_cache:
         print(f'Pre-calculating conformers and charges ({pc_method})...', flush=True)
         for mol in molecules:
+            print(f'  - Processing molecule: {mol.name}', flush=True)
             if mol.n_conformers == 0:
                 mol.generate_conformers(n_conformers=n_conf)
             if mol.partial_charges is None:

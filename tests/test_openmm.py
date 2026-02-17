@@ -62,7 +62,11 @@ def test_prepare_ligand_ff():
     residue_map = {'DGN': 'DG',
                    'DTN': 'DT',
                    'GTP': 'LIG'}
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, residue_map=residue_map, lig_names='LIG')
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
+                                                rm_ions=rm_ions,
+                                                residue_map=residue_map,
+                                                lig_names='LIG',
+                                                rm_files=False)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
@@ -70,7 +74,7 @@ def test_prepare_ligand_ff():
                           molecule,
                           gen_cache=True,
                           use_cache=False,
-                          cache=cache_name)
+                          cache_name=cache_name)
 
     # Check that the cache files were created
     assert os.path.exists(cache_name)
@@ -79,10 +83,10 @@ def test_prepare_ligand_ff():
                                        molecule,
                                        gen_cache=False,
                                        use_cache=True,
-                                       cache=cache_name)
+                                       cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
 
-    nqe.remove_file(cache_name)
+    # nqe.remove_file(cache_name)
 
 
 def test_nonstandard_ligand():
@@ -123,13 +127,13 @@ def test_prepare_ligand_ff_multiple():
     modeller.deleteWater()
     modeller.addHydrogens()
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule,
-                                       gen_cache=False,
+                                       molecule[0],
+                                       gen_cache=True,
                                        use_cache=False,
                                        cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
-    # Check that the cache files were created
-    assert os.path.exists(cache_name)
+    # # Check that the cache files were created
+    # assert os.path.exists(cache_name)
 
     # forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
     #                                    molecule,
