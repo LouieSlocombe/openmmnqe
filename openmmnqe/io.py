@@ -1165,12 +1165,92 @@ def remove_file(file_path: str):
 
 
 def move_pdb_to_origin(input_pdb, output_filename):
+    """
+    Moves the atomic positions in a PDB file to the origin.
+
+    This function reads a PDB file, calculates the geometric center (centroid)
+    of all atomic positions, shifts all positions so that the centroid is at
+    the origin, and writes the modified structure to a new PDB file.
+
+    Parameters
+    ----------
+    input_pdb : str
+        Path to the input PDB file.
+    output_filename : str
+        Path to the output PDB file where the modified structure will be saved.
+
+    Returns
+    -------
+    None
+        The function writes the modified PDB structure to the specified output file.
+    """
+    # Load the PDB file
     pdb = PDBFile(input_pdb)
+    # Get atomic positions as a NumPy array
     positions = pdb.getPositions(asNumpy=True)
+    # Calculate the geometric center (centroid) of the positions
     center = np.mean(positions, axis=0)
+    # Shift all positions so that the centroid is at the origin
     new_positions = positions - center
+
+    # Write the modified structure to the output file
     with open(output_filename, 'w') as f:
         PDBFile.writeFile(pdb.topology, new_positions, f)
 
-# Example usage:
-# move_pdb_to_origin('input.pdb', 'centered_output.pdb')
+
+def center_in_box(modeller):
+    """
+    Centers the atomic positions of a molecular system within the simulation box.
+
+    This function calculates the centroid of the atomic positions in the modeller object
+    and shifts the positions so that the centroid is at the center of the simulation box.
+    The box dimensions are determined from the modeller's topology.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The Modeller object containing the topology and positions of the molecular system.
+
+    Returns
+    -------
+    None
+        The function modifies the positions of the modeller object in place.
+    """
+    # Extract positions in nanometers
+    pos_list = modeller.positions.value_in_unit(unit.nanometer)
+
+    # Ensure positions are a NumPy array of shape (N, 3)
+    try:
+        pos_nm = np.asarray(pos_list, dtype=float)
+        if pos_nm.ndim != 2 or pos_nm.shape[1] != 3:
+            raise ValueError
+    except Exception:
+        # Handle cases where positions are not directly convertible to NumPy array
+        pos_nm = np.array([[getattr(p, 'x', p[0]),
+                            getattr(p, 'y', p[1]),
+                            getattr(p, 'z', p[2])] for p in pos_list], dtype=float)
+
+    # Calculate the centroid of the positions
+    centroid = pos_nm.mean(axis=0)
+
+    # Initialize box dimensions
+    box_vec = None
+
+    # Check if the topology has unit cell dimensions
+    if hasattr(modeller.topology, 'getUnitCellDimensions'):
+        dims = modeller.topology.getUnitCellDimensions()
+        if dims is not None:
+            box_vec = np.array([dims.x, dims.y, dims.z])
+
+    # If unit cell dimensions are not available, check for periodic box vectors
+    if box_vec is None and hasattr(modeller.topology, 'getPeriodicBoxVectors'):
+        vecs = modeller.topology.getPeriodicBoxVectors()
+        if vecs is not None:
+            box_vec = np.array([vecs[0].x, vecs[1].y, vecs[2].z])
+
+    # If box dimensions are available, center the positions
+    if box_vec is not None:
+        box_center = box_vec / 2.0
+        shift = box_center - centroid
+        new_pos = pos_nm + shift
+        modeller.positions = unit.Quantity(new_pos, unit.nanometer)

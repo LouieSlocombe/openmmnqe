@@ -23,6 +23,7 @@ from .io import (remove_directory,
                  remove_file_pattern,
                  remove_file,
                  move_pdb_to_origin,
+                 center_in_box,
                  )
 from .openmm import (md_workflow,
                      md_analysis,

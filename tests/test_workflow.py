@@ -1,7 +1,6 @@
 import os
 
 import matplotlib.pyplot as plt
-import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 from openmmml import MLPotential
@@ -452,7 +451,6 @@ def test_malonaldehyde_pt_solvated():
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-large')  # mace-off23-large mace-off23-small
 
-    cache_name = "gaff-molecules.json"
     rm_ions = ['Na+',
                'Cl-',
                'NA']
@@ -468,17 +466,7 @@ def test_malonaldehyde_pt_solvated():
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule,
                                        gen_cache=False,
-                                       use_cache=False,
-                                       cache=cache_name)
-
-    # nqe.remove_file(cache_name)
-
-    # Solvate
-    # padding = 1.5
-    # box_shape = 'cube'
-    # modeller.addSolvent(forcefield,
-    #                     padding=padding * unit.nanometer,
-    #                     boxShape=box_shape)
+                                       use_cache=False)
 
     padding = 1.5
     box_shape = 'cube'
@@ -486,44 +474,12 @@ def test_malonaldehyde_pt_solvated():
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
 
-    # Center all particles in the box: shift positions so centroid -> box center
-    pos_list = modeller.positions.value_in_unit(unit.nanometer)
-    # Ensure a NumPy array of shape (N,3)
-    try:
-        pos_nm = np.asarray(pos_list, dtype=float)
-        if pos_nm.ndim != 2 or pos_nm.shape[1] != 3:
-            raise ValueError
-    except Exception:
-        pos_nm = np.array([[getattr(p, 'x', p[0]),
-                            getattr(p, 'y', p[1]),
-                            getattr(p, 'z', p[2])] for p in pos_list], dtype=float)
-
-    centroid = pos_nm.mean(axis=0)
-
-    box_vec = None
-    if hasattr(modeller.topology, 'getUnitCellDimensions'):
-        dims = modeller.topology.getUnitCellDimensions()
-        if dims is not None:
-            box_vec = np.array([dims.x, dims.y, dims.z])
-    if box_vec is None and hasattr(modeller.topology, 'getPeriodicBoxVectors'):
-        vecs = modeller.topology.getPeriodicBoxVectors()
-        if vecs is not None:
-            box_vec = np.array([vecs[0].x, vecs[1].y, vecs[2].z])
-
-    if box_vec is not None:
-        box_center = box_vec / 2.0
-        shift = box_center - centroid
-        new_pos = pos_nm + shift
-        modeller.positions = unit.Quantity(new_pos, unit.nanometer)
+    nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
     nqe.run_openmm_relaxation_simple(modeller, forcefield, potential=potential, ml_idx=ml_atoms)
 
-    # pdb = app.PDBFile("minimized.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_heating(modeller, forcefield, potential=potential, ml_idx=ml_atoms)
-
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_prod(modeller, forcefield, potential=potential, ml_idx=ml_atoms, steps=10_000, n_report=1_000)
+    nqe.run_openmm_prod(modeller, forcefield, potential=potential, ml_idx=ml_atoms, steps=1_000, n_report=100)
