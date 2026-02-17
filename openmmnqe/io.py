@@ -7,7 +7,7 @@ from typing import List
 import MDAnalysis as mda
 import numpy as np
 import openmm.unit as unit
-from openff.toolkit import Molecule
+from openff.toolkit import Molecule, Topology
 from openmm import app
 from openmm.app import PDBFile, Modeller
 from openmmforcefields.generators import GAFFTemplateGenerator
@@ -900,7 +900,7 @@ def prepare_lig_system(input_pdb,
                        rm_ions=None,
                        residue_map=None,
                        rm_files=True,
-                       save_lig_sdf=False,
+                       rm_lig_sdf=False,
                        lig_names=None):
     remove_water_residues_in_pdb(input_pdb, clean_pdb)
 
@@ -909,30 +909,32 @@ def prepare_lig_system(input_pdb,
     if residue_map is not None:
         relabel_residues_in_pdb(clean_pdb, residue_map, clean_pdb)
 
-    # Normalize lig_names to a list
     if lig_names is None:
-        lig_names_list = list_non_standard_residues(clean_pdb)
-        # Extract just the residue names from the keys
-        lig_names_list = list(set(key.split('_')[0].strip() for key in lig_names_list))
+        non_std_residues = list_non_standard_residues(clean_pdb)
+        lig_names_list = list(set([key.split('_')[0].strip() for key in non_std_residues]))
         print(f"Identified ligands: {lig_names_list}")
     elif isinstance(lig_names, str):
         lig_names_list = [lig_names]
     else:
         lig_names_list = list(lig_names)
 
-    # Process each ligand
     molecules = []
+    generated_sdfs = []
+
     for lig_name in lig_names_list:
+        sdf_filename = f'{lig_name}.sdf'
         make_sdf(clean_pdb, lig_name=lig_name)
-        molecule = Molecule.from_file(f'{lig_name}.sdf')
-        molecules.append(molecule)
+        generated_sdfs.append(sdf_filename)
+        mol = Molecule.from_file(sdf_filename)
+        mol.name = lig_name
+        molecules.append(mol)
 
     pdb_temp = app.PDBFile(clean_pdb)
     residues = list(pdb_temp.topology.residues())
-
     lig_count = sum(1 for r in residues if r.name in lig_names_list)
     total_count = len(residues)
 
+    # Check if the PDB contains *only* the ligand(s)
     is_ligand_only = (total_count > 0 and lig_count == total_count)
 
     if is_ligand_only:
@@ -942,28 +944,23 @@ def prepare_lig_system(input_pdb,
     else:
         fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
         remove_residues_in_pdb(combined_pdb, combined_pdb, names=lig_names_list)
-        # Add each ligand back to the combined PDB
         for lig_name in lig_names_list:
             combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
 
     pdb_data = app.PDBFile(combined_pdb)
-
     if rm_files:
         if os.path.exists(clean_pdb):
             os.remove(clean_pdb)
         if os.path.exists(combined_pdb):
             os.remove(combined_pdb)
+    if rm_lig_sdf:
+        for sdf_file in generated_sdfs:
+            if os.path.exists(sdf_file):
+                os.remove(sdf_file)
 
-    if not save_lig_sdf:
-        for lig_name in lig_names_list:
-            if os.path.exists(f'{lig_name}.sdf'):
-                os.remove(f'{lig_name}.sdf')
-
-    # Set molecule names based on ligand names
     for mol, lig_name in zip(molecules, lig_names_list):
         mol.name = lig_name
 
-    # Return single molecule if only one ligand, otherwise return list
     if len(molecules) == 1:
         return pdb_data, molecules[0]
     else:

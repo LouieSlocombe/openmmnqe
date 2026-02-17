@@ -118,7 +118,7 @@ def test_prepare_ligand_ff_multiple():
                'Cl-',
                'NA']
 
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, rm_files=False)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
