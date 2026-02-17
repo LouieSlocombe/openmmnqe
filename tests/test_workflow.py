@@ -409,6 +409,12 @@ def test_malonaldehyde_pt():
     modeller.addHydrogens()
 
     forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     platform_name='CUDA')
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
     plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
@@ -422,12 +428,6 @@ def test_malonaldehyde_pt():
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
 
-    nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield,
-                                     platform_name='CUDA')
-
-    pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
@@ -478,8 +478,38 @@ def test_malonaldehyde_pt_solvated():
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
-    nqe.run_openmm_relaxation_simple(modeller, forcefield, potential=potential, ml_idx=ml_atoms)
 
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     potential=potential,
+                                     ml_idx=ml_atoms)
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_prod(modeller, forcefield, potential=potential, ml_idx=ml_atoms, steps=1_000, n_report=100)
+
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
+    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
+                                                         idx,
+                                                         temperature,
+                                                         height=2.0,
+                                                         bias=5.0)
+
+    # Write PLUMED script to a temporary file
+    plumed_script_path = "plumed.dat"
+    with open(plumed_script_path, 'w') as f:
+        f.write(plumed_input)
+
+    nqe.run_openmm_prod(modeller,
+                        forcefield,
+                        plumed_script_path=plumed_script_path,
+                        platform_name='CUDA',
+                        temperature=temperature,
+                        barostat_freq=None,
+                        steps=steps_prod,
+                        potential=potential,
+                        ml_idx=ml_atoms)
+
+    # Run PLUMED sum_hills to get FES
+    os.system(sum_hills_input)
+    # Plot FES
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()
