@@ -478,3 +478,13 @@ def test_move_pdb_to_origin():
     # Assert that the pdb file was created
     assert os.path.isfile('tmp.pdb')
     os.remove('tmp.pdb')
+
+
+def test_convert_sdfs_to_pdb():
+    nqe.convert_sdfs_to_pdb("tests/data/DGN.sdf", "single_ligand.pdb")
+    assert os.path.isfile('single_ligand.pdb')
+    os.remove('single_ligand.pdb')
+
+    nqe.convert_sdfs_to_pdb(["tests/data/DGN.sdf", "tests/data/DTN.sdf"], "combined_ligands.pdb")
+    assert os.path.isfile('combined_ligands.pdb')
+    os.remove('combined_ligands.pdb')

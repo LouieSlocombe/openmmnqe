@@ -8,13 +8,15 @@ import MDAnalysis as mda
 import numpy as np
 import openmm.unit as unit
 from openff.toolkit import Molecule, Topology
-from openmm import app
-from openmm.app import PDBFile, Modeller
+from openmm import app, Vec3
+from openmm.app import PDBFile, Topology, Element, Modeller
 from openmmforcefields.generators import GAFFTemplateGenerator
 from pdbfixer import PDBFixer
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 from scipy.constants import physical_constants as const
+
+
 
 # Conversion factor from Bohr to Angstrom
 bohr_to_angstrom = const["Bohr radius"][0] * 1e10
@@ -892,6 +894,47 @@ def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
     if patch:
         pdb_patcher(input_pdb, lig_name=lig_name)
     return None
+
+
+def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
+    if isinstance(input_files, str):
+        input_files = [input_files]
+    all_mols = []
+    for sdf_path in input_files:
+        suppl = Chem.SDMolSupplier(sdf_path, removeHs=False)
+        for mol in suppl:
+            if mol is not None:
+                all_mols.append(mol)
+    combined_topology = Topology()
+    combined_positions = []
+
+    chain = combined_topology.addChain()
+    for i, mol in enumerate(all_mols):
+        res_name = mol.GetProp("_Name") if mol.HasProp("_Name") else f"MOL{i + 1}"
+        residue = combined_topology.addResidue(res_name, chain)
+        rdkit_idx_to_atom = {}
+        for atom in mol.GetAtoms():
+            symbol = atom.GetSymbol()
+            element = Element.getBySymbol(symbol)
+            omm_atom = combined_topology.addAtom(symbol, element, residue)
+            rdkit_idx_to_atom[atom.GetIdx()] = omm_atom
+
+        for bond in mol.GetBonds():
+            atom1 = rdkit_idx_to_atom[bond.GetBeginAtomIdx()]
+            atom2 = rdkit_idx_to_atom[bond.GetEndAtomIdx()]
+            combined_topology.addBond(atom1, atom2)
+
+        if mol.GetNumConformers() > 0:
+            conf = mol.GetConformer()
+            for j in range(mol.GetNumAtoms()):
+                pos = conf.GetAtomPosition(j)
+                combined_positions.append(Vec3(pos.x, pos.y, pos.z) * 0.1)
+        else:
+            print(f"Warning: Molecule {res_name} has no 3D coordinates.")
+            combined_positions.extend([Vec3(0, 0, 0)] * mol.GetNumAtoms())
+
+    with open(output_filename, 'w') as f:
+        PDBFile.writeFile(combined_topology, combined_positions * unit.nanometers, f)
 
 
 def prepare_lig_system(input_pdb,
