@@ -400,7 +400,7 @@ def test_eq_workflow_plumed_pt():
 def test_malonaldehyde_pt():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 100_000
+    steps_prod = 10_000
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     pdb = app.PDBFile(input_pdb)
@@ -423,7 +423,6 @@ def test_malonaldehyde_pt():
                                                          height=2.0,
                                                          bias=5.0)
 
-    # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
@@ -438,7 +437,6 @@ def test_malonaldehyde_pt():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
@@ -449,7 +447,7 @@ def test_malonaldehyde_pt_solvated():
     steps_prod = 10_000
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
-    potential = MLPotential('mace-off23-large')  # mace-off23-large mace-off23-small
+    potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
     rm_ions = ['Na+',
                'Cl-',
@@ -493,7 +491,6 @@ def test_malonaldehyde_pt_solvated():
                                                          height=2.0,
                                                          bias=5.0)
 
-    # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
@@ -510,6 +507,5 @@ def test_malonaldehyde_pt_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
