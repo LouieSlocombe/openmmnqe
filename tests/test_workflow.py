@@ -453,11 +453,7 @@ def test_malonaldehyde_pt_solvated():
                'Cl-',
                'NA']
     residue_map = {'MOL': 'LIG'}
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
-                                                rm_ions=rm_ions,
-                                                residue_map=residue_map,
-                                                lig_name='LIG',
-                                                )
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, residue_map=residue_map, lig_names='LIG')
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()

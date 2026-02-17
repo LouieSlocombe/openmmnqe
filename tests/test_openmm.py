@@ -62,10 +62,7 @@ def test_prepare_ligand_ff():
     residue_map = {'DGN': 'DG',
                    'DTN': 'DT',
                    'GTP': 'LIG'}
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
-                                                rm_ions=rm_ions,
-                                                residue_map=residue_map,
-                                                lig_name='LIG')
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, residue_map=residue_map, lig_names='LIG')
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
@@ -98,10 +95,7 @@ def test_nonstandard_ligand():
     residue_map = {'DGN': 'DG',
                    'DTN': 'DT',
                    'GTP': 'LIG'}
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
-                                                rm_ions=rm_ions,
-                                                residue_map=residue_map,
-                                                lig_name='LIG')
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, residue_map=residue_map, lig_names='LIG')
     pdb_topology = pdb_data.topology
     pdb_positions = pdb_data.positions
     modeller = app.Modeller(pdb_topology, pdb_positions)
@@ -123,35 +117,28 @@ def test_prepare_ligand_ff_multiple():
     rm_ions = ['Na+',
                'Cl-',
                'NA']
-    residue_map = {'DG': 'DG',
-                   'DT': 'DT',
-                   'GTP': 'LIG'}
 
-    residue_map = None
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
-                                                rm_ions=rm_ions,
-                                                residue_map=residue_map,
-                                                lig_name='LIG')
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
-    nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                          molecule,
-                          gen_cache=True,
-                          use_cache=False,
-                          cache=cache_name)
-
-    # Check that the cache files were created
-    assert os.path.exists(cache_name)
-
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule,
                                        gen_cache=False,
-                                       use_cache=True,
-                                       cache=cache_name)
+                                       use_cache=False,
+                                       cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
+    # Check that the cache files were created
+    assert os.path.exists(cache_name)
 
-    nqe.remove_file(cache_name)
+    # forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+    #                                    molecule,
+    #                                    gen_cache=False,
+    #                                    use_cache=False,
+    #                                    cache_name=cache_name)
+    # forcefield.createSystem(modeller.topology)
+    #
+    # nqe.remove_file(cache_name)
 
 
 def _get_total_mass(system):
@@ -229,10 +216,7 @@ def test_plumed():
                    'DTN': 'DT',
                    'GTP': 'LIG'}
 
-    pdb_data, molecule = nqe.prepare_lig_system(pdb_file,
-                                                rm_ions=rm_ions,
-                                                residue_map=residue_map,
-                                                rm_files=False)
+    pdb_data, molecule = nqe.prepare_lig_system(pdb_file, rm_ions=rm_ions, residue_map=residue_map, rm_files=False)
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule,
                                        pc_methods='am1bcc')

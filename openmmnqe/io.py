@@ -901,8 +901,7 @@ def prepare_lig_system(input_pdb,
                        residue_map=None,
                        rm_files=True,
                        save_lig_sdf=False,
-                       lig_name='LIG'):
-    # 1. Standard Cleaning
+                       lig_names=None):
     remove_water_residues_in_pdb(input_pdb, clean_pdb)
 
     if rm_ions is not None:
@@ -910,46 +909,45 @@ def prepare_lig_system(input_pdb,
     if residue_map is not None:
         relabel_residues_in_pdb(clean_pdb, residue_map, clean_pdb)
 
-    # 2. Save ligand as SDF (Required for both pathways)
-    make_sdf(clean_pdb, lig_name=lig_name)
+    # Normalize lig_names to a list
+    if lig_names is None:
+        lig_names_list = list_non_standard_residues(clean_pdb)
+        # Extract just the residue names from the keys
+        lig_names_list = list(set(key.split('_')[0].strip() for key in lig_names_list))
+        print(f"Identified ligands: {lig_names_list}")
+    elif isinstance(lig_names, str):
+        lig_names_list = [lig_names]
+    else:
+        lig_names_list = list(lig_names)
 
-    # 3. Check if the PDB is *only* the ligand
-    # We load the cleaned topology to check residue counts
+    # Process each ligand
+    molecules = []
+    for lig_name in lig_names_list:
+        make_sdf(clean_pdb, lig_name=lig_name)
+        molecule = Molecule.from_file(f'{lig_name}.sdf')
+        molecules.append(molecule)
+
     pdb_temp = app.PDBFile(clean_pdb)
     residues = list(pdb_temp.topology.residues())
 
-    # Count how many residues match the ligand name vs total residues
-    lig_count = sum(1 for r in residues if r.name == lig_name)
+    lig_count = sum(1 for r in residues if r.name in lig_names_list)
     total_count = len(residues)
 
     is_ligand_only = (total_count > 0 and lig_count == total_count)
 
     if is_ligand_only:
-        # PATH A: Ligand Only
-        # Simply copy the cleaned PDB to the combined output.
-        # We do NOT want to strip the ligand, because that would leave an empty file.
         shutil.copy(clean_pdb, combined_pdb)
-
-        # We still need to run the patcher (which is usually done inside combine_sdf_pdb)
-        # to ensure atom names/types are consistent.
-        pdb_patcher(combined_pdb, lig_name=lig_name)
-
+        for lig_name in lig_names_list:
+            pdb_patcher(combined_pdb, lig_name=lig_name)
     else:
-        # PATH B: Receptor + Ligand (Original Workflow)
-        # Strip out the ligand and fix the pdb
         fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
+        remove_residues_in_pdb(combined_pdb, combined_pdb, names=lig_names_list)
+        # Add each ligand back to the combined PDB
+        for lig_name in lig_names_list:
+            combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
 
-        # Remove the ligand residues so we can re-add them clean from SDF
-        remove_residues_in_pdb(combined_pdb, combined_pdb, names=[lig_name])
-
-        # Re-combine the receptor with the clean SDF ligand
-        combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
-
-    # 4. Final Loading
     pdb_data = app.PDBFile(combined_pdb)
-    molecule = Molecule.from_file(f'{lig_name}.sdf')
 
-    # 5. Cleanup
     if rm_files:
         if os.path.exists(clean_pdb):
             os.remove(clean_pdb)
@@ -957,121 +955,63 @@ def prepare_lig_system(input_pdb,
             os.remove(combined_pdb)
 
     if not save_lig_sdf:
-        if os.path.exists(f'{lig_name}.sdf'):
-            os.remove(f'{lig_name}.sdf')
+        for lig_name in lig_names_list:
+            if os.path.exists(f'{lig_name}.sdf'):
+                os.remove(f'{lig_name}.sdf')
 
-    return pdb_data, molecule
+    # Set molecule names based on ligand names
+    for mol, lig_name in zip(molecules, lig_names_list):
+        mol.name = lig_name
 
-
-def prepare_multi_lig_system(input_pdb,
-                             combined_pdb='combined_system.pdb',
-                             clean_pdb='cleaned.pdb',
-                             rm_ions=None,
-                             residue_map=None,
-                             rm_files=True,
-                             lig_names=None):
-    # Removes water
-    remove_water_residues_in_pdb(input_pdb, clean_pdb)
-
-    if rm_ions is not None:
-        clean_ions_in_pdb(clean_pdb, rm_ions, clean_pdb)
-    if residue_map is not None:
-        relabel_residues_in_pdb(clean_pdb, residue_map, clean_pdb)
-
-    if lig_names is None:
-        # List the non-standard residues (ligands)
-        lig_names_found = list_non_standard_residues(clean_pdb)
-        print(f"Identified ligands: {lig_names_found}")
-
+    # Return single molecule if only one ligand, otherwise return list
+    if len(molecules) == 1:
+        return pdb_data, molecules[0]
     else:
-        lig_names_found = lig_names
-
-    molecule_list = []
-    for lig_name in lig_names_found:
-        # Save ligand as sdf
-        make_sdf(clean_pdb, lig_name=lig_name)
-
-        # Strip out the ligand and fix the pdb
-        fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
-        # Remove the ligand
-        remove_residues_in_pdb(combined_pdb, combined_pdb, names=[lig_name])
-
-        combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
-
-        molecule = Molecule.from_file(f'{lig_name}.sdf')
-        molecule_list.append(molecule)
-
-    pdb_data = app.PDBFile(combined_pdb)
-    if rm_files:
-        os.remove(clean_pdb)
-        os.remove(combined_pdb)
-        for lig_name in lig_names_found:
-            os.remove(f'{lig_name}.sdf')
-    return pdb_data, molecule_list
+        return pdb_data, molecules
 
 
 def prepare_ligand_ff(standard_ff,
                       molecule,
                       gen_cache=False,
                       use_cache=False,
-                      cache="gaff-molecules.json",
+                      cache_name="gaff-molecules.json",
                       n_conf=10,
-                      pc_methods='mmff94',
-                      gaff_ver='gaff-2.11'):  # gaff-2.2.20
-    """
-    Prepares a ligand-specific force field using the General Amber Force Field (GAFF).
-
-    This function generates or loads GAFF parameters for a given molecule and integrates
-    them into a standard force field. It supports caching of GAFF parameters for faster
-    reuse and allows the generation of conformers and assignment of partial charges.
-
-    Parameters
-    ----------
-    standard_ff : list of str
-        A list of file paths or names of the standard force field XML files.
-    molecule : openff.toolkit.Molecule
-        The molecule for which GAFF parameters are to be prepared.
-    gen_cache : bool, optional
-        If True, generates a cache file for the GAFF parameters. Default is False.
-    use_cache : bool, optional
-        If True, loads GAFF parameters from the specified cache file. Default is False.
-    cache : str, optional
-        Path to the cache file for GAFF parameters. Default is 'gaff-molecules.json'.
-    n_conf : int, optional
-        The number of conformers to generate for the molecule. Default is 10.
-    pc_methods : str, optional
-        The method to use for assigning partial charges. Default is 'mmff94'.
-        Other options include 'am1bcc' and 'am1-mulliken'.
-    gaff_ver : str, optional
-        The version of the General Amber Force Field to use. Default is 'gaff-2.11'.
-
-    Returns
-    -------
-    openmm.app.ForceField
-        The prepared force field object with GAFF parameters integrated.
-    """
-    # mmff94 am1bcc am1-mulliken
-
-    if use_cache:
-        print('Using cached GAFF parameters...', flush=True)
-        gaff = GAFFTemplateGenerator(molecules=molecule, cache=cache, forcefield=gaff_ver)
-        forcefield = app.ForceField(*standard_ff)
-        forcefield.registerTemplateGenerator(gaff.generator)
+                      pc_method='mmff94',
+                      gaff_ver='gaff-2.11'):
+    if not isinstance(molecule, list):
+        molecules = [molecule]
     else:
-        print('Generating GAFF parameters...', flush=True)
-        molecule.generate_conformers(n_conformers=n_conf)
-        molecule.assign_partial_charges(partial_charge_method=pc_methods,
-                                        use_conformers=molecule.conformers)
-        if gen_cache:
-            print('Generating GAFF cache file...', flush=True)
-            gaff = GAFFTemplateGenerator(molecules=molecule, cache=cache, forcefield=gaff_ver)
-            forcefield = app.ForceField(*standard_ff)
-            forcefield.registerTemplateGenerator(gaff.generator)
-            forcefield.createSystem(topology=molecule.to_topology().to_openmm())
-        else:
-            gaff = GAFFTemplateGenerator(molecules=molecule, forcefield=gaff_ver)
-            forcefield = app.ForceField(*standard_ff)
-            forcefield.registerTemplateGenerator(gaff.generator)
+        molecules = molecule
+
+    print(molecules)
+
+    if isinstance(standard_ff, str):
+        standard_ff = [standard_ff]
+
+    if not use_cache:
+        print(f'Pre-calculating conformers and charges ({pc_method})...', flush=True)
+        for mol in molecules:
+            if mol.n_conformers == 0:
+                mol.generate_conformers(n_conformers=n_conf)
+            if mol.partial_charges is None:
+                mol.assign_partial_charges(partial_charge_method=pc_method,
+                                           use_conformers=mol.conformers)
+
+    active_cache = cache_name if (use_cache or gen_cache) else None
+
+    print(f'Initializing GAFF generator (Cache: {active_cache})...', flush=True)
+    gaff = GAFFTemplateGenerator(molecules=molecules,
+                                 cache=active_cache,
+                                 forcefield=gaff_ver)
+
+    forcefield = app.ForceField(*standard_ff)
+    forcefield.registerTemplateGenerator(gaff.generator)
+
+    if gen_cache:
+        print('Triggering parameterization to populate cache...', flush=True)
+        for mol in molecules:
+            omm_topology = mol.to_topology().to_openmm()
+            forcefield.createSystem(omm_topology)
 
     return forcefield
 
