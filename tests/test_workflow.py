@@ -440,6 +440,14 @@ def test_malonaldehyde_pt():
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('prod*')
+
+    nqe.remove_file('COLVAR')
+    nqe.remove_file('HILLS')
+    nqe.remove_file('fes.dat')
+    nqe.remove_file('plumed.dat')
+
 
 def test_malonaldehyde_pt_solvated():
     print(flush=True)
@@ -452,15 +460,12 @@ def test_malonaldehyde_pt_solvated():
     rm_ions = ['Na+',
                'Cl-',
                'NA']
-    residue_map = {'MOL': 'LIG'}
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, residue_map=residue_map, lig_names='LIG')
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule,
-                                       gen_cache=False,
-                                       use_cache=False)
+                                       molecule)
 
     padding = 1.5
     box_shape = 'cube'
@@ -505,3 +510,11 @@ def test_malonaldehyde_pt_solvated():
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
+
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('prod*')
+
+    nqe.remove_file('COLVAR')
+    nqe.remove_file('HILLS')
+    nqe.remove_file('fes.dat')
+    nqe.remove_file('plumed.dat')
