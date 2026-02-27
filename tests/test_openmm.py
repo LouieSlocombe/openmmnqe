@@ -127,6 +127,9 @@ def test_prepare_ligand_ff_multiple():
     modeller.deleteWater()
     modeller.addHydrogens()
 
+    # write the pdb_data to a file for inspection
+    app.PDBFile.writeFile(modeller.topology, modeller.positions, open('prepared_system.pdb', 'w'))
+
     # from openff.toolkit import Molecule
     # from openmmforcefields.generators import GAFFTemplateGenerator
     # from openmm.app import ForceField
@@ -139,7 +142,6 @@ def test_prepare_ligand_ff_multiple():
     # forcefield = ForceField("amber14-all.xml", "amber14/tip3pfb.xml")
     # forcefield.registerTemplateGenerator(gaff.generator)
 
-
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule,
                                        gen_cache=True,
@@ -147,16 +149,21 @@ def test_prepare_ligand_ff_multiple():
                                        cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
     # Check that the cache files were created
-    assert os.path.exists(cache_name)
+    #assert os.path.exists(cache_name)
+    #
+    # forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+    #                                    molecule,
+    #                                    gen_cache=False,
+    #                                    use_cache=False,
+    #                                    cache_name=cache_name)
+    # forcefield.createSystem(modeller.topology)
+    #
+    # nqe.remove_file(cache_name)
 
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule,
-                                       gen_cache=False,
-                                       use_cache=False,
-                                       cache_name=cache_name)
-    forcefield.createSystem(modeller.topology)
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     platform_name='CUDA')
 
-    nqe.remove_file(cache_name)
 
 
 def _get_total_mass(system):

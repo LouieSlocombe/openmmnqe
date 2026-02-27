@@ -978,9 +978,10 @@ def prepare_lig_system(input_pdb,
     is_ligand_only = (total_count > 0 and lig_count == total_count)
 
     if is_ligand_only:
-        print('Only ligand residues found in PDB. Converting SDF directly to PDB without fixing.', flush=True)
+        print('Only ligand residues found in PDB.', flush=True)
+        combined_pdb=clean_pdb
         # convert_sdfs_to_pdb(generated_sdfs, output_filename=combined_pdb)
-        fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
+        # fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
         for lig_name in lig_names_list:
             pdb_patcher(combined_pdb, lig_name=lig_name)
     else:
