@@ -974,17 +974,20 @@ def prepare_lig_system(input_pdb,
     residues = list(pdb_temp.topology.residues())
     lig_count = sum(1 for r in residues if r.name in lig_names_list)
     total_count = len(residues)
-
+    print(f"Total residues: {total_count}, Ligand residues: {lig_count}", flush=True)
     is_ligand_only = (total_count > 0 and lig_count == total_count)
 
     if is_ligand_only:
-        convert_sdfs_to_pdb(generated_sdfs, output_filename=combined_pdb)
+        print('Only ligand residues found in PDB. Converting SDF directly to PDB without fixing.', flush=True)
+        # convert_sdfs_to_pdb(generated_sdfs, output_filename=combined_pdb)
+        fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
         for lig_name in lig_names_list:
             pdb_patcher(combined_pdb, lig_name=lig_name)
     else:
         fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
         remove_residues_in_pdb(combined_pdb, combined_pdb, names=lig_names_list)
         for lig_name in lig_names_list:
+            print('Patching PDB for ligand:', lig_name, flush=True)
             combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
 
     pdb_data = app.PDBFile(combined_pdb)
@@ -993,6 +996,7 @@ def prepare_lig_system(input_pdb,
             os.remove(clean_pdb)
         if os.path.exists(combined_pdb):
             os.remove(combined_pdb)
+
     if rm_lig_sdf:
         for sdf_file in generated_sdfs:
             if os.path.exists(sdf_file):
