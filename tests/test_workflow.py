@@ -35,10 +35,7 @@ def test_run_openmm_heating():
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')
     nqe.run_openmm_heating(modeller, forcefield)
-    nqe.remove_file('equilibrate.chk')
-    nqe.remove_file('equilibrate.log')
-    nqe.remove_file('equilibrate.pdb')
-    nqe.remove_file('equilibrate_steps.pdb')
+    nqe.remove_file_pattern('equilibrate*')
 
 
 def test_run_openmm_heating_deuterate():
@@ -53,10 +50,7 @@ def test_run_openmm_heating_deuterate():
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')
     nqe.run_openmm_heating(modeller, forcefield, deuterate=True)
-    nqe.remove_file('equilibrate.chk')
-    nqe.remove_file('equilibrate.log')
-    nqe.remove_file('equilibrate.pdb')
-    nqe.remove_file('equilibrate_steps.pdb')
+    nqe.remove_file_pattern('equilibrate*')
 
 
 def test_run_openmm_npt():
@@ -71,10 +65,7 @@ def test_run_openmm_npt():
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')
     nqe.run_openmm_npt(modeller, forcefield)
-    nqe.remove_file('npt_equilibrated.chk')
-    nqe.remove_file('npt_equilibrated.log')
-    nqe.remove_file('npt_equilibrated.pdb')
-    nqe.remove_file('npt_equilibrated_steps.pdb')
+    nqe.remove_file_pattern('npt_equilibrated*')
 
 
 def test_eq_workflow():
@@ -99,16 +90,8 @@ def test_eq_workflow():
     nqe.run_openmm_npt(modeller, forcefield)
 
     nqe.remove_file('minimized.pdb')
-
-    nqe.remove_file('equilibrate.chk')
-    nqe.remove_file('equilibrate.log')
-    nqe.remove_file('equilibrate.pdb')
-    nqe.remove_file('equilibrate_steps.pdb')
-
-    nqe.remove_file('npt_equilibrated.chk')
-    nqe.remove_file('npt_equilibrated.log')
-    nqe.remove_file('npt_equilibrated.pdb')
-    nqe.remove_file('npt_equilibrated_steps.pdb')
+    nqe.remove_file_pattern('equilibrate*')
+    nqe.remove_file_pattern('npt_equilibrated*')
 
 
 def test_eq_workflow_mixed():
@@ -142,16 +125,8 @@ def test_eq_workflow_mixed():
     nqe.run_openmm_npt(modeller, forcefield, potential=potential, ml_idx=ml_atoms)
 
     nqe.remove_file('minimized.pdb')
-
-    nqe.remove_file('equilibrate.chk')
-    nqe.remove_file('equilibrate.log')
-    nqe.remove_file('equilibrate.pdb')
-    nqe.remove_file('equilibrate_steps.pdb')
-
-    nqe.remove_file('npt_equilibrated.chk')
-    nqe.remove_file('npt_equilibrated.log')
-    nqe.remove_file('npt_equilibrated.pdb')
-    nqe.remove_file('npt_equilibrated_steps.pdb')
+    nqe.remove_file_pattern('equilibrate*')
+    nqe.remove_file_pattern('npt_equilibrated*')
 
 
 def test_eq_workflow_plumed_dihedral():
@@ -165,11 +140,9 @@ def test_eq_workflow_plumed_dihedral():
     modeller.addHydrogens()
 
     # Solvate
-    padding = 1.0
-    box_shape = 'cube'
     modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
+                        padding=1.0 * unit.nanometer,
+                        boxShape='cube')
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['ALA1:C', 'ALA2:N', 'ALA2:CA', 'ALA2:C'])
     idx_str = ",".join([str(i + 1) for i in idx])
 
@@ -235,38 +208,13 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
-    nqe.remove_file('rpmd_ready.chk')
-    nqe.remove_file('rpmd_ready.log')
-    nqe.remove_file('rpmd_ready_centroid.pdb')
-    for i in range(n_beads):
-        nqe.remove_file(f'rpmd_ready_bead_{i}.pdb')
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('equilibrate*')
+    nqe.remove_file_pattern('npt_equilibrated*')
+    nqe.remove_file_pattern('prod*')
 
-    nqe.remove_file('rpmd_prod.pdb')
-    nqe.remove_file('rpmd_prod.chk')
-    nqe.remove_file('rpmd_prod.log')
-    nqe.remove_file('rpmd_prod_centroid.pdb')
-    for i in range(n_beads):
-        nqe.remove_file(f'rpmd_prod_bead_{i}.pdb')
-
-    nqe.remove_file('minimized.chk')
-    nqe.remove_file('minimized.log')
-    nqe.remove_file('minimized.pdb')
-    nqe.remove_file('minimized_steps.pdb')
-
-    nqe.remove_file('equilibrate.chk')
-    nqe.remove_file('equilibrate.log')
-    nqe.remove_file('equilibrate.pdb')
-    nqe.remove_file('equilibrate_steps.pdb')
-
-    nqe.remove_file('npt_equilibrated.chk')
-    nqe.remove_file('npt_equilibrated.log')
-    nqe.remove_file('npt_equilibrated.pdb')
-    nqe.remove_file('npt_equilibrated_steps.pdb')
-
-    nqe.remove_file('prod.chk')
-    nqe.remove_file('prod.log')
-    nqe.remove_file('prod.pdb')
-    nqe.remove_file('prod_steps.pdb')
+    nqe.remove_file_pattern('rpmd_ready*')
+    nqe.remove_file_pattern('rpmd_prod*')
 
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
