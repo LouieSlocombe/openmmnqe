@@ -580,6 +580,7 @@ def test_malonaldehyde_pt_quantum_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
+    n_beads = 2
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -612,6 +613,14 @@ def test_malonaldehyde_pt_quantum_solvated():
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
+    nqe.run_openmm_rpmd_equilibration(modeller,
+                                      forcefield,
+                                      n_beads=n_beads,
+                                      n_report=1,
+                                      platform_name='CUDA',
+                                      n_1=100,
+                                      n_2=100)
+
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
     plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
                                                          idx,
@@ -623,15 +632,17 @@ def test_malonaldehyde_pt_quantum_solvated():
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
 
-    nqe.run_openmm_prod(modeller,
-                        forcefield,
-                        plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
-                        temperature=temperature,
-                        barostat_freq=None,
-                        steps=steps_prod,
-                        potential=potential,
-                        ml_idx=ml_atoms)
+    nqe.run_openmm_rpmd_prod(modeller,
+                             forcefield,
+                             n_beads=n_beads,
+                             plumed_script_path=plumed_script_path,
+                             platform_name='CUDA',
+                             temperature=temperature,
+                             barostat_freq=None,
+                             steps=steps_prod,
+                             potential=potential,
+                             ml_idx=ml_atoms)
+
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
@@ -642,7 +653,8 @@ def test_malonaldehyde_pt_quantum_solvated():
     plt.show()
 
     nqe.remove_file_pattern('minimized*')
-    nqe.remove_file_pattern('prod*')
+    nqe.remove_file_pattern('rpmd_ready*')
+    nqe.remove_file_pattern('rpmd_prod*')
 
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
