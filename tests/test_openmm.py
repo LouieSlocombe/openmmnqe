@@ -485,15 +485,15 @@ def test_angle_between_atoms():
 
 def test_ase_load():
     print(flush=True)
-    from ase.io import read
+    from ase.io import read, write
     from ase.visualize import view
-    # atoms = read('malonaldehyde.traj')
-    # write('malonaldehyde.xyz', atoms)
-    # print(atoms)
-    # view(atoms)
-
-    atoms = read('tests/data/pdb/malonaldehyde.pdb')
+    atoms = read('tests/data/GC.traj@0')
+    write('tests/data/GC.xyz', atoms)
+    print(atoms)
     view(atoms)
+
+    # atoms = read('tests/data/pdb/malonaldehyde.pdb')
+    # view(atoms)
 
 
 def test_move_pdb_to_origin():
