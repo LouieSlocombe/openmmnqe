@@ -413,12 +413,7 @@ def test_run_openmm_rpmd_equilibration():
                                       platform_name=device,
                                       n_1=10,
                                       n_2=10)
-
-    nqe.remove_file('rpmd_ready.chk')
-    nqe.remove_file('rpmd_ready.log')
-    nqe.remove_file('rpmd_ready_centroid.pdb')
-    for i in range(n_beads):
-        nqe.remove_file(f'rpmd_ready_bead_{i}.pdb')
+    nqe.remove_file_pattern('rpmd_ready*')
 
 
 def test_run_openmm_rpmd_prod():
@@ -443,19 +438,8 @@ def test_run_openmm_rpmd_prod():
                              n_beads=n_beads,
                              platform_name=device,
                              steps=100)
-
-    nqe.remove_file('rpmd_ready.chk')
-    nqe.remove_file('rpmd_ready.log')
-    nqe.remove_file('rpmd_ready_centroid.pdb')
-    for i in range(n_beads):
-        nqe.remove_file(f'rpmd_ready_bead_{i}.pdb')
-
-    nqe.remove_file('rpmd_prod.pdb')
-    nqe.remove_file('rpmd_prod.chk')
-    nqe.remove_file('rpmd_prod.log')
-    nqe.remove_file('rpmd_prod_centroid.pdb')
-    for i in range(n_beads):
-        nqe.remove_file(f'rpmd_prod_bead_{i}.pdb')
+    nqe.remove_file_pattern('rpmd_ready*')
+    nqe.remove_file_pattern('rpmd_prod*')
 
 
 def test_run_openmm_rpmd_contracted():
@@ -481,17 +465,8 @@ def test_run_openmm_rpmd_contracted():
                                    n_report=1,
                                    platform_name=device)
 
-    nqe.remove_file('rpmd_ready.chk')
-    nqe.remove_file('rpmd_ready.log')
-    nqe.remove_file('rpmd_ready_centroid.pdb')
-    for i in range(n_beads):
-        nqe.remove_file(f'rpmd_ready_bead_{i}.pdb')
-
-    nqe.remove_file('rpmd_prod_contracted.chk')
-    nqe.remove_file('rpmd_prod_contracted.log')
-    nqe.remove_file('rpmd_prod_contracted_centroid.pdb')
-    for i in range(n_beads):
-        nqe.remove_file(f'rpmd_prod_contracted_bead_{i}.pdb')
+    nqe.remove_file_pattern('rpmd_ready*')
+    nqe.remove_file_pattern('rpmd_prod_contracted*')
 
 
 def test_run_openmm_adqtb_eq():
@@ -508,10 +483,7 @@ def test_run_openmm_adqtb_eq():
                             n_report=1,
                             steps=100)
 
-    nqe.remove_file('adqtb_ready.chk')
-    nqe.remove_file('adqtb_ready.log')
-    nqe.remove_file('adqtb_ready.pdb')
-    nqe.remove_file('adqtb_ready_steps.pdb')
+    nqe.remove_file_pattern('adqtb_ready*')
 
 
 def test_run_openmm_adqtb_prod():
@@ -539,12 +511,5 @@ def test_run_openmm_adqtb_prod():
                               n_report=1,
                               steps=100)
 
-    nqe.remove_file('adqtb_ready.chk')
-    nqe.remove_file('adqtb_ready.log')
-    nqe.remove_file('adqtb_ready.pdb')
-    nqe.remove_file('adqtb_ready_steps.pdb')
-
-    nqe.remove_file('adqtb_prod.chk')
-    nqe.remove_file('adqtb_prod.log')
-    nqe.remove_file('adqtb_prod.pdb')
-    nqe.remove_file('adqtb_prod_steps.pdb')
+    nqe.remove_file_pattern('adqtb_ready*')
+    nqe.remove_file_pattern('adqtb_prod*')
