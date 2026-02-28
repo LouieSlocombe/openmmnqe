@@ -487,8 +487,8 @@ def test_ase_load():
     print(flush=True)
     from ase.io import read, write
     from ase.visualize import view
-    atoms = read('tests/data/GC.traj@0')
-    write('tests/data/GC.xyz', atoms)
+    atoms = read('tests/data/GC.traj@:')
+    # write('tests/data/GC.xyz', atoms)
     print(atoms)
     view(atoms)
 

@@ -614,6 +614,80 @@ def test_fad_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
+def test_gc_pt_solvated():
+    print(flush=True)
+    temperature = 300.0 * unit.kelvin
+    steps_prod = 40_000
+
+    input_pdb = 'tests/data/pdb/gc.pdb'
+    potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
+
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule)
+
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+
+    nqe.center_in_box(modeller)
+
+    chains = list(modeller.topology.chains())
+    ml_atoms = [atom.index for atom in chains[0].atoms()]
+
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     potential=potential,
+                                     ml_idx=ml_atoms)
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+
+    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['CCC1:N1', 'CCC1:H2', 'GGG1:O1'])
+    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['GGG1:N3', 'GGG1:H3', 'CCC1:N2'])
+    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
+                                                            idx1,
+                                                            idx2,
+                                                            temperature,
+                                                            wall=1.0,
+                                                            height=12.0,
+                                                            bias=15.0)
+
+    plumed_script_path = "plumed.dat"
+    with open(plumed_script_path, 'w') as f:
+        f.write(plumed_input)
+
+    nqe.run_openmm_prod(modeller,
+                        forcefield,
+                        plumed_script_path=plumed_script_path,
+                        platform_name='CUDA',
+                        temperature=temperature,
+                        barostat_freq=None,
+                        steps=steps_prod,
+                        potential=potential,
+                        ml_idx=ml_atoms)
+
+    # Run PLUMED sum_hills to get FES
+    os.system(sum_hills_input)
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('prod*')
+
+    nqe.remove_file('COLVAR')
+    nqe.remove_file('HILLS')
+    nqe.remove_file('fes.dat')
+    nqe.remove_file('plumed.dat')
+
+
 def test_eq_workflow_plumed_pt():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
