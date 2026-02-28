@@ -181,6 +181,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+
     n_beads = 4
     pdb = app.PDBFile("npt_equilibrated.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -206,6 +209,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
     # Plot FES
     nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    nqe.plot_plumed_colvar("COLVAR")
     plt.show()
 
     nqe.remove_file_pattern('minimized*')
@@ -303,6 +309,9 @@ def test_eq_workflow_plumed_pt():
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+
     # n_beads = 4
     # pdb = app.PDBFile("minimized.pdb")
     # modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -328,6 +337,8 @@ def test_eq_workflow_plumed_pt():
     # os.system(sum_hills_input)
     # # Plot FES
     # nqe.plot_plumed_fes("fes.dat")
+    # plt.show()
+    # nqe.plot_plumed_colvar("COLVAR")
     # plt.show()
 
     nqe.remove_file_pattern('minimized*')
@@ -368,7 +379,7 @@ def test_malonaldehyde_pt():
     plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
                                                          idx,
                                                          temperature,
-                                                         height=2.0,
+                                                         height=8.0,
                                                          bias=5.0)
 
     plumed_script_path = "plumed.dat"
@@ -388,6 +399,9 @@ def test_malonaldehyde_pt():
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
 
@@ -400,7 +414,7 @@ def test_malonaldehyde_pt():
 def test_malonaldehyde_pt_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 40_000
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -437,7 +451,7 @@ def test_malonaldehyde_pt_solvated():
     plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
                                                          idx,
                                                          temperature,
-                                                         height=2.0,
+                                                         height=8.0,
                                                          bias=5.0)
 
     plumed_script_path = "plumed.dat"
@@ -459,6 +473,9 @@ def test_malonaldehyde_pt_solvated():
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
 
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
 
@@ -471,7 +488,7 @@ def test_malonaldehyde_pt_solvated():
 def test_malonaldehyde_pt_solvated_full():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 50_000
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -523,7 +540,7 @@ def test_malonaldehyde_pt_solvated_full():
     plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
                                                          idx,
                                                          temperature,
-                                                         height=2.0,
+                                                         height=8.0,
                                                          bias=5.0)
 
     plumed_script_path = "plumed.dat"
@@ -543,6 +560,9 @@ def test_malonaldehyde_pt_solvated_full():
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    nqe.plot_plumed_colvar("COLVAR")
     plt.show()
 
     nqe.remove_file_pattern('minimized*')
@@ -596,7 +616,7 @@ def test_malonaldehyde_pt_quantum_solvated():
     plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
                                                          idx,
                                                          temperature,
-                                                         height=2.0,
+                                                         height=8.0,
                                                          bias=5.0)
 
     plumed_script_path = "plumed.dat"
@@ -616,6 +636,9 @@ def test_malonaldehyde_pt_quantum_solvated():
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    nqe.plot_plumed_colvar("COLVAR")
     plt.show()
 
     nqe.remove_file_pattern('minimized*')

@@ -49,6 +49,7 @@ from .plotting import (n_plot,
                        plot_fes_contour_compare,
                        plot_fes_sep,
                        plot_plumed_fes,
+                       plot_plumed_colvar,
                        )
 from .plumed import (plumed_input_1pt,
                      plumed_input_2pt_1d,
