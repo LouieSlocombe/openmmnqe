@@ -540,15 +540,12 @@ def test_malonaldehyde_pt_solvated_full():
 def test_fad_pt_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 40_000
+    steps_prod = 20_000
 
     input_pdb = 'tests/data/pdb/fad.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
@@ -564,7 +561,8 @@ def test_fad_pt_solvated():
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
-    ml_atoms = [atom.index for atom in chains[0].atoms()]
+    ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
+    print(f"ML atoms: {ml_atoms}", flush=True)
 
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
@@ -573,15 +571,16 @@ def test_fad_pt_solvated():
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
-    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H2', 'FAD1:O1'])
-    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['FAD1:O2', 'FAD1:H2', 'LIG1:O1'])
+    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['FAD1:O1', 'LIG1:H2', 'LIG1:O2'])
+    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'FAD1:H2', 'FAD1:O2'])
+
     plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
                                                             idx1,
                                                             idx2,
                                                             temperature,
                                                             wall=1.0,
-                                                            height=12.0,
-                                                            bias=5.0)
+                                                            height=20.0,
+                                                            bias=10.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -617,7 +616,7 @@ def test_fad_pt_solvated():
 def test_gc_pt_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 40_000
+    steps_prod = 60_000
 
     input_pdb = 'tests/data/pdb/gc.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -638,7 +637,8 @@ def test_gc_pt_solvated():
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
-    ml_atoms = [atom.index for atom in chains[0].atoms()]
+    ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
+    print(f"ML atoms: {ml_atoms}", flush=True)
 
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
@@ -647,15 +647,16 @@ def test_gc_pt_solvated():
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
-    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['CCC1:N1', 'CCC1:H2', 'GGG1:O1'])
-    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['GGG1:N3', 'GGG1:H3', 'CCC1:N2'])
+    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['GGG1:O1', 'CCC1:H2', 'CCC1:N1'])
+    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['CCC1:N2', 'GGG1:H3', 'GGG1:N3'])
+
     plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
                                                             idx1,
                                                             idx2,
                                                             temperature,
                                                             wall=1.0,
-                                                            height=12.0,
-                                                            bias=15.0)
+                                                            height=20.0,
+                                                            bias=10.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
