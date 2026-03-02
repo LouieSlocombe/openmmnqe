@@ -16,8 +16,6 @@ from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 from scipy.constants import physical_constants as const
 
-
-
 # Conversion factor from Bohr to Angstrom
 bohr_to_angstrom = const["Bohr radius"][0] * 1e10
 # Conversion factor between Angstrom and nm
@@ -979,7 +977,7 @@ def prepare_lig_system(input_pdb,
 
     if is_ligand_only:
         print('Only ligand residues found in PDB.', flush=True)
-        combined_pdb=clean_pdb
+        combined_pdb = clean_pdb
         # convert_sdfs_to_pdb(generated_sdfs, output_filename=combined_pdb)
         # fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
         for lig_name in lig_names_list:

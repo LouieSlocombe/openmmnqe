@@ -487,13 +487,42 @@ def test_ase_load():
     print(flush=True)
     from ase.io import read, write
     from ase.visualize import view
-    atoms = read('tests/data/GC.traj@:')
-    # write('tests/data/GC.xyz', atoms)
+    name  = 'tests/data/G_T_wob.traj'
+    atoms = read(name, index=':')
+    write(name.replace('.traj', '.xyz'), atoms[0])
     print(atoms)
     view(atoms)
 
     # atoms = read('tests/data/pdb/malonaldehyde.pdb')
     # view(atoms)
+
+
+import string
+
+
+def fix_pdb_chains(input_file, output_file):
+    chain_chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
+    current_residue = None
+    chain_index = -1
+    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+        for line in infile:
+            if line.startswith(("ATOM  ", "HETATM")):
+                res_id = line[22:27]
+                if res_id != current_residue:
+                    current_residue = res_id
+                    chain_index += 1
+                chain_id = chain_chars[chain_index % len(chain_chars)]
+                new_line = line[:21] + chain_id + line[22:]
+                outfile.write(new_line)
+            else:
+                outfile.write(line)
+
+
+def test_run_pdb_fixer():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/gt_wob.pdb'
+    # nqe.fix_pdb_light(input_pdb, 'fixed.pdb')
+    fix_pdb_chains(input_pdb, "fixed.pdb")
 
 
 def test_move_pdb_to_origin():

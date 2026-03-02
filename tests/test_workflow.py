@@ -520,8 +520,8 @@ def test_malonaldehyde_pt_adqtb_solvated():
     plt.show()
 
     nqe.remove_file_pattern('minimized*')
-    nqe.remove_file_pattern('adqtb_ready*')
-    nqe.remove_file_pattern('adqtb_prod*')
+    # nqe.remove_file_pattern('adqtb_ready*')
+    # nqe.remove_file_pattern('adqtb_prod*')
 
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
@@ -775,8 +775,8 @@ def test_gc_pt_solvated():
 def test_gc_pt_quantum_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 30_000
-    n_beads = 2
+    steps_prod = 60_000
+    n_beads = 4
 
     input_pdb = 'tests/data/pdb/gc.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
