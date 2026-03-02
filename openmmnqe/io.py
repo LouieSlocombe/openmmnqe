@@ -2,6 +2,7 @@ import glob
 import os
 import re
 import shutil
+import string
 from typing import List
 
 import MDAnalysis as mda
@@ -1233,3 +1234,21 @@ def center_in_box(modeller):
         shift = box_center - centroid
         new_pos = pos_nm + shift
         modeller.positions = unit.Quantity(new_pos, unit.nanometer)
+
+
+def fix_pdb_chains(input_file, output_file):
+    chain_chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
+    current_residue = None
+    chain_index = -1
+    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+        for line in infile:
+            if line.startswith(("ATOM  ", "HETATM")):
+                res_id = line[22:27]
+                if res_id != current_residue:
+                    current_residue = res_id
+                    chain_index += 1
+                chain_id = chain_chars[chain_index % len(chain_chars)]
+                new_line = line[:21] + chain_id + line[22:]
+                outfile.write(new_line)
+            else:
+                outfile.write(line)

@@ -149,7 +149,7 @@ def test_prepare_ligand_ff_multiple():
                                        cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
     # Check that the cache files were created
-    #assert os.path.exists(cache_name)
+    # assert os.path.exists(cache_name)
     #
     # forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
     #                                    molecule,
@@ -163,7 +163,6 @@ def test_prepare_ligand_ff_multiple():
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
                                      platform_name='CUDA')
-
 
 
 def _get_total_mass(system):
@@ -487,7 +486,7 @@ def test_ase_load():
     print(flush=True)
     from ase.io import read, write
     from ase.visualize import view
-    name  = 'tests/data/G_T_wob.traj'
+    name = 'tests/data/G_T_wob.traj'
     atoms = read(name, index=':')
     write(name.replace('.traj', '.xyz'), atoms[0])
     print(atoms)
@@ -497,31 +496,10 @@ def test_ase_load():
     # view(atoms)
 
 
-import string
-
-
-def fix_pdb_chains(input_file, output_file):
-    chain_chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    current_residue = None
-    chain_index = -1
-    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
-        for line in infile:
-            if line.startswith(("ATOM  ", "HETATM")):
-                res_id = line[22:27]
-                if res_id != current_residue:
-                    current_residue = res_id
-                    chain_index += 1
-                chain_id = chain_chars[chain_index % len(chain_chars)]
-                new_line = line[:21] + chain_id + line[22:]
-                outfile.write(new_line)
-            else:
-                outfile.write(line)
-
-
 def test_fix_pdb_chains():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malformed.pdb'
-    fix_pdb_chains(input_pdb, "fixed.pdb")
+    nqe.fix_pdb_chains(input_pdb, "fixed.pdb")
     # Assert that the pdb file was created
     assert os.path.isfile('fixed.pdb')
     # Assert that there are two chains in the fixed pdb
