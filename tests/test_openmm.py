@@ -518,11 +518,21 @@ def fix_pdb_chains(input_file, output_file):
                 outfile.write(line)
 
 
-def test_run_pdb_fixer():
+def test_fix_pdb_chains():
     print(flush=True)
-    input_pdb = 'tests/data/pdb/gt_wob.pdb'
-    # nqe.fix_pdb_light(input_pdb, 'fixed.pdb')
+    input_pdb = 'tests/data/pdb/malformed.pdb'
     fix_pdb_chains(input_pdb, "fixed.pdb")
+    # Assert that the pdb file was created
+    assert os.path.isfile('fixed.pdb')
+    # Assert that there are two chains in the fixed pdb
+    with open('fixed.pdb', 'r') as f:
+        chains = set()
+        for line in f:
+            if line.startswith(("ATOM  ", "HETATM")):
+                chain_id = line[21]
+                chains.add(chain_id)
+        assert len(chains) == 2
+    os.remove('fixed.pdb')
 
 
 def test_move_pdb_to_origin():
