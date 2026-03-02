@@ -528,6 +528,16 @@ def test_fix_pdb_atom_labels():
     os.remove('fixed_atoms.pdb')
 
 
+def test_convert_xyz_to_pdb():
+    # Define your file names
+    input_file = 'tests/data/G_T_wob.traj'
+    output_file = 'output.pdb'
+    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1)
+    # Assert that the pdb file was created
+    assert os.path.isfile(output_file)
+    os.remove(output_file)
+
+
 def test_move_pdb_to_origin():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'

@@ -3,11 +3,14 @@ import os
 import re
 import shutil
 import string
+from collections import defaultdict
 from typing import List
 
 import MDAnalysis as mda
 import numpy as np
 import openmm.unit as unit
+from ase.io import read
+from ase.neighborlist import natural_cutoffs, neighbor_list
 from openff.toolkit import Molecule, Topology
 from openmm import app, Vec3
 from openmm.app import PDBFile, Topology, Element, Modeller
@@ -16,6 +19,8 @@ from pdbfixer import PDBFixer
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 from scipy.constants import physical_constants as const
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 
 # Conversion factor from Bohr to Angstrom
 bohr_to_angstrom = const["Bohr radius"][0] * 1e10
@@ -1284,3 +1289,51 @@ def fix_pdb_atom_labels(input_file, output_file):
                 outfile.write(new_line)
             else:
                 outfile.write(line)
+
+
+def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: float = 1.1) -> int:
+    atoms = read(input_file)
+    base_cutoffs = natural_cutoffs(atoms)
+    cutoffs = [c * cutoff_multiplier for c in base_cutoffs]
+    i, j = neighbor_list('ij', atoms, cutoffs)
+    n_atoms = len(atoms)
+    adjacency_matrix = csr_matrix((np.ones_like(i), (i, j)), shape=(n_atoms, n_atoms))
+    n_clusters, labels = connected_components(csgraph=adjacency_matrix, directed=False)
+    available_chains = string.ascii_uppercase + string.ascii_lowercase + string.digits
+    chain_ids = [available_chains[label % len(available_chains)] for label in labels]
+    res_ids = [label + 1 for label in labels]
+    res_names = [f"M{label % 100:02d}" for label in labels]
+    atom_names = []
+    element_counts_per_cluster = defaultdict(lambda: defaultdict(int))
+    for idx, atom in enumerate(atoms):
+        cluster_id = labels[idx]
+        sym = atom.symbol
+        element_counts_per_cluster[cluster_id][sym] += 1
+        count = element_counts_per_cluster[cluster_id][sym]
+        unique_name = f"{sym}{count}"
+        if len(sym) == 1 and len(unique_name) < 4:
+            formatted_name = f" {unique_name:<3}"
+        else:
+            formatted_name = f"{unique_name[:4]:<4}"
+        atom_names.append(formatted_name)
+    with open(output_file, 'w') as f:
+        for idx, atom in enumerate(atoms):
+            serial = idx + 1
+            sym = atom.symbol
+            x, y, z = atom.position
+            line = (f"ATOM  {serial:>5} {atom_names[idx]} {res_names[idx]:>3} {chain_ids[idx]}{res_ids[idx]:>4}    "
+                    f"{x:>8.3f}{y:>8.3f}{z:>8.3f}  1.00  0.00          {sym:>2}\n")
+            f.write(line)
+        conect_dict = defaultdict(list)
+        for a1, a2 in zip(i, j):
+            conect_dict[a1].append(a2)
+        for atom_idx in sorted(conect_dict.keys()):
+            a1_pdb = atom_idx + 1
+            bonded_atoms = sorted([x + 1 for x in conect_dict[atom_idx]])
+            for chunk_start in range(0, len(bonded_atoms), 4):
+                chunk = bonded_atoms[chunk_start:chunk_start + 4]
+                line = f"CONECT{a1_pdb:>5}"
+                for b in chunk:
+                    line += f"{b:>5}"
+                f.write(line + "\n")
+    return n_clusters
