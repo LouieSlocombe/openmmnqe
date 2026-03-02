@@ -1292,48 +1292,102 @@ def fix_pdb_atom_labels(input_file, output_file):
 
 
 def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: float = 1.1) -> int:
-    atoms = read(input_file)
+    # 1. Load the original structure
+    original_atoms = read(input_file)
+    n_atoms = len(original_atoms)
+
+    # 2. Initial connectivity pass to identify molecules (clusters)
+    base_cutoffs = natural_cutoffs(original_atoms)
+    cutoffs = [c * cutoff_multiplier for c in base_cutoffs]
+    i, j = neighbor_list('ij', original_atoms, cutoffs)
+
+    adjacency_matrix = csr_matrix((np.ones_like(i), (i, j)), shape=(n_atoms, n_atoms))
+    n_clusters, original_labels = connected_components(csgraph=adjacency_matrix, directed=False)
+
+    # 3. Canonicalise Atom Ordering: Group by cluster, then Hill system (C, H, others)
+    def get_sort_key(cluster_id, symbol):
+        if symbol == 'C':
+            return (cluster_id, 0, symbol)
+        elif symbol == 'H':
+            return (cluster_id, 1, symbol)
+        else:
+            return (cluster_id, 2, symbol)
+
+    # Create a list of tuples containing the sort key and original index
+    sort_data = [(get_sort_key(original_labels[idx], atom.symbol), idx) for idx, atom in enumerate(original_atoms)]
+
+    # Sort primarily by cluster label, then element type
+    sort_data.sort(key=lambda x: x[0])
+    sorted_indices = [x[1] for x in sort_data]
+
+    # 4. Create the cleanly reordered Atoms object
+    atoms = original_atoms[sorted_indices]
+    sorted_labels = [original_labels[idx] for idx in sorted_indices]
+
+    # 5. Map sorted labels to perfectly sequential Residue IDs (1, 2, 3...)
+    unique_labels = []
+    for lbl in sorted_labels:
+        if not unique_labels or unique_labels[-1] != lbl:
+            unique_labels.append(lbl)
+
+    label_to_resid = {lbl: idx + 1 for idx, lbl in enumerate(unique_labels)}
+    res_ids = [label_to_resid[lbl] for lbl in sorted_labels]
+
+    # 6. Re-calculate connectivity on the newly sorted atoms for accurate CONECT records
     base_cutoffs = natural_cutoffs(atoms)
     cutoffs = [c * cutoff_multiplier for c in base_cutoffs]
     i, j = neighbor_list('ij', atoms, cutoffs)
-    n_atoms = len(atoms)
-    adjacency_matrix = csr_matrix((np.ones_like(i), (i, j)), shape=(n_atoms, n_atoms))
-    n_clusters, labels = connected_components(csgraph=adjacency_matrix, directed=False)
+
+    # 7. Generate formatting data (Chains, Residue Names, Atom Names)
     available_chains = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    chain_ids = [available_chains[label % len(available_chains)] for label in labels]
-    res_ids = [label + 1 for label in labels]
-    res_names = [f"M{label % 100:02d}" for label in labels]
+    chain_ids = [available_chains[(rid - 1) % len(available_chains)] for rid in res_ids]
+    res_names = [f"M{(rid - 1) % 100:02d}" for rid in res_ids]
+
     atom_names = []
-    element_counts_per_cluster = defaultdict(lambda: defaultdict(int))
+    element_counts_per_cluster = defaultdict(int)
+
     for idx, atom in enumerate(atoms):
-        cluster_id = labels[idx]
+        resid = res_ids[idx]
         sym = atom.symbol
-        element_counts_per_cluster[cluster_id][sym] += 1
-        count = element_counts_per_cluster[cluster_id][sym]
+
+        # Key tracks the specific element count within the specific residue
+        tracking_key = f"{resid}_{sym}"
+        element_counts_per_cluster[tracking_key] += 1
+        count = element_counts_per_cluster[tracking_key]
+
         unique_name = f"{sym}{count}"
+
         if len(sym) == 1 and len(unique_name) < 4:
             formatted_name = f" {unique_name:<3}"
         else:
             formatted_name = f"{unique_name[:4]:<4}"
+
         atom_names.append(formatted_name)
+
+    # 8. Write the properly grouped and ordered PDB file
     with open(output_file, 'w') as f:
         for idx, atom in enumerate(atoms):
             serial = idx + 1
             sym = atom.symbol
             x, y, z = atom.position
+
             line = (f"ATOM  {serial:>5} {atom_names[idx]} {res_names[idx]:>3} {chain_ids[idx]}{res_ids[idx]:>4}    "
                     f"{x:>8.3f}{y:>8.3f}{z:>8.3f}  1.00  0.00          {sym:>2}\n")
             f.write(line)
+
         conect_dict = defaultdict(list)
         for a1, a2 in zip(i, j):
             conect_dict[a1].append(a2)
+
         for atom_idx in sorted(conect_dict.keys()):
             a1_pdb = atom_idx + 1
             bonded_atoms = sorted([x + 1 for x in conect_dict[atom_idx]])
+
             for chunk_start in range(0, len(bonded_atoms), 4):
                 chunk = bonded_atoms[chunk_start:chunk_start + 4]
                 line = f"CONECT{a1_pdb:>5}"
                 for b in chunk:
                     line += f"{b:>5}"
                 f.write(line + "\n")
+
     return n_clusters
