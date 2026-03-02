@@ -1313,10 +1313,7 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
         else:
             return (cluster_id, 2, symbol)
 
-    # Create a list of tuples containing the sort key and original index
     sort_data = [(get_sort_key(original_labels[idx], atom.symbol), idx) for idx, atom in enumerate(original_atoms)]
-
-    # Sort primarily by cluster label, then element type
     sort_data.sort(key=lambda x: x[0])
     sorted_indices = [x[1] for x in sort_data]
 
@@ -1324,34 +1321,49 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
     atoms = original_atoms[sorted_indices]
     sorted_labels = [original_labels[idx] for idx in sorted_indices]
 
-    # 5. Map sorted labels to perfectly sequential Residue IDs (1, 2, 3...)
+    # 5. Map sorted labels to Chain and Residue IDs
     unique_labels = []
     for lbl in sorted_labels:
         if not unique_labels or unique_labels[-1] != lbl:
             unique_labels.append(lbl)
 
-    label_to_resid = {lbl: idx + 1 for idx, lbl in enumerate(unique_labels)}
-    res_ids = [label_to_resid[lbl] for lbl in sorted_labels]
+    available_chains = string.ascii_uppercase + string.ascii_lowercase + string.digits
+    num_chains = len(available_chains)
 
-    # 6. Re-calculate connectivity on the newly sorted atoms for accurate CONECT records
+    label_to_chain = {}
+    label_to_resid = {}
+    label_to_resname = {}
+
+    for cluster_idx, lbl in enumerate(unique_labels):
+        # Chain ID wraps around every 62 clusters
+        label_to_chain[lbl] = available_chains[cluster_idx % num_chains]
+
+        # Residue ID increments only when the chain ID wraps around
+        label_to_resid[lbl] = (cluster_idx // num_chains) + 1
+
+        # Unique residue name
+        label_to_resname[lbl] = f"M{(cluster_idx % 100):02d}"
+
+    chain_ids = [label_to_chain[lbl] for lbl in sorted_labels]
+    res_ids = [label_to_resid[lbl] for lbl in sorted_labels]
+    res_names = [label_to_resname[lbl] for lbl in sorted_labels]
+
+    # 6. Re-calculate connectivity on the newly sorted atoms
     base_cutoffs = natural_cutoffs(atoms)
     cutoffs = [c * cutoff_multiplier for c in base_cutoffs]
     i, j = neighbor_list('ij', atoms, cutoffs)
 
-    # 7. Generate formatting data (Chains, Residue Names, Atom Names)
-    available_chains = string.ascii_uppercase + string.ascii_lowercase + string.digits
-    chain_ids = [available_chains[(rid - 1) % len(available_chains)] for rid in res_ids]
-    res_names = [f"M{(rid - 1) % 100:02d}" for rid in res_ids]
-
+    # 7. Generate unique atom names
     atom_names = []
     element_counts_per_cluster = defaultdict(int)
 
     for idx, atom in enumerate(atoms):
+        chain = chain_ids[idx]
         resid = res_ids[idx]
         sym = atom.symbol
 
-        # Key tracks the specific element count within the specific residue
-        tracking_key = f"{resid}_{sym}"
+        # Track the element count specifically within this unique chain/residue combo
+        tracking_key = f"{chain}_{resid}_{sym}"
         element_counts_per_cluster[tracking_key] += 1
         count = element_counts_per_cluster[tracking_key]
 
