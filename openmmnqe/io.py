@@ -1341,8 +1341,11 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
         # Residue ID increments only when the chain ID wraps around
         label_to_resid[lbl] = (cluster_idx // num_chains) + 1
 
-        # Unique residue name
-        label_to_resname[lbl] = f"M{(cluster_idx % 100):02d}"
+        # Unique three-letter residue name (AAA, AAB, ..., AAZ, ABA, ..., ZZZ)
+        a = cluster_idx // (26 * 26) % 26
+        b = (cluster_idx // 26) % 26
+        c = cluster_idx % 26
+        label_to_resname[lbl] = chr(65 + a) + chr(65 + b) + chr(65 + c)
 
     chain_ids = [label_to_chain[lbl] for lbl in sorted_labels]
     res_ids = [label_to_resid[lbl] for lbl in sorted_labels]
