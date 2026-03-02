@@ -484,16 +484,28 @@ def test_angle_between_atoms():
 
 def test_ase_load():
     print(flush=True)
-    from ase.io import read, write
-    from ase.visualize import view
-    name = 'tests/data/G_T_wob.traj'
-    atoms = read(name, index=':')
-    write(name.replace('.traj', '.xyz'), atoms[0])
-    print(atoms)
-    view(atoms)
+    # from ase.io import read, write
+    # from ase.visualize import view
+    # name = 'tests/data/G_T_wob.traj'
+    # atoms = read(name, index=':')
+    # write(name.replace('.traj', '.xyz'), atoms[0])
+    # print(atoms)
+    # view(atoms)
 
     # atoms = read('tests/data/pdb/malonaldehyde.pdb')
     # view(atoms)
+
+    input_file = 'tests/data/G_enol_T.traj'
+    output_file = 'tests/data/pdb/G_enol_T.pdb'
+    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+
+    input_file = 'tests/data/G_T_enol.traj'
+    output_file = 'tests/data/pdb/G_T_enol.pdb'
+    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+
+    input_file = 'tests/data/G_T_wob.traj'
+    output_file = 'tests/data/pdb/G_T_wob.pdb'
+    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
 
 
 def test_fix_pdb_chains():
