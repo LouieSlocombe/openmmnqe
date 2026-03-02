@@ -513,6 +513,21 @@ def test_fix_pdb_chains():
     os.remove('fixed.pdb')
 
 
+def test_fix_pdb_atom_labels():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/malformed.pdb'
+    nqe.fix_pdb_atom_labels(input_pdb, "fixed_atoms.pdb")
+    # Assert that the pdb file was created
+    assert os.path.isfile('fixed_atoms.pdb')
+    # Assert that there are no atom labels starting with a digit
+    with open('fixed_atoms.pdb', 'r') as f:
+        for line in f:
+            if line.startswith(("ATOM  ", "HETATM")):
+                atom_label = line[12:16].strip()
+                assert not atom_label[0].isdigit(), f"Atom label '{atom_label}' starts with a digit"
+    os.remove('fixed_atoms.pdb')
+
+
 def test_move_pdb_to_origin():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'

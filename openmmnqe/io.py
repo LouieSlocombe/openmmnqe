@@ -1252,3 +1252,35 @@ def fix_pdb_chains(input_file, output_file):
                 outfile.write(new_line)
             else:
                 outfile.write(line)
+
+
+def fix_pdb_atom_labels(input_file, output_file):
+    current_residue = None
+    element_counts = {}
+    global_atom_serial = 1
+    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+        for line in infile:
+            if line.startswith(("ATOM  ", "HETATM")):
+                res_id = line[22:27]
+                if res_id != current_residue:
+                    current_residue = res_id
+                    element_counts = {}
+                element = line[76:78].strip().upper()
+                if not element:
+                    old_name = line[12:16].strip()
+                    element = ''.join([c for c in old_name if c.isalpha()])[:2]
+                    if not element:
+                        element = "X"
+                element_counts[element] = element_counts.get(element, 0) + 1
+                count = element_counts[element]
+                raw_new_name = f"{element}{count}"
+                if len(element) == 1:
+                    new_atom_name = f" {raw_new_name:<3}"[:4]
+                else:
+                    new_atom_name = f"{raw_new_name:<4}"[:4]
+                new_serial = f"{global_atom_serial:>5}"[:5]
+                global_atom_serial += 1
+                new_line = line[:6] + new_serial + line[11:12] + new_atom_name + line[16:]
+                outfile.write(new_line)
+            else:
+                outfile.write(line)
