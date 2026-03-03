@@ -35,6 +35,57 @@ def md_workflow(file_in,
                 gbaoab=True,
                 platform='CPU',
                 ):
+    """
+    Run a complete MD workflow: solvation, minimisation, NVT, and NPT.
+
+    This function loads a PDB file, adds hydrogens, solvates the system,
+    performs energy minimisation, runs an NVT equilibration followed by an
+    NPT production simulation, and writes trajectory and log outputs.
+
+    Parameters
+    ----------
+    file_in : str
+        Path to the input PDB file.
+    ff : str, optional
+        Force field XML file name. Default is ``'amber19-all.xml'``.
+    water_model : str, optional
+        Water model XML file name. Default is ``'amber19/opc3.xml'``.
+    padding : float, optional
+        Solvent padding in nanometres. Default is 1.0.
+    temperature : float, optional
+        Simulation temperature in kelvin. Default is 300.0.
+    pressure : float, optional
+        Barostat pressure in bar. Default is 1.0.
+    friction_coeff : float, optional
+        Langevin friction coefficient in 1/ps. Default is 1.0.
+    time_step : float, optional
+        Integration time step in picoseconds. Default is 0.004.
+    report_pdb : int, optional
+        PDB reporter interval in steps. Default is 1000.
+    report_std : int, optional
+        Standard-output reporter interval in steps. Default is 1000.
+    report_data : int, optional
+        Data log reporter interval in steps. Default is 100.
+    file_out : str, optional
+        Output PDB trajectory filename. Default is ``'output.pdb'``.
+    data_out : str, optional
+        Output data log filename. Default is ``'md_log.txt'``.
+    n_nvt : int, optional
+        Number of NVT equilibration steps. Default is 10000.
+    n_npt : int, optional
+        Number of NPT production steps. Default is 50000.
+    box_shape : str, optional
+        Box shape for solvation. Default is ``'dodecahedron'``.
+    gbaoab : bool, optional
+        If True, use the GeodesicBAOAB integrator; otherwise use
+        ``LangevinIntegrator``. Default is True.
+    platform : str, optional
+        OpenMM platform name (e.g. ``'CPU'``, ``'CUDA'``). Default is ``'CPU'``.
+
+    Returns
+    -------
+    None
+    """
     # Prepare system
     pdb = app.PDBFile(file_in)
     forcefield = app.ForceField(ff, water_model)
@@ -102,6 +153,22 @@ def md_workflow(file_in,
 
 
 def md_analysis(file_in='md_log.txt'):
+    """
+    Plot basic thermodynamic observables from an MD simulation log file.
+
+    Reads a comma-separated log file produced by ``md_workflow`` and generates
+    time-series plots for potential energy, kinetic energy, total energy,
+    temperature, and volume.
+
+    Parameters
+    ----------
+    file_in : str, optional
+        Path to the MD log file. Default is ``'md_log.txt'``.
+
+    Returns
+    -------
+    None
+    """
     # Analysis
     data = np.loadtxt(file_in, delimiter=',')
 
@@ -151,6 +218,53 @@ def run_openmm_relaxation(modeller,
                           potential=None,
                           ml_idx=None,
                           ):
+    """
+    Perform a staged energy minimisation with progressively weaker backbone restraints.
+
+    Three successive minimisation stages are executed with decreasing restraint
+    spring constants on backbone atoms, allowing the structure to relax gently.
+    An optional ML/MM mixed potential can be used.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    output_prefix : str, optional
+        Prefix for the output PDB file. Default is ``'minimized'``.
+    temperature : openmm.unit.Quantity, optional
+        Temperature for the Langevin integrator. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    n_1 : int, optional
+        Maximum iterations for stage 1 (strong restraints). Default is 1000.
+    n_2 : int, optional
+        Maximum iterations for stage 2 (weak restraints). Default is 1000.
+    n_3 : int, optional
+        Maximum iterations for stage 3 (unrestrained). Default is 2000.
+    backbone_names : list of str or None, optional
+        Atom names considered backbone for restraints. If None, defaults to
+        ``['CA', 'C', 'N', 'P', 'O3']``.
+    ks_1 : float, optional
+        Spring constant for stage 1 in kJ/mol/nm². Default is 100.0.
+    ks_2 : float, optional
+        Spring constant for stage 2 in kJ/mol/nm². Default is 10.0.
+    ks_3 : float, optional
+        Spring constant for stage 3 in kJ/mol/nm². Default is 0.0.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
@@ -247,6 +361,40 @@ def run_openmm_relaxation_simple(modeller,
                                  potential=None,
                                  ml_idx=None,
                                  ):
+    """
+    Perform a simple, unrestrained energy minimisation.
+
+    Sets up a system with a Langevin integrator, runs ``minimizeEnergy``,
+    and saves the minimised structure and checkpoint. Optionally uses an
+    ML/MM mixed potential.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    output_prefix : str, optional
+        Prefix for output files (PDB, checkpoint, log). Default is ``'minimized'``.
+    temperature : openmm.unit.Quantity, optional
+        Temperature for the Langevin integrator. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CUDA'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if potential is not None and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
@@ -339,6 +487,57 @@ def run_openmm_heating(modeller,
                        potential=None,
                        ml_idx=None,
                        ):
+    """
+    Gently heat a system from 0 K to the target temperature with backbone restraints.
+
+    The temperature is incremented in steps of ``temp_step`` until
+    ``target_temp`` is reached, followed by a final equilibration stage at the
+    target temperature. Backbone atoms are harmonically restrained throughout.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'equilibrate'``.
+    k1 : float, optional
+        Backbone restraint spring constant in kJ/mol/nm². Default is 100.0.
+    backbone_names : list of str or None, optional
+        Atom names considered backbone for restraints. If None, defaults to
+        ``['CA', 'C', 'N', 'P', 'O3']``.
+    target_temp : openmm.unit.Quantity, optional
+        Target temperature. Default is 300.0 K.
+    temp_step : openmm.unit.Quantity, optional
+        Temperature increment per heating stage. Default is 50.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1000.
+    steps_per_stage : int, optional
+        Number of MD steps per heating stage. Default is 5000.
+    steps_final : int, optional
+        Number of MD steps for the final equilibration at target temperature.
+        Default is 10000.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate (e.g. ``'water'``, ``'all'``).
+        Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
@@ -458,6 +657,58 @@ def run_openmm_npt(modeller,
                    potential=None,
                    ml_idx=None,
                    ):
+    """
+    Run a two-phase NPT density equilibration.
+
+    Phase 1 applies backbone restraints while relaxing the box density under a
+    Monte Carlo barostat. Phase 2 removes restraints and continues the NPT
+    simulation. An optional ML/MM mixed potential is supported.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'npt_equilibrated'``.
+    pressure : openmm.unit.Quantity, optional
+        Target pressure for the barostat. Default is 1.0 bar.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    barostat_freq : int or None, optional
+        Barostat attempt frequency in steps. If None, no barostat is added.
+        Default is 50.
+    backbone_names : list of str or None, optional
+        Atom names considered backbone for restraints. If None, defaults to
+        ``['CA', 'C', 'N', 'P', 'O3']``.
+    k : float, optional
+        Backbone restraint spring constant in kJ/mol/nm². Default is 10.0.
+    n_report : int, optional
+        Reporter interval in steps. Default is 500.
+    n_1 : int, optional
+        Number of steps for restrained NPT (Phase 1). Default is 5000.
+    n_2 : int, optional
+        Number of steps for unrestrained NPT (Phase 2). Default is 25000.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
@@ -575,6 +826,54 @@ def run_openmm_prod(modeller,
                     potential=None,
                     ml_idx=None,
                     ):
+    """
+    Run an NPT production MD simulation, optionally with PLUMED enhanced sampling.
+
+    Sets up the system with a Langevin integrator and optional Monte Carlo
+    barostat, loads an optional PLUMED bias script, and runs the production
+    trajectory.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    plumed_script_path : str or None, optional
+        Path to a PLUMED input script. If None, no PLUMED bias is applied.
+        Default is None.
+    pressure : openmm.unit.Quantity, optional
+        Target pressure for the barostat. Default is 1.0 bar.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    barostat_freq : int or None, optional
+        Barostat attempt frequency in steps. If None, no barostat is added.
+        Default is 50.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1000.
+    steps : int, optional
+        Total number of production MD steps. Default is 500000.
+    output_prefix : str, optional
+        Prefix for output files (PDB, checkpoint, log). Default is ``'prod'``.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if potential is not None and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
@@ -680,6 +979,52 @@ def run_openmm_rpmd_equilibration(modeller,
                                   potential=None,
                                   ml_idx=None,
                                   atoms_to_watch=None):
+    """
+    Equilibrate a ring-polymer molecular dynamics (RPMD) simulation.
+
+    Performs a two-stage equilibration: stage 1 uses a reduced time step for
+    gentle bead expansion, and stage 2 runs at the full time step. A
+    checkpoint is saved at the end for use by subsequent production runs.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'rpmd_ready'``.
+    n_beads : int, optional
+        Number of ring-polymer beads. Default is 32.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300 K.
+    friction : openmm.unit.Quantity, optional
+        RPMD friction coefficient. Default is 1.0 / ps.
+    timestep : openmm.unit.Quantity, optional
+        Integration time step. Default is 0.5 fs.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1000.
+    n_1 : int, optional
+        Number of steps for stage 1 (bead expansion). Default is 1000.
+    n_2 : int, optional
+        Number of steps for stage 2 (relaxation). Default is 5000.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+    atoms_to_watch : list of int or None, optional
+        Atom indices for quantum spread monitoring. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if potential is not None and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
@@ -800,6 +1145,64 @@ def run_openmm_rpmd_contracted(modeller,
                                potential=None,
                                ml_idx=None,
                                atoms_to_watch=None):
+    """
+    Run a contracted ring-polymer MD (RPMD) production simulation.
+
+    Uses the ring-polymer contraction scheme to evaluate expensive force
+    components (e.g. PME reciprocal space) on fewer bead copies, reducing
+    computational cost. A checkpoint from a prior RPMD equilibration is
+    required. An optional PLUMED bias and ML/MM mixed potential are supported.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    plumed_script_path : str or None, optional
+        Path to a PLUMED input script. If None, no bias is applied.
+        Default is None.
+    checkpoint_file : str, optional
+        Path to the equilibration checkpoint. Default is ``'rpmd_ready.chk'``.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'rpmd_prod_contracted'``.
+    n_beads : int, optional
+        Number of ring-polymer beads. Default is 32.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300 K.
+    pressure : openmm.unit.Quantity, optional
+        Target pressure for the RPMD barostat. Default is 1.0 bar.
+    barostat_freq : int or None, optional
+        RPMD barostat attempt frequency. If None, no barostat is added.
+        Default is 50.
+    friction : openmm.unit.Quantity, optional
+        RPMD friction coefficient. Default is 1.0 / ps.
+    timestep : openmm.unit.Quantity, optional
+        Integration time step. Default is 0.5 fs.
+    steps : int, optional
+        Total number of production steps. Default is 100000.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1000.
+    contractions : dict or None, optional
+        Mapping of force group to the number of contracted copies. If None,
+        defaults to ``{1: 8, 2: 1}``. Default is None.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+    atoms_to_watch : list of int or None, optional
+        Atom indices for quantum spread monitoring. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if potential is not None and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
@@ -972,6 +1375,60 @@ def run_openmm_rpmd_prod(modeller,
                          potential=None,
                          ml_idx=None,
                          atoms_to_watch=None):
+    """
+    Run a full ring-polymer MD (RPMD) production simulation.
+
+    Loads a checkpoint from a prior RPMD equilibration and continues with a
+    production run using the ``RPMDIntegrator``. An optional PLUMED bias,
+    RPMD barostat, and ML/MM mixed potential are supported.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    plumed_script_path : str or None, optional
+        Path to a PLUMED input script. If None, no bias is applied.
+        Default is None.
+    checkpoint_file : str, optional
+        Path to the equilibration checkpoint. Default is ``'rpmd_ready.chk'``.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'rpmd_prod'``.
+    n_beads : int, optional
+        Number of ring-polymer beads. Default is 32.
+    pressure : openmm.unit.Quantity, optional
+        Target pressure for the RPMD barostat. Default is 1.0 bar.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    barostat_freq : int or None, optional
+        RPMD barostat attempt frequency. If None, no barostat is added.
+        Default is 50.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1000.
+    steps : int, optional
+        Total number of production steps. Default is 500000.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+    atoms_to_watch : list of int or None, optional
+        Atom indices for quantum spread monitoring. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if potential is not None and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
@@ -1101,6 +1558,49 @@ def run_openmm_adqtb_eq(modeller,
                         potential=None,
                         ml_idx=None,
                         ):
+    """
+    Run an adaptive quantum thermal bath (adQTB) equilibration simulation.
+
+    Uses the ``QTBIntegrator`` to thermalise the system with quantum thermal
+    noise. A checkpoint is saved at the end for subsequent production runs.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    segment_length : openmm.unit.Quantity, optional
+        Segment length for the QTB integrator. Default is 0.5 ps.
+    adaptation_rate : float, optional
+        Adaptation rate for the QTB integrator. Default is 0.5.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1000.
+    steps : int, optional
+        Total number of equilibration steps. Default is 500000.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'adqtb_ready'``.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if potential is not None and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
@@ -1202,6 +1702,57 @@ def run_openmm_adqtb_prod(modeller,
                           potential=None,
                           ml_idx=None,
                           ):
+    """
+    Run an adaptive quantum thermal bath (adQTB) production simulation.
+
+    Uses the ``QTBIntegrator`` with optional PLUMED enhanced-sampling bias
+    and a Monte Carlo barostat for NPT conditions.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    plumed_script_path : str or None, optional
+        Path to a PLUMED input script. If None, no bias is applied.
+        Default is None.
+    pressure : openmm.unit.Quantity, optional
+        Target pressure for the barostat. Default is 1.0 bar.
+    barostat_freq : int or None, optional
+        Barostat attempt frequency in steps. If None, no barostat is added.
+        Default is 50.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 1.0 fs.
+    segment_length : openmm.unit.Quantity, optional
+        Segment length for the QTB integrator. Default is 0.5 ps.
+    adaptation_rate : float, optional
+        Adaptation rate for the QTB integrator. Default is 0.5.
+    n_report : int, optional
+        Reporter interval in steps. Default is 1000.
+    steps : int, optional
+        Total number of production steps. Default is 500000.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'adqtb_prod'``.
+    platform_name : str, optional
+        OpenMM platform name. Default is ``'CPU'``.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if potential is not None and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True

@@ -471,6 +471,21 @@ def set_adqtb_particle_types_by_element(
         )
 
     def _sym_and_Z(el: Any) -> tuple[str, int]:
+        """
+        Extract element symbol and atomic number from an element-like object.
+
+        Parameters
+        ----------
+        el : openmm.app.element.Element, str, or None
+            An element, its symbol string, or None.
+
+        Returns
+        -------
+        sym : str
+            The element symbol, or *unknown_symbol* if *el* is None.
+        Z : int
+            The atomic number, or 10**9 if unknown.
+        """
         # OpenMM Element has .symbol and .atomic_number; allow strings too.
         if el is None:
             return unknown_symbol, 10 ** 9

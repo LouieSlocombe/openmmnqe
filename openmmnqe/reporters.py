@@ -52,6 +52,8 @@ class RPMDQuantumSpreadReporter(object):
 
     def __init__(self, file, reportInterval, atom_indices, names=None):
         """
+        Initialize the RPMDQuantumSpreadReporter.
+
         Parameters
         ----------
         file : str
@@ -76,10 +78,40 @@ class RPMDQuantumSpreadReporter(object):
         self._out.write(header + "\n")
 
     def describeNextReport(self, simulation):
+        """
+        Describe when the next report is due.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The current simulation instance.
+
+        Returns
+        -------
+        tuple
+            A 5-tuple ``(steps, positions, velocities, forces, energies)``
+            indicating the number of steps until the next report and which
+            data are required.
+        """
         steps = self._reportInterval - simulation.currentStep % self._reportInterval
         return (steps, False, False, False, False)
 
     def report(self, simulation, state):
+        """
+        Compute the quantum spread for monitored atoms and write to file.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The current simulation instance.
+        state : openmm.State
+            The current simulation state (unused; bead positions are obtained
+            directly from the RPMD integrator).
+
+        Returns
+        -------
+        None
+        """
         # We need access to the integrator to get bead positions, not just the simulation state
         integrator = simulation.integrator
 
@@ -98,6 +130,9 @@ class RPMDQuantumSpreadReporter(object):
         self._out.flush()
 
     def __del__(self):
+        """
+        Clean up by closing the output file handle.
+        """
         self._out.close()
 
 
@@ -109,11 +144,19 @@ class RPMDBeadReporter(object):
 
     def __init__(self, file_base_name, reportInterval, num_beads, topology):
         """
-        args:
-            file_base_name (str): Prefix for files (e.g., 'output' -> 'output_bead_0.pdb')
-            reportInterval (int): How often to write frames (steps)
-            num_beads (int): Number of beads in the RPMD integrator
-            topology (Topology): The system topology
+        Initialize the RPMDBeadReporter.
+
+        Parameters
+        ----------
+        file_base_name : str
+            Prefix for output files (e.g. ``'output'`` produces
+            ``'output_bead_0.pdb'``, ``'output_bead_1.pdb'``, etc.).
+        reportInterval : int
+            The interval (in time steps) at which to write frames.
+        num_beads : int
+            Number of beads in the RPMD integrator.
+        topology : openmm.app.Topology
+            The system topology used for writing PDB headers and models.
         """
         self._reportInterval = reportInterval
         self._num_beads = num_beads
@@ -131,14 +174,38 @@ class RPMDBeadReporter(object):
 
     def describeNextReport(self, simulation):
         """
-        Tells the Simulation when the next report is due.
+        Describe when the next report is due.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The current simulation instance.
+
+        Returns
+        -------
+        tuple
+            A 5-tuple ``(steps, positions, velocities, forces, energies)``
+            indicating the number of steps until the next report and which
+            data are required.
         """
         steps = self._reportInterval - simulation.currentStep % self._reportInterval
         return (steps, False, False, False, False)
 
     def report(self, simulation, state):
         """
-        Called by the Simulation to generate the report.
+        Write the current bead positions to per-bead PDB files.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The current simulation instance.
+        state : openmm.State
+            The current simulation state (unused; bead positions are obtained
+            directly from the RPMD integrator).
+
+        Returns
+        -------
+        None
         """
         # We must access the integrator specifically to get bead positions
         integrator = simulation.integrator
@@ -161,7 +228,7 @@ class RPMDBeadReporter(object):
 
     def __del__(self):
         """
-        Cleanup: Close all file handles when the reporter is destroyed.
+        Clean up by writing PDB footers and closing all bead file handles.
         """
         for f in self._files:
             try:
@@ -179,6 +246,20 @@ class RPMDCentroidReporter(object):
     """
 
     def __init__(self, file_name, reportInterval, num_beads, topology):
+        """
+        Initialize the RPMDCentroidReporter.
+
+        Parameters
+        ----------
+        file_name : str
+            Path to the output PDB file for the centroid trajectory.
+        reportInterval : int
+            The interval (in time steps) at which to write frames.
+        num_beads : int
+            Number of beads in the RPMD integrator.
+        topology : openmm.app.Topology
+            The system topology used for writing PDB headers and models.
+        """
         self._reportInterval = reportInterval
         self._num_beads = num_beads
         self._topology = topology
@@ -187,10 +268,40 @@ class RPMDCentroidReporter(object):
         app.PDBFile.writeHeader(topology, self._out)
 
     def describeNextReport(self, simulation):
+        """
+        Describe when the next report is due.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The current simulation instance.
+
+        Returns
+        -------
+        tuple
+            A 5-tuple ``(steps, positions, velocities, forces, energies)``
+            indicating the number of steps until the next report and which
+            data are required.
+        """
         steps = self._reportInterval - simulation.currentStep % self._reportInterval
         return (steps, False, False, False, False)
 
     def report(self, simulation, state):
+        """
+        Compute the bead centroid and write it to the PDB file.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The current simulation instance.
+        state : openmm.State
+            The current simulation state (unused; bead positions are obtained
+            directly from the RPMD integrator).
+
+        Returns
+        -------
+        None
+        """
         integrator = simulation.integrator
 
         # Get first bead to initialize sum
@@ -213,6 +324,9 @@ class RPMDCentroidReporter(object):
             self._out.flush()
 
     def __del__(self):
+        """
+        Clean up by writing the PDB footer and closing the file handle.
+        """
         try:
             app.PDBFile.writeFooter(self._topology, self._out)
             self._out.close()

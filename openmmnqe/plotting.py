@@ -602,11 +602,48 @@ def plot_fes_sep(fes_a,
 
 @dataclass
 class PlumedFES:
+    """
+    Container for a PLUMED free-energy surface loaded from a file.
+
+    Attributes
+    ----------
+    data : numpy.ndarray
+        Numeric columns after dropping derivative (``der_*``) fields, if
+        possible. Shape is ``(n_rows, n_fields)``.
+    fields : list of str
+        Column names corresponding to *data* (after dropping ``der_*``
+        columns). May be empty if no ``#! FIELDS`` header was found.
+    """
+
     data: np.ndarray  # numeric columns (after dropping der_* if possible)
     fields: List[str]  # matching names (after dropping der_*), may be []
 
 
 def load_plumed_fes_drop_der(path: str) -> PlumedFES:
+    """
+    Load a PLUMED FES file, dropping derivative columns.
+
+    Reads a PLUMED-formatted data file, extracts the ``#! FIELDS`` header
+    (if present), and removes any columns whose names start with ``der_``.
+    The remaining numeric data and field names are returned as a
+    :class:`PlumedFES` object.
+
+    Parameters
+    ----------
+    path : str
+        Path to the PLUMED FES data file.
+
+    Returns
+    -------
+    PlumedFES
+        A dataclass containing the numeric data array and the corresponding
+        field names.
+
+    Raises
+    ------
+    ValueError
+        If no numeric data lines are found in the file.
+    """
     fields_raw: List[str] = []
     numeric_lines: List[str] = []
 
@@ -650,6 +687,38 @@ def plot_plumed_fes(
         shift_min_to_zero: bool = True,
         levels: int = 30,
 ) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Plot a PLUMED free-energy surface from a data file.
+
+    Automatically determines whether the FES is 1-D or 2-D from the number
+    of data columns. A 1-D FES is drawn as a line plot; a 2-D FES is drawn
+    as a filled contour plot with a colour bar.
+
+    Parameters
+    ----------
+    path : str
+        Path to the PLUMED FES data file.
+    ax : matplotlib.axes.Axes or None, optional
+        Axes on which to draw the plot. If None, a new figure and axes are
+        created. Default is None.
+    shift_min_to_zero : bool, optional
+        If True, shift the free-energy values so that the minimum is zero.
+        Default is True.
+    levels : int, optional
+        Number of contour levels for 2-D plots. Default is 30.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The matplotlib figure.
+    ax : matplotlib.axes.Axes
+        The matplotlib axes.
+
+    Raises
+    ------
+    ValueError
+        If the data has fewer than 2 columns.
+    """
     fes = load_plumed_fes_drop_der(path)
     data, fields = fes.data, fes.fields
 
@@ -664,6 +733,21 @@ def plot_plumed_fes(
 
     # Labels: use FIELDS if available, else defaults
     def lab(i: int, default: str) -> str:
+        """
+        Return the field label at index *i*, or *default* if unavailable.
+
+        Parameters
+        ----------
+        i : int
+            Column index.
+        default : str
+            Fallback label.
+
+        Returns
+        -------
+        str
+            The field name or *default*.
+        """
         return fields[i] if fields and i < len(fields) else default
 
     if ncol == 2:
@@ -709,6 +793,36 @@ def plot_plumed_fes(
 
 
 def plot_plumed_colvar(filename, x_axis='time', figsize=(10, 8)):
+    """
+    Plot all collective variables from a PLUMED COLVAR file.
+
+    Reads a PLUMED COLVAR file, extracts the ``#! FIELDS`` header to
+    determine column names, and creates a vertically stacked subplot for
+    each variable (excluding the x-axis column).
+
+    Parameters
+    ----------
+    filename : str
+        Path to the PLUMED COLVAR file.
+    x_axis : str, optional
+        Column name to use as the x-axis. If the column is not found, the
+        row index is used instead. Default is ``'time'``.
+    figsize : tuple of float, optional
+        Figure size in inches ``(width, height)``. Default is ``(10, 8)``.
+
+    Returns
+    -------
+    data : pandas.DataFrame or None
+        The loaded COLVAR data as a DataFrame, or None if reading failed.
+    fig : matplotlib.figure.Figure or None
+        The matplotlib figure, or None if no variables were found or
+        reading failed.
+
+    Raises
+    ------
+    ValueError
+        If no ``#! FIELDS`` header is found in the file.
+    """
     col_names = None
     with open(filename, 'r') as f:
         for line in f:

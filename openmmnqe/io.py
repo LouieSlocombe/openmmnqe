@@ -885,6 +885,29 @@ def pdb_patcher(pdb_file, lig_name='LIG'):
 
 
 def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
+    """
+    Combine a ligand SDF file with a receptor PDB file into a single PDB.
+
+    Reads the ligand from ``<lig_name>.sdf``, converts it to an OpenMM
+    topology, appends it to the receptor topology loaded from *input_pdb*,
+    and overwrites *input_pdb* with the combined structure. Optionally
+    patches residue labels via :func:`pdb_patcher`.
+
+    Parameters
+    ----------
+    input_pdb : str
+        Path to the receptor PDB file. The combined output is written back
+        to this file.
+    lig_name : str, optional
+        Residue name (and SDF filename stem) of the ligand. Default is ``'LIG'``.
+    patch : bool, optional
+        If True, run :func:`pdb_patcher` on the output to fix residue names.
+        Default is True.
+
+    Returns
+    -------
+    None
+    """
     # Combine ligand and receptor into one pdb
     pdb = app.PDBFile(input_pdb)
     molecule = Molecule.from_file(f'{lig_name}.sdf')
@@ -901,6 +924,23 @@ def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
 
 
 def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
+    """
+    Convert one or more SDF files into a single combined PDB file.
+
+    Each molecule in each SDF file is assigned a unique chain, residue ID,
+    and three-letter residue name. Bonds and 3-D coordinates are preserved.
+
+    Parameters
+    ----------
+    input_files : str or list of str
+        Path(s) to the input SDF file(s).
+    output_filename : str, optional
+        Path for the output PDB file. Default is ``'combined_output.pdb'``.
+
+    Returns
+    -------
+    None
+    """
     if isinstance(input_files, str):
         input_files = [input_files]
     all_mols = []
@@ -947,6 +987,47 @@ def prepare_lig_system(input_pdb,
                        rm_files=True,
                        rm_lig_sdf=True,
                        lig_names=None):
+    """
+    Prepare a protein–ligand system from a raw PDB file.
+
+    Removes water and (optionally) ions, relabels residues, identifies
+    non-standard (ligand) residues, generates SDF files, fixes the PDB,
+    and combines ligand and receptor topologies into one PDB ready for
+    force-field parameterisation.
+
+    Parameters
+    ----------
+    input_pdb : str
+        Path to the input PDB file.
+    combined_pdb : str, optional
+        Path for the intermediate combined PDB file. Default is
+        ``'combined_system.pdb'``.
+    clean_pdb : str, optional
+        Path for the intermediate cleaned PDB file. Default is
+        ``'cleaned.pdb'``.
+    rm_ions : list of str or None, optional
+        Ion residue names to remove. If None, no ions are removed.
+        Default is None.
+    residue_map : dict or None, optional
+        Mapping of old residue names to new names for relabelling.
+        If None, no relabelling is performed. Default is None.
+    rm_files : bool, optional
+        If True, remove intermediate files after completion. Default is True.
+    rm_lig_sdf : bool, optional
+        If True, remove generated ligand SDF files after completion.
+        Default is True.
+    lig_names : str, list of str, or None, optional
+        Ligand residue name(s). If None, non-standard residues are
+        auto-detected. Default is None.
+
+    Returns
+    -------
+    pdb_data : openmm.app.PDBFile
+        The final combined PDB data.
+    molecules : openff.toolkit.Molecule or list of openff.toolkit.Molecule
+        The ligand molecule(s). A single ``Molecule`` is returned when only
+        one ligand is present; otherwise a list.
+    """
     remove_water_residues_in_pdb(input_pdb, clean_pdb)
 
     if rm_ions is not None:
@@ -1024,6 +1105,42 @@ def prepare_ligand_ff(standard_ff,
                       n_conf=10,
                       pc_method='mmff94',
                       gaff_ver='gaff-2.11'):
+    """
+    Build an OpenMM ForceField that includes GAFF parameters for ligand(s).
+
+    Generates conformers and partial charges for each ligand molecule (unless
+    a cache is used), registers a ``GAFFTemplateGenerator`` with the force
+    field, and optionally populates a parameter cache for later reuse.
+
+    Parameters
+    ----------
+    standard_ff : str or list of str
+        Standard force field XML file name(s) (e.g. ``'amber14-all.xml'``).
+    molecule : openff.toolkit.Molecule or list of openff.toolkit.Molecule
+        The ligand molecule(s) to parameterise.
+    gen_cache : bool, optional
+        If True, trigger parameterisation to populate the JSON cache.
+        Default is False.
+    use_cache : bool, optional
+        If True, load parameters from an existing cache file instead of
+        recomputing. Default is False.
+    cache_name : str, optional
+        Filename for the GAFF parameter cache. Default is
+        ``'gaff-molecules.json'``.
+    n_conf : int, optional
+        Number of conformers to generate per molecule. Default is 10.
+    pc_method : str, optional
+        Partial-charge method name (e.g. ``'mmff94'``, ``'am1bcc'``).
+        Default is ``'mmff94'``.
+    gaff_ver : str, optional
+        GAFF force field version string. Default is ``'gaff-2.11'``.
+
+    Returns
+    -------
+    forcefield : openmm.app.ForceField
+        An OpenMM ForceField with a registered GAFF template generator for
+        the supplied ligand molecule(s).
+    """
     if not isinstance(molecule, list):
         molecules = [molecule]
     else:
@@ -1242,6 +1359,24 @@ def center_in_box(modeller):
 
 
 def fix_pdb_chains(input_file, output_file):
+    """
+    Assign unique chain IDs to each residue in a PDB file.
+
+    Reads the PDB line by line and replaces the chain-ID column so that
+    every new residue receives the next available chain letter/digit
+    (A–Z, a–z, 0–9, cycling).
+
+    Parameters
+    ----------
+    input_file : str
+        Path to the input PDB file.
+    output_file : str
+        Path to the output PDB file with corrected chain IDs.
+
+    Returns
+    -------
+    None
+    """
     chain_chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
     current_residue = None
     chain_index = -1
@@ -1260,6 +1395,23 @@ def fix_pdb_chains(input_file, output_file):
 
 
 def fix_pdb_atom_labels(input_file, output_file):
+    """
+    Regenerate unique atom names and serial numbers in a PDB file.
+
+    Within each residue, atoms are renamed ``<Element><count>`` (e.g. C1,
+    C2, H1) and atom serial numbers are renumbered sequentially from 1.
+
+    Parameters
+    ----------
+    input_file : str
+        Path to the input PDB file.
+    output_file : str
+        Path to the output PDB file with corrected atom labels.
+
+    Returns
+    -------
+    None
+    """
     current_residue = None
     element_counts = {}
     global_atom_serial = 1
@@ -1292,6 +1444,30 @@ def fix_pdb_atom_labels(input_file, output_file):
 
 
 def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: float = 1.1) -> int:
+    """
+    Convert an XYZ file to a PDB file with connectivity and residue assignment.
+
+    Molecules (clusters) are identified using distance-based connectivity and
+    assigned unique chain IDs, residue IDs, and three-letter residue names.
+    Atoms within each cluster are reordered following Hill-system convention
+    (C, H, then remaining elements alphabetically). CONECT records are written
+    for all bonds.
+
+    Parameters
+    ----------
+    input_file : str
+        Path to the input XYZ file.
+    output_file : str
+        Path to the output PDB file.
+    cutoff_multiplier : float, optional
+        Multiplier applied to natural covalent-radius cutoffs when
+        determining bonded neighbours. Default is 1.1.
+
+    Returns
+    -------
+    int
+        The number of molecular clusters (connected components) found.
+    """
     # 1. Load the original structure
     original_atoms = read(input_file)
     n_atoms = len(original_atoms)
@@ -1306,6 +1482,22 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
 
     # 3. Canonicalise Atom Ordering: Group by cluster, then Hill system (C, H, others)
     def get_sort_key(cluster_id, symbol):
+        """
+        Return a sort key for ordering atoms by cluster then Hill system.
+
+        Parameters
+        ----------
+        cluster_id : int
+            The cluster (molecule) index.
+        symbol : str
+            The atomic element symbol.
+
+        Returns
+        -------
+        tuple
+            A 3-tuple ``(cluster_id, priority, symbol)`` where *priority*
+            is 0 for C, 1 for H, and 2 for all other elements.
+        """
         if symbol == 'C':
             return (cluster_id, 0, symbol)
         elif symbol == 'H':

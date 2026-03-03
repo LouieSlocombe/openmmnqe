@@ -17,6 +17,52 @@ def plumed_input_1pt(modeller,
                      grid_min=-1.1,
                      grid_max=1.1,
                      grid_bin=200):
+    """
+    Generate a PLUMED input script for a single proton-transfer CV with metadynamics.
+
+    Constructs a 1-D coordination-difference collective variable for a
+    donor–proton–acceptor triplet, adds upper-wall and lower-angle restraints,
+    and configures well-tempered metadynamics.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions, used to
+        compute inter-atomic distances for setting ``R_0`` and wall values.
+    idx : list of int
+        Three 0-based atom indices ``[donor, proton, acceptor]``.
+    temperature : openmm.unit.Quantity
+        Simulation temperature (with units of kelvin).
+    r_0 : float, optional
+        Multiplicative factor applied to the shortest donor/acceptor–proton
+        distance to obtain the COORDINATION ``R_0``. Default is 1.1.
+    wall : float, optional
+        Multiplicative factor applied to the donor–acceptor distance to set
+        the upper-wall position. Default is 1.5.
+    angle_lim : float, optional
+        Lower-wall angle limit in degrees. Default is 130.0.
+    pace : int, optional
+        METAD deposition pace in steps. Default is 500.
+    height : float, optional
+        Initial Gaussian height in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width in nm. Default is 0.05.
+    bias : float, optional
+        Bias factor for well-tempered metadynamics. Default is 20.0.
+    grid_min : float, optional
+        Minimum grid value for the CV. Default is -1.1.
+    grid_max : float, optional
+        Maximum grid value for the CV. Default is 1.1.
+    grid_bin : int, optional
+        Number of grid bins. Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script as a string.
+    sum_hills_input : str
+        The ``plumed sum_hills`` command line for post-processing.
+    """
     r_01 = distance_between_atoms(modeller, idx[0], idx[1])
     r_21 = distance_between_atoms(modeller, idx[2], idx[1])
     r_02 = distance_between_atoms(modeller, idx[0], idx[2])
@@ -64,6 +110,54 @@ def plumed_input_2pt_1d(modeller,
                         grid_min=-1.1,
                         grid_max=1.1,
                         grid_bin=200):
+    """
+    Generate a PLUMED input for two proton-transfer sites combined into a 1-D CV.
+
+    Two coordination-difference CVs are computed (one per donor–proton–acceptor
+    triplet) and averaged into a single 1-D collective variable. Upper-wall
+    and lower-angle restraints are applied to each site. Well-tempered
+    metadynamics is configured on the combined CV.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    idx1 : list of int
+        Three 0-based atom indices ``[donor, proton, acceptor]`` for the
+        first proton-transfer site.
+    idx2 : list of int
+        Three 0-based atom indices ``[donor, proton, acceptor]`` for the
+        second proton-transfer site.
+    temperature : openmm.unit.Quantity
+        Simulation temperature (with units of kelvin).
+    r_0 : float, optional
+        Factor for computing COORDINATION ``R_0``. Default is 1.1.
+    wall : float, optional
+        Factor for the upper-wall distance. Default is 1.5.
+    angle_lim : float, optional
+        Lower-wall angle limit in degrees. Default is 130.0.
+    pace : int, optional
+        METAD deposition pace in steps. Default is 500.
+    height : float, optional
+        Initial Gaussian height in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width in nm. Default is 0.05.
+    bias : float, optional
+        Bias factor for well-tempered metadynamics. Default is 20.0.
+    grid_min : float, optional
+        Minimum grid value. Default is -1.1.
+    grid_max : float, optional
+        Maximum grid value. Default is 1.1.
+    grid_bin : int, optional
+        Number of grid bins. Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script as a string.
+    sum_hills_input : str
+        The ``plumed sum_hills`` command line for post-processing.
+    """
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
     r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
     r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
@@ -129,6 +223,54 @@ def plumed_input_2pt_2d(modeller,
                         grid_min=-1.1,
                         grid_max=1.1,
                         grid_bin=200):
+    """
+    Generate a PLUMED input for two proton-transfer sites as a 2-D metadynamics CV.
+
+    Two independent coordination-difference CVs are computed (one per
+    donor–proton–acceptor triplet) and used as the two dimensions of a 2-D
+    well-tempered metadynamics simulation. Upper-wall and lower-angle
+    restraints are applied to each site.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    idx1 : list of int
+        Three 0-based atom indices ``[donor, proton, acceptor]`` for the
+        first proton-transfer site.
+    idx2 : list of int
+        Three 0-based atom indices ``[donor, proton, acceptor]`` for the
+        second proton-transfer site.
+    temperature : openmm.unit.Quantity
+        Simulation temperature (with units of kelvin).
+    r_0 : float, optional
+        Factor for computing COORDINATION ``R_0``. Default is 1.1.
+    wall : float, optional
+        Factor for the upper-wall distance. Default is 1.5.
+    angle_lim : float, optional
+        Lower-wall angle limit in degrees. Default is 130.0.
+    pace : int, optional
+        METAD deposition pace in steps. Default is 500.
+    height : float, optional
+        Initial Gaussian height in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width in nm. Default is 0.05.
+    bias : float, optional
+        Bias factor for well-tempered metadynamics. Default is 20.0.
+    grid_min : float, optional
+        Minimum grid value for each CV dimension. Default is -1.1.
+    grid_max : float, optional
+        Maximum grid value for each CV dimension. Default is 1.1.
+    grid_bin : int, optional
+        Number of grid bins per dimension. Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script as a string.
+    sum_hills_input : str
+        The ``plumed sum_hills`` command line for post-processing.
+    """
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
     r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
     r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
@@ -189,6 +331,52 @@ def plumed_input_wob_1(idx1,
                        grid_min=-1.1,
                        grid_max=1.1,
                        grid_bin=200):
+    """
+    Generate a PLUMED input for a Wobble (wob) base-pair proton-transfer CV (variant 1).
+
+    Constructs coordination-difference CVs for two donor–proton–acceptor
+    triplets using fixed ``R_0`` values (in nm). Upper-wall and lower-angle
+    restraints are applied. The combined CV is biased with well-tempered
+    metadynamics.
+
+    Parameters
+    ----------
+    idx1 : list of int
+        Three 0-based atom indices ``[donor, proton, acceptor]`` for the
+        first proton-transfer site.
+    idx2 : list of int
+        Three 0-based atom indices ``[donor, proton, acceptor]`` for the
+        second proton-transfer site.
+    temperature : openmm.unit.Quantity
+        Simulation temperature (with units of kelvin).
+    r_0 : float, optional
+        COORDINATION ``R_0`` in nm. Default is 0.14.
+    wall : float, optional
+        Upper-wall distance in nm. Default is 0.4.
+    angle_lim : float, optional
+        Lower-wall angle limit in degrees. Default is 100.0.
+    pace : int, optional
+        METAD deposition pace in steps. Default is 500.
+    height : float, optional
+        Initial Gaussian height in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width in nm. Default is 0.05.
+    bias : float, optional
+        Bias factor for well-tempered metadynamics. Default is 20.0.
+    grid_min : float, optional
+        Minimum grid value. Default is -1.1.
+    grid_max : float, optional
+        Maximum grid value. Default is 1.1.
+    grid_bin : int, optional
+        Number of grid bins. Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script as a string.
+    sum_hills_input : str
+        The ``plumed sum_hills`` command line for post-processing.
+    """
     # Convert atom indices to PLUMED format
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
@@ -240,6 +428,52 @@ def plumed_input_wob_2(modeller,
                        grid_min=-1.1,
                        grid_max=1.1,
                        grid_bin=200):
+    """
+    Generate a PLUMED input for a multi-site Wobble proton-transfer CV (variant 2).
+
+    Constructs five coordination-difference sub-CVs (z1–z5) from eight atom
+    indices representing a multi-step proton relay. The sub-CVs are summed
+    into a single collective variable ``z`` and biased with well-tempered
+    metadynamics. Upper-wall distance restraints are applied to key
+    heavy-atom pairs.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions, used to
+        compute inter-atomic distances for ``R_0`` values.
+    idx : list of int
+        Eight 0-based atom indices in the order
+        ``[N3, H3, O6, O4, N1, H1, O2, N2]``.
+    temperature : openmm.unit.Quantity
+        Simulation temperature (with units of kelvin).
+    r_0 : float, optional
+        Multiplicative factor for computing COORDINATION ``R_0`` from
+        inter-atomic distances. Default is 1.1.
+    wall : float, optional
+        Upper-wall distance in nm for heavy-atom pairs. Default is 4.0.
+    pace : int, optional
+        METAD deposition pace in steps. Default is 500.
+    height : float, optional
+        Initial Gaussian height in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width in nm. Default is 0.05.
+    bias : float, optional
+        Bias factor for well-tempered metadynamics. Default is 20.0.
+    grid_min : float, optional
+        Minimum grid value. Default is -1.1.
+    grid_max : float, optional
+        Maximum grid value. Default is 1.1.
+    grid_bin : int, optional
+        Number of grid bins. Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script as a string.
+    sum_hills_input : str
+        The ``plumed sum_hills`` command line for post-processing.
+    """
     # Unpack indices
     idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
 
