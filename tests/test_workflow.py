@@ -969,6 +969,13 @@ def test_gt_wob_pt_solvated():
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
+    idx1 = ['AAB1:N2', 'AAB1:H6', 'AAB1:O1', 'AAB1:H6']
+    idx2 = ['AAA1:O1', 'AAB1:H6', 'AAB1:O2', 'AAB1:H6']
+    idx3 = []
+
+
+
+
     # idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
     # AAB1:N2 AAB1:H6 AAB1:H6 AAB1:O2 AAA1:N3 AAA1:H3 AAB1:O1 AAA1:N4
     idx = ['AAB1:N2', 'AAB1:H6', 'AAA1:O1', 'AAB1:O2', 'AAA1:N3', 'AAA1:H3', 'AAB1:O1', 'AAA1:N4']
@@ -978,7 +985,7 @@ def test_gt_wob_pt_solvated():
                                                            idx,
                                                            temperature,
                                                            wall=1.0,
-                                                           height=30.0,
+                                                           height=20.0,
                                                            bias=10.0)
 
     plumed_script_path = "plumed.dat"

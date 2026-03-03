@@ -559,7 +559,102 @@ uw2: UPPER_WALLS ARG=d2 AT={wall} KAPPA=500
 uw3: UPPER_WALLS ARG=d3 AT={wall} KAPPA=500
 
 metad: METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS
-PRINT ARG=* STRIDE={pace} FILE=COLVAR
+PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
+        """
+    sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
+    return plumed_input, sum_hills_input
+
+
+def plumed_input_wob_3(modeller,
+                       idx1,
+                       idx2,
+                       idx3,
+                       idx4,
+                       idx5,
+                       temperature,
+                       r_0=1.1,
+                       wall=4.0,
+                       pace=500,
+                       height=15.0,  # kJ/mol
+                       sigma=0.05,  # nm
+                       bias=20.0,
+                       grid_min=-1.1,
+                       grid_max=1.1,
+                       grid_bin=200):
+    idx_n3, idx_h3, idx_o6, idx_h3 = idx1
+    idx_o6, idx_h3, idx_o4, idx_h3 = idx2
+
+    idx_n1, idx_h1, idx_n3, idx_h1 = idx3
+
+    idx_n1, idx_o2, idx_n2, idx_o2 = idx4
+    idx_n2, idx_o2, idx_n1, idx_n3 = idx5
+
+    # Unpack indices
+    # idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
+
+    # Calculate r_0 for each distance
+    r_1 = np.round(distance_between_atoms(modeller, idx_n3, idx_h3) * r_0, decimals=2)
+    r_2 = np.round(distance_between_atoms(modeller, idx_o6, idx_h3) * r_0, decimals=2)
+    r_3 = np.round(distance_between_atoms(modeller, idx_o6, idx_h3) * r_0, decimals=2)
+    r_4 = np.round(distance_between_atoms(modeller, idx_o4, idx_h3) * r_0, decimals=2)
+    r_5 = np.round(distance_between_atoms(modeller, idx_n1, idx_h1) * r_0, decimals=2)
+    r_6 = np.round(distance_between_atoms(modeller, idx_n3, idx_h1) * r_0, decimals=2)
+    r_7 = np.round(distance_between_atoms(modeller, idx_n1, idx_o2) * r_0, decimals=2)
+    r_8 = np.round(distance_between_atoms(modeller, idx_n2, idx_o2) * r_0, decimals=2)
+    r_9 = np.round(distance_between_atoms(modeller, idx_n2, idx_o2) * r_0, decimals=2)
+    r_10 = np.round(distance_between_atoms(modeller, idx_n3, idx_h3) * r_0, decimals=2)
+
+    # Convert atom indices to PLUMED format
+    idx_n3 = atom_indices_to_plumed(idx_n3)
+    idx_h3 = atom_indices_to_plumed(idx_h3)
+    idx_o6 = atom_indices_to_plumed(idx_o6)
+    idx_o4 = atom_indices_to_plumed(idx_o4)
+    idx_n1 = atom_indices_to_plumed(idx_n1)
+    idx_h1 = atom_indices_to_plumed(idx_h1)
+    idx_o2 = atom_indices_to_plumed(idx_o2)
+    idx_n2 = atom_indices_to_plumed(idx_n2)
+
+    temperature_str = str(temperature.value_in_unit(unit.kelvin))
+    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
+    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    plumed_input = f"""
+# z1: top PT reaction coordinate
+c_1: DISTANCE ATOMS={idx_n3},{idx_h3}
+c_2: DISTANCE ATOMS={idx_o6},{idx_h3}
+z1: COMBINE ARG=c_1,c_2 COEFFICIENTS=1,-1 PERIODIC=NO
+
+# z2: top PT reaction coordinate
+c_3: DISTANCE ATOMS={idx_o6},{idx_h3}
+c_4: DISTANCE ATOMS={idx_o4},{idx_h3}
+z2: COMBINE ARG=c_3,c_4 COEFFICIENTS=1,-1 PERIODIC=NO
+
+# z3: second PT reaction coordinate
+c_5: DISTANCE ATOMS={idx_n1},{idx_h1}
+c_6: DISTANCE ATOMS={idx_n3},{idx_h1}
+z3: COMBINE ARG=c_5,c_6 COEFFICIENTS=1,-1 PERIODIC=NO
+
+# z4
+c_7: DISTANCE ATOMS={idx_n1},{idx_o2}
+c_8: DISTANCE ATOMS={idx_n2},{idx_o2}
+z4: COMBINE ARG=c_7,c_8 COEFFICIENTS=1,-1 PERIODIC=NO
+
+# z5
+c_9: DISTANCE ATOMS={idx_n2},{idx_o2} 
+c_10: DISTANCE ATOMS={idx_n1},{idx_n3}
+z5: COMBINE ARG=c_9,c_10 COEFFICIENTS=1,-1 PERIODIC=NO
+
+z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
+
+d1: DISTANCE ATOMS={idx_o6},{idx_o4} 
+d2: DISTANCE ATOMS={idx_n1},{idx_n3}
+d3: DISTANCE ATOMS={idx_n2},{idx_o2}
+
+uw1: UPPER_WALLS ARG=d1 AT={wall} KAPPA=500
+uw2: UPPER_WALLS ARG=d2 AT={wall} KAPPA=500
+uw3: UPPER_WALLS ARG=d3 AT={wall} KAPPA=500
+
+metad: METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS
+PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
