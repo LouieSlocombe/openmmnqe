@@ -938,7 +938,7 @@ def test_g_enol_t_pt_solvated():
 def test_gt_wob_pt_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 20_000
 
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -969,24 +969,26 @@ def test_gt_wob_pt_solvated():
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
-    idx1 = ['AAB1:N2', 'AAB1:H6', 'AAB1:O1', 'AAB1:H6']
-    idx2 = ['AAA1:O1', 'AAB1:H6', 'AAB1:O2', 'AAB1:H6']
-    idx3 = []
+    idx_o4 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:O2'])
+    idx_h3 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:H6'])
+    idx_o2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:O1'])
+    idx_o6 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:O1'])
+    idx_n2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N4'])
+    idx_nr1 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N1'])
+    idx_nr2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:N1'])
 
-
-
-
-    # idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
-    # AAB1:N2 AAB1:H6 AAB1:H6 AAB1:O2 AAA1:N3 AAA1:H3 AAB1:O1 AAA1:N4
-    idx = ['AAB1:N2', 'AAB1:H6', 'AAA1:O1', 'AAB1:O2', 'AAA1:N3', 'AAA1:H3', 'AAB1:O1', 'AAA1:N4']
-    idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
-
-    plumed_input, sum_hills_input = nqe.plumed_input_wob_2(modeller,
-                                                           idx,
+    plumed_input, sum_hills_input = nqe.plumed_input_wob_3(modeller,
+                                                           idx_o4,
+                                                           idx_h3,
+                                                           idx_o2,
+                                                           idx_o6,
+                                                           idx_n2,
+                                                           idx_nr1,
+                                                           idx_nr2,
                                                            temperature,
                                                            wall=1.0,
                                                            height=20.0,
-                                                           bias=10.0)
+                                                           bias=20.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:

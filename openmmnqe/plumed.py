@@ -566,12 +566,13 @@ PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
 
 
 def plumed_input_wob_3(modeller,
-                       idx_pt1,
-                       idx_pt2,
-                       idx_d1,
-                       idx_d2,
-                       idx_d3,
-                       idx_d4,
+                       idx_o4,
+                       idx_h3,
+                       idx_o2,
+                       idx_o6,
+                       idx_n2,
+                       idx_nr1,
+                       idx_nr2,
                        temperature,
                        r_0=1.1,
                        wall=1.1,
@@ -582,48 +583,51 @@ def plumed_input_wob_3(modeller,
                        grid_min=-1.1,
                        grid_max=1.1,
                        grid_bin=200):
+    wall_u = np.round(distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]) * wall, decimals=2)
+    wall_l = np.round(distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]) * (2.0 - wall), decimals=2)
 
-    idx_n3, idx_h3, idx_o6 = idx_pt1
-    idx_o6, idx_h3, idx_o4 = idx_pt2
+    wall_1 = np.round(distance_between_atoms(modeller, idx_o6[0], idx_o4[0]) * wall, decimals=2)
+    wall_2 = np.round(distance_between_atoms(modeller, idx_n2[0], idx_o2[0]) * wall, decimals=2)
 
-    idx_o6, idx_o4 = idx_d1
-    idx_n1, idx_n3 = idx_d2
-    idx_n1, idx_o2 = idx_d3
-    idx_n2, idx_o2 = idx_d4
+    # Proton-transfer CVs
+    idx_o4 = atom_indices_to_plumed(idx_o4)[0]
+    idx_h3 = atom_indices_to_plumed(idx_h3)[0]
+    idx_o2 = atom_indices_to_plumed(idx_o2)[0]
 
-    # Calculate r_0 for each distance
-    r_1 = np.round(distance_between_atoms(modeller, idx_n3, idx_h3) * r_0, decimals=2)
+    idx_o6 = atom_indices_to_plumed(idx_o6)[0]
+    idx_n2 = atom_indices_to_plumed(idx_n2)[0]
 
-    # Convert atom indices to PLUMED format
-    idx_n3 = atom_indices_to_plumed(idx_n3)
-    idx_h3 = atom_indices_to_plumed(idx_h3)
-    idx_o6 = atom_indices_to_plumed(idx_o6)
-    idx_o4 = atom_indices_to_plumed(idx_o4)
-    idx_n1 = atom_indices_to_plumed(idx_n1)
-    idx_o2 = atom_indices_to_plumed(idx_o2)
-    idx_n2 = atom_indices_to_plumed(idx_n2)
+    idx_nr1 = atom_indices_to_plumed(idx_nr1)[0]
+    idx_nr2 = atom_indices_to_plumed(idx_nr2)[0]
 
     temperature_str = str(temperature.value_in_unit(unit.kelvin))
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
     plumed_input = f"""
-# z1: top PT reaction coordinate
-c_1: DISTANCE ATOMS={idx_n3},{idx_h3}
-c_2: DISTANCE ATOMS={idx_o6},{idx_h3}
+# z1: PT reaction coordinate
+c_1: DISTANCE ATOMS={idx_o4},{idx_h3}
+c_2: DISTANCE ATOMS={idx_o2},{idx_h3}
 z1: COMBINE ARG=c_1,c_2 COEFFICIENTS=1,-1 PERIODIC=NO
 
-# z2: top PT reaction coordinate
-c_3: DISTANCE ATOMS={idx_o6},{idx_h3}
-c_4: DISTANCE ATOMS={idx_o4},{idx_h3}
-z2: COMBINE ARG=c_3,c_4 COEFFICIENTS=1,-1 PERIODIC=NO
+# z2: base-pair wobble coordinate
+z2: ANGLE ATOMS={idx_n2},{idx_o6},{idx_o4}
 
-d1: DISTANCE ATOMS={idx_o6},{idx_o4} 
-d2: DISTANCE ATOMS={idx_n1},{idx_n3}
-d3: DISTANCE ATOMS={idx_n2},{idx_o2}
+# Constraint to bound the sliding of the bases
+w_a1: LOWER_WALLS ARG=z2 AT={np.round(np.deg2rad(80.0), decimals=2)} KAPPA=500
+w_a2: UPPER_WALLS ARG=z2 AT={np.round(np.deg2rad(150.0), decimals=2)} KAPPA=500
 
-uw1: UPPER_WALLS ARG=d1 AT={wall} KAPPA=500
-uw2: UPPER_WALLS ARG=d2 AT={wall} KAPPA=500
-uw3: UPPER_WALLS ARG=d3 AT={wall} KAPPA=500
+# Constraint to R-groups to keep bases together
+d_rr: DISTANCE ATOMS={idx_nr1},{idx_nr2}
+w_d1: UPPER_WALLS ARG=d_rr AT={wall_u} KAPPA=500
+w_d2: LOWER_WALLS ARG=d_rr AT={wall_l} KAPPA=500
+
+# Constraint to prevent excessive opening of the base pair
+d_oo: DISTANCE ATOMS={idx_o6},{idx_o4}
+w_oo: UPPER_WALLS ARG=d_oo AT={wall_1} KAPPA=500
+d_no: DISTANCE ATOMS={idx_n2},{idx_o2}
+w_no: UPPER_WALLS ARG=d_no AT={wall_2} KAPPA=500
+
+z: COMBINE ARG=z1,z2 COEFFICIENTS=1,1 PERIODIC=NO
 
 metad: METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS
 PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR

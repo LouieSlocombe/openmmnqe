@@ -624,22 +624,15 @@ def test_pca_angles():
     print(df[['triplet', 'weight']].head(10))
 
 
-def check_linear_relationship(y):
-    x = np.arange(len(y))
+def check_linear_relationship(y, x=None):
+    if x is None:
+        x = np.arange(len(y))
     slope, intercept, r_value, p_value, std_err = linregress(x, y)
     print(f"R-squared: {r_value ** 2:.4f}")
     return r_value ** 2
 
 
-def test_ase_load():
-    print(flush=True)
-
-    # name = 'tests/data/G_T_wob.traj'
-    # atoms = read(name, index=':')
-    # write(name.replace('.traj', '.xyz'), atoms[0])
-    # print(atoms)
-    # view(atoms)
-
+def test_ase_rc1():
     atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
     # view(atoms)
 
@@ -660,49 +653,138 @@ def test_ase_load():
     # # plt.title(f'Distance between Atom {atom1_index} and Atom {atom2_index}')
     # # plt.show()
     #
-    d1 = np.array(ase_distance_between_atoms(atoms, 18, 30))
-    d2 = np.array(ase_distance_between_atoms(atoms, 21, 30))
-    r1 = d2 - d1
-    check_linear_relationship(r1)
+    a1_d = 21
+    a2_d = 30
+    a3_d = 18
+    d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
+    d2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
+    r1 = d1 -d2
+    rr = check_linear_relationship(r1)
     # plt.plot(r1)
     # plt.xlabel('Frame')
     # plt.ylabel('Distance (Angstrom)')
-    # plt.title(f'r1')
+    # plt.title(f'r1, Distance Difference between {a1_d}-{a2_d} and {a3_d}-{a2_d}, R2={rr:.4f}')
     # plt.show()
 
 
-    atom1_index = 8
-    atom2_index = 5
-    atom3_index = 21
+    a1_a = 8
+    a2_a = 5
+    a3_a = 21
 
-    angles = ase_angle_between_atoms(atoms, atom1_index, atom2_index, atom3_index)
+    angles = ase_angle_between_atoms(atoms, a1_a, a2_a, a3_a)
     rr = check_linear_relationship(angles)
 
     # plt.plot(angles)
     # plt.xlabel('Frame')
     # plt.ylabel('Angle (degrees)')
-    # plt.title(f'Angle between Atoms {atom1_index}-{atom2_index}-{atom3_index}, R2={rr:.4f}')
+    # plt.title(f'Angle between Atoms {a1_a}-{a2_a}-{a3_a}, R2={rr:.4f}')
     # plt.show()
     #
+
+    rr = check_linear_relationship(r1, x=angles)
     plt.plot(angles, r1)
-    plt.xlabel('Angle (degrees)')
-    plt.ylabel('Distance Difference (Angstrom)')
-    plt.title(f'Angle vs Distance Difference, R2={check_linear_relationship(np.column_stack((angles, r1))[:, 0])}')
+    plt.xlabel(f'Angle {a1_a}-{a2_a}-{a3_a}')
+    plt.ylabel(f'Distance {a1_d}-{a2_d} and {a3_d}-{a2_d}')
+    plt.title(f'Angle vs Distance Difference, R2={rr:.4f}')
+    plt.show()
+
+def test_ase_rc2():
+    atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
+    # view(atoms)
+
+    a1_d = 21
+    a2_d = 30
+    a3_d = 18
+    dd1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
+    dd2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
+    # r1 = d1 + d2
+    # rr = check_linear_relationship(r1)
+    # plt.plot(r1)
+    # plt.xlabel('Frame')
+    # plt.ylabel('Distance (Angstrom)')
+    # plt.title(f'r1, Distance Difference between {a1_d}-{a2_d} and {a3_d}-{a2_d}, R2={rr:.4f}')
+    # plt.show()
+
+    d1 = np.array(ase_distance_between_atoms(atoms, 5, 21))
+    d2 = np.array(ase_distance_between_atoms(atoms, 5, 19))
+    d3 = np.array(ase_distance_between_atoms(atoms, 6, 19))
+    d4 = np.array(ase_distance_between_atoms(atoms, 6, 18))
+    d5 = np.array(ase_distance_between_atoms(atoms, 8, 18))
+    r1 = (d1 - d2) + d3 - d4 + d5  # + dd1 - dd2
+
+    n3 =19
+    h3 = 30
+    o6 = 5
+    o4 = 21
+    n1 = 6
+    h1 = 13
+    o2 = 18
+    n2 = 8
+    n3_h3 = np.array(ase_distance_between_atoms(atoms, n3, h3))
+    o6_h3 = np.array(ase_distance_between_atoms(atoms, o6, h3))
+    o4_h3 = np.array(ase_distance_between_atoms(atoms, o4, h3))
+    n1_h1 = np.array(ase_distance_between_atoms(atoms, n1, h1))
+    n3_h1 = np.array(ase_distance_between_atoms(atoms, n3, h1))
+    n1_o2 = np.array(ase_distance_between_atoms(atoms, n1, o2))
+    n2_o2 = np.array(ase_distance_between_atoms(atoms, n2, o2))
+    n1_n3 = np.array(ase_distance_between_atoms(atoms, n1, n3))
+
+    z1 = n3_h3 - o6_h3
+    z2 = o6_h3 - o4_h3
+    z3 = 0#n1_h1 - n3_h1
+    z4 = n1_o2 - n2_o2
+    z5 = n2_o2 - n1_n3
+
+    r1 = z1 + z2 + z3 + z4 + z5
+    rr = check_linear_relationship(r1)
+    plt.plot(r1)
+    plt.xlabel('Frame')
+    plt.ylabel('Distance (Angstrom)')
+    plt.title(f'R2={rr:.4f}')
     plt.show()
 
 
 
-    # input_file = 'tests/data/G_enol_T.traj'
-    # output_file = 'tests/data/pdb/G_enol_T.pdb'
-    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    # a1_a = 8
+    # a2_a = 5
+    # a3_a = 21
     #
-    # input_file = 'tests/data/G_T_enol.traj'
-    # output_file = 'tests/data/pdb/G_T_enol.pdb'
-    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    # angles = ase_angle_between_atoms(atoms, a1_a, a2_a, a3_a)
+    # rr = check_linear_relationship(angles)
     #
-    # input_file = 'tests/data/G_T_wob.traj'
-    # output_file = 'tests/data/pdb/G_T_wob.pdb'
-    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    # # plt.plot(angles)
+    # # plt.xlabel('Frame')
+    # # plt.ylabel('Angle (degrees)')
+    # # plt.title(f'Angle between Atoms {a1_a}-{a2_a}-{a3_a}, R2={rr:.4f}')
+    # # plt.show()
+    # #
+    #
+    # rr = check_linear_relationship(r1, x=angles)
+    # plt.plot(angles, r1)
+    # plt.xlabel(f'Angle {a1_a}-{a2_a}-{a3_a}')
+    # plt.ylabel(f'Distance {a1_d}-{a2_d} and {a3_d}-{a2_d}')
+    # plt.title(f'Angle vs Distance Difference, R2={rr:.4f}')
+    # plt.show()
+
+
+def test_ase_load():
+    print(flush=True)
+    # name = 'tests/data/G_T_wob.traj'
+    # atoms = read(name, index=':')
+    # write(name.replace('.traj', '.xyz'), atoms[0])
+    # print(atoms)
+    # view(atoms)
+    input_file = 'tests/data/G_enol_T.traj'
+    output_file = 'tests/data/pdb/G_enol_T.pdb'
+    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+
+    input_file = 'tests/data/G_T_enol.traj'
+    output_file = 'tests/data/pdb/G_T_enol.pdb'
+    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+
+    input_file = 'tests/data/G_T_wob.traj'
+    output_file = 'tests/data/pdb/G_T_wob.pdb'
+    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
 
 
 def test_fix_pdb_chains():
