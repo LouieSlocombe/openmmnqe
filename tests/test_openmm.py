@@ -1,12 +1,18 @@
 import os
 import sys
+from itertools import combinations
 
+import matplotlib.pyplot as plt
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
+import pandas as pd
+from ase.io import read, write
 from openmm import openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
+from scipy.stats import linregress
+from sklearn.decomposition import PCA
 
 import openmmnqe as nqe
 
@@ -482,30 +488,221 @@ def test_angle_between_atoms():
     assert abs(angle - ref_angle) < 0.01
 
 
+def ase_distance_between_atoms(atoms, index1, index2):
+    distances = []
+    for frame in atoms:
+        pos1 = frame[index1].position
+        pos2 = frame[index2].position
+        distance = np.linalg.norm(pos1 - pos2)
+        distances.append(distance)
+    return distances
+
+
+def ase_angle_between_atoms(atoms, index1, index2, index3):
+    angles = []
+    for frame in atoms:
+        pos1 = frame[index1].position
+        pos2 = frame[index2].position
+        pos3 = frame[index3].position
+        v1 = pos1 - pos2
+        v2 = pos3 - pos2
+        cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        angle = np.arccos(cos_angle) * 180 / np.pi
+        angles.append(angle)
+    return angles
+
+
+def test_pca_distances():
+    # 1. Load the NEB path
+    images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
+    n_atoms = len(images[0])
+    n_frames = len(images)
+
+    # 2. Get indices for all unique pairs (the upper triangle of the distance matrix)
+    # This ensures we don't count dist(1,2) and dist(2,1) separately
+    triu_i, triu_j = np.triu_indices(n_atoms, k=1)
+
+    def get_all_distances(atoms):
+        pos = atoms.get_positions()
+        # Efficiently calculate all pairwise distances
+        diff = pos[:, np.newaxis, :] - pos[np.newaxis, :, :]
+        dist_matrix = np.linalg.norm(diff, axis=-1)
+        return dist_matrix[triu_i, triu_j]
+
+    # 3. Build the Feature Matrix
+    print(f"Processing {n_frames} frames with {len(triu_i)} distances each...")
+    feature_matrix = np.array([get_all_distances(img) for img in images])
+
+    # 4. Run PCA
+    pca = PCA(n_components=1)
+    pca.fit(feature_matrix)
+
+    # 5. Extract the "Recipe" (The Weights/Loadings)
+    pc1_weights = pca.components_[0]
+
+    # 6. Map weights back to atom pairs for easy reading
+    results = []
+    for idx, weight in enumerate(pc1_weights):
+        results.append({
+            'atom_i': triu_i[idx],
+            'atom_j': triu_j[idx],
+            'symbol_i': images[0].get_chemical_symbols()[triu_i[idx]],
+            'symbol_j': images[0].get_chemical_symbols()[triu_j[idx]],
+            'weight': weight,
+            'abs_weight': abs(weight)
+        })
+
+    df = pd.DataFrame(results).sort_values(by='abs_weight', ascending=False)
+
+    print(f"\nPC1 Explained Variance: {pca.explained_variance_ratio_[0] * 100:.2f}%")
+    print("\n--- Top 10 Contributing Distances (The ones you should put in PLUMED) ---")
+    print(df[['atom_i', 'symbol_i', 'atom_j', 'symbol_j', 'weight']].head(10))
+
+
+def test_pca_angles():
+    # 1. Load the NEB path
+    images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
+    n_atoms = len(images[0])
+    n_frames = len(images)
+    symbols = images[0].get_chemical_symbols()
+
+    # 2. Generate all unique triplets (i, j, k) where j is the vertex
+    # We use combinations for indices, but any atom can be the center (vertex)
+    # To get all unique angles, we pick 3 atoms and realize one is the vertex.
+    # Actually, to be thorough, for every 3 atoms, there are 3 possible angles.
+    triplets = []
+    for combo in combinations(range(n_atoms), 3):
+        i, j, k = combo
+        triplets.append((i, j, k))  # Angle i-j-k
+        triplets.append((j, i, k))  # Angle j-i-k
+        triplets.append((i, k, j))  # Angle i-k-j
+
+    def get_all_angles(atoms, triplet_list):
+        pos = atoms.get_positions()
+        angles = []
+        for i, j, k in triplet_list:
+            # Vectors: ba = a - b, bc = c - b (j is the vertex)
+            v_ji = pos[i] - pos[j]
+            v_jk = pos[k] - pos[j]
+
+            # Cosine rule
+            norm_product = np.linalg.norm(v_ji) * np.linalg.norm(v_jk)
+            if norm_product == 0:
+                angles.append(0.0)
+                continue
+
+            cosine_angle = np.dot(v_ji, v_jk) / norm_product
+            # Clip to avoid floating point errors outside [-1, 1]
+            angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
+            angles.append(angle)
+        return np.array(angles)
+
+    # 3. Build the Feature Matrix
+    print(f"Calculating {len(triplets)} angles for {n_frames} frames...")
+    feature_matrix = np.array([get_all_angles(img, triplets) for img in images])
+
+    # 4. Run PCA
+    pca = PCA(n_components=1)
+    pca.fit(feature_matrix)
+    pc1_weights = pca.components_[0]
+
+    # 5. Extract and Map Results
+    results = []
+    for idx, weight in enumerate(pc1_weights):
+        i, j, k = triplets[idx]
+        results.append({
+            'triplet': f"{symbols[i]}{i}-{symbols[j]}{j}-{symbols[k]}{k}",
+            'indices': (i, j, k),
+            'weight': weight,
+            'abs_weight': abs(weight)
+        })
+
+    df = pd.DataFrame(results).sort_values(by='abs_weight', ascending=False)
+
+    print(f"\nPC1 (Angles) Explained Variance: {pca.explained_variance_ratio_[0] * 100:.2f}%")
+    print("\n--- Top 10 Contributing Angles ---")
+    print(df[['triplet', 'weight']].head(10))
+
+
+def check_linear_relationship(y):
+    x = np.arange(len(y))
+    slope, intercept, r_value, p_value, std_err = linregress(x, y)
+    print(f"R-squared: {r_value ** 2:.4f}")
+    return r_value ** 2
+
+
 def test_ase_load():
     print(flush=True)
-    # from ase.io import read, write
-    # from ase.visualize import view
+
     # name = 'tests/data/G_T_wob.traj'
     # atoms = read(name, index=':')
     # write(name.replace('.traj', '.xyz'), atoms[0])
     # print(atoms)
     # view(atoms)
 
-    # atoms = read('tests/data/pdb/malonaldehyde.pdb')
+    atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
     # view(atoms)
 
-    input_file = 'tests/data/G_enol_T.traj'
-    output_file = 'tests/data/pdb/G_enol_T.pdb'
-    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    # plot the distance between two atoms over the trajectory
 
-    input_file = 'tests/data/G_T_enol.traj'
-    output_file = 'tests/data/pdb/G_T_enol.pdb'
-    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    # atom1_index = 21
+    # atom2_index = 30
+    #
+    # distances = np.array(ase_distance_between_atoms(atoms, atom1_index, atom2_index))
+    #
+    # # distances -= distances[0]  # Normalize to the first frame
+    # # # turn it into percent change
+    # # distances = (distances / distances[0]) * 100
+    #
+    # # plt.plot(distances)
+    # # plt.xlabel('Frame')
+    # # plt.ylabel('Distance (Angstrom)')
+    # # plt.title(f'Distance between Atom {atom1_index} and Atom {atom2_index}')
+    # # plt.show()
+    #
+    d1 = np.array(ase_distance_between_atoms(atoms, 18, 30))
+    d2 = np.array(ase_distance_between_atoms(atoms, 21, 30))
+    r1 = d2 - d1
+    check_linear_relationship(r1)
+    # plt.plot(r1)
+    # plt.xlabel('Frame')
+    # plt.ylabel('Distance (Angstrom)')
+    # plt.title(f'r1')
+    # plt.show()
 
-    input_file = 'tests/data/G_T_wob.traj'
-    output_file = 'tests/data/pdb/G_T_wob.pdb'
-    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+
+    atom1_index = 8
+    atom2_index = 5
+    atom3_index = 21
+
+    angles = ase_angle_between_atoms(atoms, atom1_index, atom2_index, atom3_index)
+    rr = check_linear_relationship(angles)
+
+    # plt.plot(angles)
+    # plt.xlabel('Frame')
+    # plt.ylabel('Angle (degrees)')
+    # plt.title(f'Angle between Atoms {atom1_index}-{atom2_index}-{atom3_index}, R2={rr:.4f}')
+    # plt.show()
+    #
+    plt.plot(angles, r1)
+    plt.xlabel('Angle (degrees)')
+    plt.ylabel('Distance Difference (Angstrom)')
+    plt.title(f'Angle vs Distance Difference, R2={check_linear_relationship(np.column_stack((angles, r1))[:, 0])}')
+    plt.show()
+
+
+
+    # input_file = 'tests/data/G_enol_T.traj'
+    # output_file = 'tests/data/pdb/G_enol_T.pdb'
+    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    #
+    # input_file = 'tests/data/G_T_enol.traj'
+    # output_file = 'tests/data/pdb/G_T_enol.pdb'
+    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    #
+    # input_file = 'tests/data/G_T_wob.traj'
+    # output_file = 'tests/data/pdb/G_T_wob.pdb'
+    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
 
 
 def test_fix_pdb_chains():
