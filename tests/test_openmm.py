@@ -7,7 +7,7 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pandas as pd
-from ase.io import read, write
+from ase.io import read
 from openmm import openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
@@ -624,12 +624,27 @@ def test_pca_angles():
     print(df[['triplet', 'weight']].head(10))
 
 
-def check_linear_relationship(y, x=None):
+def check_linear_relationship(y, x=None, f_print=True):
+    """
+    Check the linear relationship between two variables using the coefficient of determination (R²).
+
+    Parameters:
+        y (array-like): The dependent variable (response data).
+        x (array-like, optional): The independent variable (predictor data). If None, defaults to a range of integers
+                                  from 0 to the length of `y`.
+        f_print (bool, optional): If True, prints the calculated R² value. Defaults to True.
+
+    Returns:
+        float: The coefficient of determination (R²), which indicates the strength of the linear relationship
+               between `x` and `y`. A value closer to 1 indicates a strong linear relationship.
+    """
     if x is None:
         x = np.arange(len(y))
-    slope, intercept, r_value, p_value, std_err = linregress(x, y)
-    print(f"R-squared: {r_value ** 2:.4f}")
-    return r_value ** 2
+    _, _, r_value, _, _ = linregress(x, y)
+    r2 = r_value ** 2
+    if f_print:
+        print(f"R2: {r2:.4f}")
+    return r2
 
 
 def test_ase_rc1():
@@ -658,14 +673,13 @@ def test_ase_rc1():
     a3_d = 18
     d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
     d2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
-    r1 = d1 -d2
+    r1 = d1 - d2
     rr = check_linear_relationship(r1)
     # plt.plot(r1)
     # plt.xlabel('Frame')
     # plt.ylabel('Distance (Angstrom)')
     # plt.title(f'r1, Distance Difference between {a1_d}-{a2_d} and {a3_d}-{a2_d}, R2={rr:.4f}')
     # plt.show()
-
 
     a1_a = 8
     a2_a = 5
@@ -687,6 +701,7 @@ def test_ase_rc1():
     plt.ylabel(f'Distance {a1_d}-{a2_d} and {a3_d}-{a2_d}')
     plt.title(f'Angle vs Distance Difference, R2={rr:.4f}')
     plt.show()
+
 
 def test_ase_rc2():
     atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
@@ -712,7 +727,7 @@ def test_ase_rc2():
     d5 = np.array(ase_distance_between_atoms(atoms, 8, 18))
     r1 = (d1 - d2) + d3 - d4 + d5  # + dd1 - dd2
 
-    n3 =19
+    n3 = 19
     h3 = 30
     o6 = 5
     o4 = 21
@@ -731,7 +746,7 @@ def test_ase_rc2():
 
     z1 = n3_h3 - o6_h3
     z2 = o6_h3 - o4_h3
-    z3 = 0#n1_h1 - n3_h1
+    z3 = 0  # n1_h1 - n3_h1
     z4 = n1_o2 - n2_o2
     z5 = n2_o2 - n1_n3
 
@@ -742,8 +757,6 @@ def test_ase_rc2():
     plt.ylabel('Distance (Angstrom)')
     plt.title(f'R2={rr:.4f}')
     plt.show()
-
-
 
     # a1_a = 8
     # a2_a = 5
