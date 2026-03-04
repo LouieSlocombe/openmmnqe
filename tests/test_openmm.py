@@ -489,26 +489,49 @@ def test_angle_between_atoms():
 
 
 def ase_distance_between_atoms(atoms, index1, index2):
+    """
+    Calculate the distances between two atoms across all frames in a trajectory.
+
+    Parameters:
+        atoms (list): A list of ASE `Atoms` objects representing the trajectory frames.
+        index1 (int): The index of the first atom.
+        index2 (int): The index of the second atom.
+
+    Returns:
+        list: A list of distances (float) between the two specified atoms for each frame.
+    """
     distances = []
     for frame in atoms:
-        pos1 = frame[index1].position
-        pos2 = frame[index2].position
-        distance = np.linalg.norm(pos1 - pos2)
-        distances.append(distance)
+        pos1 = frame[index1].position  # Position of the first atom in the current frame
+        pos2 = frame[index2].position  # Position of the second atom in the current frame
+        distance = np.linalg.norm(pos1 - pos2)  # Calculate the Euclidean distance
+        distances.append(distance)  # Append the distance to the result list
     return distances
 
 
 def ase_angle_between_atoms(atoms, index1, index2, index3):
+    """
+    Calculate the angles formed by three atoms across all frames in a trajectory.
+
+    Parameters:
+        atoms (list): A list of ASE `Atoms` objects representing the trajectory frames.
+        index1 (int): The index of the first atom.
+        index2 (int): The index of the second atom (vertex of the angle).
+        index3 (int): The index of the third atom.
+
+    Returns:
+        list: A list of angles (float, in degrees) formed by the three specified atoms for each frame.
+    """
     angles = []
     for frame in atoms:
-        pos1 = frame[index1].position
-        pos2 = frame[index2].position
-        pos3 = frame[index3].position
-        v1 = pos1 - pos2
-        v2 = pos3 - pos2
-        cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-        angle = np.arccos(cos_angle) * 180 / np.pi
-        angles.append(angle)
+        pos1 = frame[index1].position  # Position of the first atom
+        pos2 = frame[index2].position  # Position of the second atom (vertex)
+        pos3 = frame[index3].position  # Position of the third atom
+        v1 = pos1 - pos2  # Vector from the vertex to the first atom
+        v2 = pos3 - pos2  # Vector from the vertex to the third atom
+        cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))  # Cosine of the angle
+        angle = np.arccos(cos_angle) * 180.0 / np.pi  # Convert the angle to degrees
+        angles.append(angle)  # Append the calculated angle to the result list
     return angles
 
 
