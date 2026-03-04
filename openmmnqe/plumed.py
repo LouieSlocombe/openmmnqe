@@ -634,3 +634,46 @@ PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
+
+def plumed_input_wob_4(modeller,
+                       idx,
+                       temperature,
+                       r_0=1.1,
+                       wall=1.1,
+                       pace=500,
+                       height=15.0,  # kJ/mol
+                       sigma=0.05,  # nm
+                       bias=20.0,
+                       grid_bin=200):
+    # Convert atom indices to PLUMED format
+    idx = atom_indices_to_plumed(idx)
+    # Unpack indices
+    n3 ,h3 ,o6 ,o4 ,n1 ,h1 ,o2 ,n2 = idx
+    temperature_str = str(temperature.value_in_unit(unit.kelvin))
+    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
+    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    plumed_input = f"""
+# Get the distances
+n3_h3 DISTANCE ATOMS={n3},{h3}
+o6_h3 DISTANCE ATOMS={o6},{h3}
+o4_h3 DISTANCE ATOMS={o4},{h3}
+n1_h1 DISTANCE ATOMS={n1},{h1}
+n3_h1 DISTANCE ATOMS={n3},{h1}
+n1_o2 DISTANCE ATOMS={n1},{o2}
+n2_o2 DISTANCE ATOMS={n2},{o2}
+n1_n3 DISTANCE ATOMS={n1},{n3}
+
+# Define the CVs
+z1: COMBINE ARG=n3_h3,o6_h3 COEFFICIENTS=1,-1 PERIODIC=NO
+z2: COMBINE ARG=o6_h3,o4_h3 COEFFICIENTS=1,-1 PERIODIC=NO
+z3: COMBINE ARG=n1_h1,n3_h1 COEFFICIENTS=1,-1 PERIODIC=NO
+z4: COMBINE ARG=n1_o2,n2_o2 COEFFICIENTS=1,-1 PERIODIC=NO
+z5: COMBINE ARG=n1_o2,n1_n3 COEFFICIENTS=1,-1 PERIODIC=NO
+# Combine into a single CV
+z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
+
+metad: METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS
+PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
+        """
+    sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
+    return plumed_input, sum_hills_input
