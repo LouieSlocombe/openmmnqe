@@ -13,7 +13,7 @@ from openmmml import MLPotential
 from openmmplumed import PlumedForce
 from scipy.stats import linregress
 from sklearn.decomposition import PCA
-
+from ase.visualize import view
 import openmmnqe as nqe
 
 
@@ -728,73 +728,84 @@ def test_ase_rc1():
 
 def test_ase_rc2():
     atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
-    # view(atoms)
+    view(atoms)
 
-    a1_d = 21
-    a2_d = 30
-    a3_d = 18
-    dd1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
-    dd2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
-    # r1 = d1 + d2
+    # a1_d = 21
+    # a2_d = 30
+    # a3_d = 18
+    # dd1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
+    # dd2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
+    # # r1 = d1 + d2
+    # # rr = check_linear_relationship(r1)
+    # # plt.plot(r1)
+    # # plt.xlabel('Frame')
+    # # plt.ylabel('Distance (Angstrom)')
+    # # plt.title(f'r1, Distance Difference between {a1_d}-{a2_d} and {a3_d}-{a2_d}, R2={rr:.4f}')
+    # # plt.show()
+    #
+    # d1 = np.array(ase_distance_between_atoms(atoms, 5, 21))
+    # d2 = np.array(ase_distance_between_atoms(atoms, 5, 19))
+    # d3 = np.array(ase_distance_between_atoms(atoms, 6, 19))
+    # d4 = np.array(ase_distance_between_atoms(atoms, 6, 18))
+    # d5 = np.array(ase_distance_between_atoms(atoms, 8, 18))
+    # r1 = (d1 - d2) + d3 - d4 + d5  # + dd1 - dd2
+    #
+    # n3 = 19
+    # h3 = 30
+    # o6 = 5
+    # o4 = 21
+    # n1 = 6
+    # h1 = 13
+    # o2 = 18
+    # n2 = 8
+    # n3_h3 = np.array(ase_distance_between_atoms(atoms, n3, h3))
+    # o6_h3 = np.array(ase_distance_between_atoms(atoms, o6, h3))
+    # o4_h3 = np.array(ase_distance_between_atoms(atoms, o4, h3))
+    # n1_h1 = np.array(ase_distance_between_atoms(atoms, n1, h1))
+    # n3_h1 = np.array(ase_distance_between_atoms(atoms, n3, h1))
+    # n1_o2 = np.array(ase_distance_between_atoms(atoms, n1, o2))
+    # n2_o2 = np.array(ase_distance_between_atoms(atoms, n2, o2))
+    # n1_n3 = np.array(ase_distance_between_atoms(atoms, n1, n3))
+    #
+    # z1 = n3_h3 - o6_h3
+    # z2 = o6_h3 - o4_h3
+    # z3 = 0  # n1_h1 - n3_h1
+    # z4 = n1_o2 - n2_o2
+    # z5 = n2_o2 - n1_n3
+    #
+    # r1 = z1 + z2 + z3 + z4 + z5
     # rr = check_linear_relationship(r1)
     # plt.plot(r1)
     # plt.xlabel('Frame')
     # plt.ylabel('Distance (Angstrom)')
-    # plt.title(f'r1, Distance Difference between {a1_d}-{a2_d} and {a3_d}-{a2_d}, R2={rr:.4f}')
+    # plt.title(f'R2={rr:.4f}')
     # plt.show()
 
-    d1 = np.array(ase_distance_between_atoms(atoms, 5, 21))
-    d2 = np.array(ase_distance_between_atoms(atoms, 5, 19))
-    d3 = np.array(ase_distance_between_atoms(atoms, 6, 19))
-    d4 = np.array(ase_distance_between_atoms(atoms, 6, 18))
-    d5 = np.array(ase_distance_between_atoms(atoms, 8, 18))
-    r1 = (d1 - d2) + d3 - d4 + d5  # + dd1 - dd2
 
-    n3 = 19
-    h3 = 30
-    o6 = 5
-    o4 = 21
-    n1 = 6
-    h1 = 13
-    o2 = 18
-    n2 = 8
-    n3_h3 = np.array(ase_distance_between_atoms(atoms, n3, h3))
-    o6_h3 = np.array(ase_distance_between_atoms(atoms, o6, h3))
-    o4_h3 = np.array(ase_distance_between_atoms(atoms, o4, h3))
-    n1_h1 = np.array(ase_distance_between_atoms(atoms, n1, h1))
-    n3_h1 = np.array(ase_distance_between_atoms(atoms, n3, h1))
-    n1_o2 = np.array(ase_distance_between_atoms(atoms, n1, o2))
-    n2_o2 = np.array(ase_distance_between_atoms(atoms, n2, o2))
-    n1_n3 = np.array(ase_distance_between_atoms(atoms, n1, n3))
-
-    z1 = n3_h3 - o6_h3
-    z2 = o6_h3 - o4_h3
-    z3 = 0  # n1_h1 - n3_h1
-    z4 = n1_o2 - n2_o2
-    z5 = n2_o2 - n1_n3
-
-    r1 = z1 + z2 + z3 + z4 + z5
-    rr = check_linear_relationship(r1)
-    plt.plot(r1)
+    a1_d = 6
+    a2_d = 18
+    d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
+    rr = check_linear_relationship(d1)
+    plt.plot(d1)
     plt.xlabel('Frame')
     plt.ylabel('Distance (Angstrom)')
-    plt.title(f'R2={rr:.4f}')
+    plt.title(f'r1, Distance Difference between {a1_d}-{a2_d}, R2={rr:.4f}')
     plt.show()
 
-    # a1_a = 8
+
+    # a1_a = 0
     # a2_a = 5
-    # a3_a = 21
+    # a3_a = 16
     #
     # angles = ase_angle_between_atoms(atoms, a1_a, a2_a, a3_a)
     # rr = check_linear_relationship(angles)
     #
-    # # plt.plot(angles)
-    # # plt.xlabel('Frame')
-    # # plt.ylabel('Angle (degrees)')
-    # # plt.title(f'Angle between Atoms {a1_a}-{a2_a}-{a3_a}, R2={rr:.4f}')
-    # # plt.show()
-    # #
-    #
+    # plt.plot(angles)
+    # plt.xlabel('Frame')
+    # plt.ylabel('Angle (degrees)')
+    # plt.title(f'Angle between Atoms {a1_a}-{a2_a}-{a3_a}, R2={rr:.4f}')
+    # plt.show()
+
     # rr = check_linear_relationship(r1, x=angles)
     # plt.plot(angles, r1)
     # plt.xlabel(f'Angle {a1_a}-{a2_a}-{a3_a}')

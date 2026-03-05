@@ -941,7 +941,7 @@ def test_gt_wob_pt_solvated():
     steps_prod = 10_000
 
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
-    potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
+    potential = MLPotential('ani1ccx')  # mace-off23-large mace-off23-small
 
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
@@ -977,7 +977,7 @@ def test_gt_wob_pt_solvated():
     # idx_nr1 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N1'])
     # idx_nr2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:N1'])
 
-    # n3 ,h3 ,o6 ,o4 ,n1 ,h1 ,o2 ,n2
+    # n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2
     idx = ['AAB1:N2',
            'AAB1:H6',
            'AAA1:O1',
@@ -985,14 +985,16 @@ def test_gt_wob_pt_solvated():
            'AAA1:N3',
            'AAA1:H3',
            'AAB1:O1',
-           'AAA1:N4']
+           'AAA1:N4',
+           'AAA1:N1',
+           'AAB1:N1']
     idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
 
     plumed_input, sum_hills_input = nqe.plumed_input_wob_4(modeller,
                                                            idx,
                                                            temperature,
                                                            wall=1.0,
-                                                           height=20.0,
+                                                           height=10.0,
                                                            bias=10.0)
 
     plumed_script_path = "plumed.dat"

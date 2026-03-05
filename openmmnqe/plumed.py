@@ -646,10 +646,14 @@ def plumed_input_wob_4(modeller,
                        sigma=0.05,  # nm
                        bias=20.0,
                        grid_bin=200):
+    rr_u = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * wall, decimals=2)
+    rr_l = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * (2.0-wall), decimals=2)
+
+
     # Convert atom indices to PLUMED format
     idx = atom_indices_to_plumed(idx)
     # Unpack indices
-    n3, h3, o6, o4, n1, h1, o2, n2 = idx
+    n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2 = idx
     temperature_str = str(temperature.value_in_unit(unit.kelvin))
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
@@ -672,6 +676,20 @@ z4: COMBINE ARG=n1_o2,n2_o2 COEFFICIENTS=1,-1 PERIODIC=NO
 z5: COMBINE ARG=n1_o2,n1_n3 COEFFICIENTS=1,-1 PERIODIC=NO
 # Combine into a single CV
 z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
+
+# Constraints to keep the bases together
+nr_dist: DISTANCE ATOMS={nr1},{nr2}
+uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA=500
+lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA=500
+
+# nr_1: DISTANCE ATOMS={nr1},{o2}
+# UPPER_WALLS ARG=nr_1 AT={0.39} KAPPA=500
+# LOWER_WALLS ARG=nr_1 AT={0.28} KAPPA=500
+
+# Constraints to prevent excessive opening of the base pair
+nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}
+w_a1: LOWER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(120.0), decimals=2)} KAPPA=500
+w_a2: UPPER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(140.0), decimals=2)} KAPPA=500
 
 metad: METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS
 PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
