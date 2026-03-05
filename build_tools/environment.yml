@@ -1,28 +1,24 @@
-name: openmmnqe
+name: openmmnqe2
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.12
-  - pip
+  - python>=3.10
+  - pytorch-cuda>=12.1
   - pytest
-  - numpy
-  - scipy
   - pandas
   - matplotlib
   - mdanalysis
   - sympy
-  - ase
-  - pytorch
-  - openmm
-  - openmm-ml
-  - openmm-torch
+  - ase>=3.27.0
+  - openmm>=8.4
+  - openmm-ml>=1.5
   - openmmforcefields
-  - openmm-plumed
+  - openmm-plumed>=2.1
   - openmmtools
   - ambertools
   - pdbfixer
   - rdkit
-  - nnpops
-  - pip:
-      - mace-torch
+  - pymace>=0.3.15

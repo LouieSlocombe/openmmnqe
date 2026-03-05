@@ -969,14 +969,6 @@ def test_gt_wob_pt_solvated():
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
-    # idx_o4 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:O2'])
-    # idx_h3 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:H6'])
-    # idx_o2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:O1'])
-    # idx_o6 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:O1'])
-    # idx_n2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N4'])
-    # idx_nr1 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N1'])
-    # idx_nr2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:N1'])
-
     # n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2
     idx = ['AAB1:N2',
            'AAB1:H6',

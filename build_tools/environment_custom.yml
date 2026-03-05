@@ -27,5 +27,4 @@ dependencies:
   - pdbfixer
   - rdkit
   - nnpops
-  - pip:
-      - mace-torch
+  - pymace
