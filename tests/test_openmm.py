@@ -893,3 +893,26 @@ def test_convert_sdfs_to_pdb():
     nqe.convert_sdfs_to_pdb(["tests/data/DGN.sdf", "tests/data/DTN.sdf"], "combined_ligands.pdb")
     assert os.path.isfile('combined_ligands.pdb')
     os.remove('combined_ligands.pdb')
+
+def test_ase_calc():
+    import os
+
+    import numpy as np
+    import openmm as mm
+    import openmm.app as app
+    import openmm.unit as unit
+    import pytest
+
+    from openmmml import MLPotential
+
+    from mace.calculators.foundations_models import mace_off
+    pdb = app.PDBFile('tests/data/pdb/malonaldehyde.pdb')
+    potential = MLPotential('ase')
+    calculator = mace_off('small', default_dtype='float32')
+    system = potential.createSystem(pdb.topology, calculator=calculator)
+    platform_ints = range(mm.Platform.getNumPlatforms())
+    platform = mm.Platform.getPlatform(platform_ints[0])
+    context = mm.Context(system, mm.VerletIntegrator(0.001), platform)
+    context.setPositions(pdb.getPositions(asNumpy=True))
+    energyML = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
+    print(energyML)
