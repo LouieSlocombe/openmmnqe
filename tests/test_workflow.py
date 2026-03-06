@@ -941,7 +941,7 @@ def test_gt_wob_pt_solvated():
     steps_prod = 10_000
 
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
-    potential = MLPotential('ani1ccx')  # mace-off23-large mace-off23-small
+    potential = MLPotential('mace-omat-0-medium')  # mace-off23-large mace-off23-small
 
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)

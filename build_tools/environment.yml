@@ -21,3 +21,4 @@ dependencies:
   - ambertools
   - pdbfixer
   - rdkit
+  - nnpops
