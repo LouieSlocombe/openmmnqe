@@ -1,0 +1,30 @@
+name: openmmnqe_custom
+channels:
+  - conda-forge
+
+dependencies:
+  # Python toolchain
+  - python=3.12
+  - pip
+  - setuptools
+  - wheel
+  - numpy
+
+  # OpenMM source-build prerequisites
+  - cmake>=3.17
+  - make
+  - cython
+  - swig
+  - doxygen
+
+  # Practical build helpers
+  - git
+  - ninja
+  - pkg-config
+
+  # openmm-ml runtime/build-adjacent deps
+  - openmm-torch>=1.5.1
+  - pytorch
+
+  # Nice to have for validation
+  - pytest
