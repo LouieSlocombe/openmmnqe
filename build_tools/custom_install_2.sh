@@ -1,4 +1,7 @@
-conda env create -f environment_custom.yml
+#bash build_tools/custom_install_2.sh
+#conda remove -n openmmnqe_custom --all
+
+conda env create -f environment_custom_2.yml
 conda activate openmmnqe_custom
 mkdir -p sources && cd sources
 
@@ -17,4 +20,4 @@ git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
 pip install .
 cd ..
 
-conda install -c conda-forge openmm-plumed=2.1 openmmforcefields openmmtools pdbfixer -y
+#conda install -c conda-forge openmm-plumed openmmforcefields pdbfixer -y
