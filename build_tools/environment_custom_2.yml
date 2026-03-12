@@ -1,10 +1,12 @@
 name: openmmnqe_custom
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
 
 dependencies:
   # Python toolchain
-  - python=3.12
+  - python=3.13.*
   - pip
   - setuptools
   - wheel
@@ -23,8 +25,8 @@ dependencies:
   - pkg-config
 
   # openmm-ml runtime/build-adjacent deps
-  - openmm-torch>=1.5.1
-  - pytorch
+  - cuda-toolkit
+  - pytorch-gpu
 
   # Nice to have for validation
   - pytest
