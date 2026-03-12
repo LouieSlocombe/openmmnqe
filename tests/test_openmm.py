@@ -782,7 +782,6 @@ def test_ase_rc2():
     # plt.title(f'R2={rr:.4f}')
     # plt.show()
 
-
     a1_d = 6
     a2_d = 18
     d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
@@ -792,7 +791,6 @@ def test_ase_rc2():
     plt.ylabel('Distance (Angstrom)')
     plt.title(f'r1, Distance Difference between {a1_d}-{a2_d}, R2={rr:.4f}')
     plt.show()
-
 
     # a1_a = 0
     # a2_a = 5
@@ -894,21 +892,3 @@ def test_convert_sdfs_to_pdb():
     nqe.convert_sdfs_to_pdb(["tests/data/DGN.sdf", "tests/data/DTN.sdf"], "combined_ligands.pdb")
     assert os.path.isfile('combined_ligands.pdb')
     os.remove('combined_ligands.pdb')
-
-def test_ase_calc():
-    import openmm as mm
-    import openmm.app as app
-    import openmm.unit as unit
-    from openmmml import MLPotential
-
-    from mace.calculators.foundations_models import mace_off
-    pdb = app.PDBFile('tests/data/pdb/malonaldehyde.pdb')
-    potential = MLPotential('ase')
-    calculator = mace_off('small', default_dtype='float32')
-    system = potential.createSystem(pdb.topology, calculator=calculator)
-    platform_ints = range(mm.Platform.getNumPlatforms())
-    platform = mm.Platform.getPlatform(platform_ints[0])
-    context = mm.Context(system, mm.VerletIntegrator(0.001), platform)
-    context.setPositions(pdb.getPositions(asNumpy=True))
-    energyML = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
-    print(energyML)
