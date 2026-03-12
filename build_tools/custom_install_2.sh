@@ -30,9 +30,6 @@ git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
 pip install .
 cd ..
 
-conda install -c conda-forge zlib mkl mkl-include sysroot_linux-64 -y
-conda install -c conda-forge compilers make cmake pkg-config zlib libblas liblapack numpy -y
-
 # PLUMED
 git clone --branch v2.10.0 https://github.com/plumed/plumed2.git && cd plumed2
 ./configure --prefix=$CONDA_PREFIX --enable-modules=opes
@@ -56,19 +53,6 @@ make PythonInstall
 cd python
 pip install . --no-build-isolation
 cd ../../..
-
-# OpenMM-ForceFields and PDBFixer
-conda install -c conda-forge openmmforcefields pdbfixer -y
-
-# Need to rebuild OpenMM
-cd openmm/build
-make clean
-cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-         -DPYTHON_EXECUTABLE=$(which python)
-make -j$(nproc)
-make install
-make PythonInstall
-cd ../..
 
 # Return to the build tools directory
 cd openmm/build_tools
