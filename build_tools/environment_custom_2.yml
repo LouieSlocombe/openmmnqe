@@ -11,6 +11,15 @@ dependencies:
   - setuptools
   - wheel
   - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - mdanalysis
+  - sympy
+  - ambertools
+  - rdkit
+  - pymace=0.3.15
+  - ase=3.27.0
 
   # OpenMM source-build prerequisites
   - cmake>=3.17
@@ -30,3 +39,8 @@ dependencies:
 
   # Nice to have for validation
   - pytest
+
+#  - openmm-plumed=2.1
+#  - openmmforcefields
+#  - openmmtools
+#  - pdbfixer
