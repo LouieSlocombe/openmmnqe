@@ -12,7 +12,6 @@ from openmm import openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
 from scipy.stats import linregress
-from sklearn.decomposition import PCA
 from ase.visualize import view
 import openmmnqe as nqe
 
@@ -536,6 +535,7 @@ def ase_angle_between_atoms(atoms, index1, index2, index3):
 
 
 def test_pca_distances():
+    from sklearn.decomposition import PCA
     # 1. Load the NEB path
     images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
     n_atoms = len(images[0])
@@ -583,6 +583,7 @@ def test_pca_distances():
 
 
 def test_pca_angles():
+    from sklearn.decomposition import PCA
     # 1. Load the NEB path
     images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
     n_atoms = len(images[0])
@@ -895,14 +896,9 @@ def test_convert_sdfs_to_pdb():
     os.remove('combined_ligands.pdb')
 
 def test_ase_calc():
-    import os
-
-    import numpy as np
     import openmm as mm
     import openmm.app as app
     import openmm.unit as unit
-    import pytest
-
     from openmmml import MLPotential
 
     from mace.calculators.foundations_models import mace_off
