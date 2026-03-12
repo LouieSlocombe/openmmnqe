@@ -3,6 +3,7 @@
 
 conda env create -f environment_custom_2.yml
 conda activate openmmnqe_custom
+cd ..
 mkdir -p sources && cd sources
 
 # OpenMM
@@ -19,5 +20,29 @@ cd ../..
 git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
 pip install .
 cd ..
+
+# PLUMED
+git clone --branch v2.10.0 https://github.com/plumed/plumed2.git && cd plumed2
+./configure --prefix=$CONDA_PREFIX --enable-modules=opes
+make -j$(nproc)
+make install
+export PLUMED_INCLUDE_DIR=$CONDA_PREFIX/include/plumed
+export PLUMED_LIBRARY_DIR=$CONDA_PREFIX/lib
+cd ..
+
+# openmm-plumed
+git clone https://github.com/openmm/openmm-plumed.git && cd openmm-plumed
+mkdir -p build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+         -DOPENMM_DIR=$CONDA_PREFIX \
+         -DPLUMED_INCLUDE_DIR=$PLUMED_INCLUDE_DIR \
+         -DPLUMED_LIBRARY_DIR=$PLUMED_LIBRARY_DIR \
+         -DPYTHON_EXECUTABLE=$(which python)
+make -j$(nproc)
+make install
+make PythonInstall
+cd python
+pip install . --no-build-isolation
+cd ../../..
 
 #conda install -c conda-forge openmm-plumed openmmforcefields pdbfixer -y
