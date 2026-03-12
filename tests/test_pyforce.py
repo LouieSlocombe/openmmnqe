@@ -1,49 +1,58 @@
-import os
 import glob
-import openmm as mm
+import os
+
+import numpy as np
 import openmm.app as app
 import openmm.unit as unit
-from openmmml import MLPotential
-import sys
+from ase.calculators.orca import ORCA, OrcaProfile
 from mace.calculators.foundations_models import mace_off
-
-from ase.calculators.orca import OrcaProfile
-from ase.calculators.orca import ORCA
 from openmm import openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
 
 
 def test_ase_mace():
-    pdb = app.PDBFile('tests/data/pdb/malonaldehyde.pdb')
+    print(flush=True)
+    pdb = app.PDBFile('tests/data/pdb/toluene.pdb')
     potential = MLPotential('ase')
     calculator = mace_off('small', default_dtype='float32')
     system = potential.createSystem(pdb.topology, calculator=calculator)
-    platform_ints = range(mm.Platform.getNumPlatforms())
-    platform = mm.Platform.getPlatform(platform_ints[0])
-    context = mm.Context(system, mm.VerletIntegrator(0.001), platform)
+    platform = openmm.Platform.getPlatform('CPU')
+    context = openmm.Context(system, openmm.VerletIntegrator(0.001), platform)
     context.setPositions(pdb.getPositions(asNumpy=True))
     energy = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
-    print(energy)
-    assert abs(energy - -701887.9719313162) < 1e-3
+    print(energy, flush=True)
+    assert np.isclose(-713468.6327560507, energy, rtol=1e-6)
+
+
+def test_openmm_mlp():
+    print(flush=True)
+    pdb = app.PDBFile('tests/data/pdb/toluene.pdb')
+    potential = MLPotential('mace-off23-small')
+    system = potential.createSystem(pdb.topology, returnEnergyType='energy')
+    platform = openmm.Platform.getPlatform('CPU')
+    context = openmm.Context(system, openmm.VerletIntegrator(0.001), platform)
+    context.setPositions(pdb.getPositions(asNumpy=True))
+    energy = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
+    print(energy, flush=True)
+    assert np.isclose(-713468.6327560507, energy, rtol=1e-6)
 
 
 def test_ase_orca():
-    pdb = app.PDBFile('tests/data/pdb/malonaldehyde.pdb')
+    print(flush=True)
+    pdb = app.PDBFile('tests/data/pdb/toluene.pdb')
     potential = MLPotential('ase')
 
     profile = OrcaProfile(command=os.environ['ORCA_PATH'])
     calculator = ORCA(profile=profile, orcasimpleinput='PBE def2-SVP RI D3BJ ENGRAD')  # PBE def2-SVP RI D3BJ or B97-3c
 
     system = potential.createSystem(pdb.topology, calculator=calculator)
-    platform_ints = range(mm.Platform.getNumPlatforms())
-    platform = mm.Platform.getPlatform(platform_ints[0])
-    context = mm.Context(system, mm.VerletIntegrator(0.001), platform)
+    platform = openmm.Platform.getPlatform('CPU')
+    context = openmm.Context(system, openmm.VerletIntegrator(0.001), platform)
     context.setPositions(pdb.getPositions(asNumpy=True))
     energy = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
-    print(energy)
-    assert abs(energy - -700122.448099461) < 1e-3
-    # remove all the orca.* files
+    print(energy, flush=True)
+    assert np.isclose(-711546.8260864686, energy, rtol=1e-6)
     [os.remove(file) for file in glob.glob('orca.*')]
 
 
