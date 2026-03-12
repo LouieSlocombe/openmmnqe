@@ -1,9 +1,18 @@
-#bash build_tools/custom_install_2.sh
-#conda remove -n openmmnqe_custom --all
+# cd to the build tools directory
+cd $HOME/skunkworks/openmmnqe/build_tools
+#bash custom_install_2.sh
+#conda remove -n openmmnqe_custom --all -y
 
+conda init bash
 conda env create -f environment_custom_2.yml
 conda activate openmmnqe_custom
-cd ..
+cd ../..
+
+# if the sources directory exists remove it to ensure a clean build
+if [ -d "sources" ]; then
+    rm -rf sources
+fi
+
 mkdir -p sources && cd sources
 
 # OpenMM
@@ -20,6 +29,9 @@ cd ../..
 git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
 pip install .
 cd ..
+
+conda install -c conda-forge zlib mkl mkl-include sysroot_linux-64 -y
+conda install -c conda-forge compilers make cmake pkg-config zlib libblas liblapack numpy -y
 
 # PLUMED
 git clone --branch v2.10.0 https://github.com/plumed/plumed2.git && cd plumed2
@@ -45,4 +57,18 @@ cd python
 pip install . --no-build-isolation
 cd ../../..
 
-#conda install -c conda-forge openmm-plumed openmmforcefields pdbfixer -y
+# OpenMM-ForceFields and PDBFixer
+conda install -c conda-forge openmmforcefields pdbfixer -y
+
+# Need to rebuild OpenMM
+cd openmm/build
+make clean
+cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
+         -DPYTHON_EXECUTABLE=$(which python)
+make -j$(nproc)
+make install
+make PythonInstall
+cd ../..
+
+# Return to the build tools directory
+cd openmm/build_tools
