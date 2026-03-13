@@ -28,6 +28,7 @@ def run_openmm_relaxation(modeller,
                           platform_name=None,
                           potential=None,
                           ml_idx=None,
+                          calculator=None,
                           ):
     """
     Perform a staged energy minimisation with progressively weaker backbone restraints.
@@ -107,6 +108,7 @@ def run_openmm_relaxation(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -116,6 +118,7 @@ def run_openmm_relaxation(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     current_positions = modeller.positions
@@ -282,6 +285,7 @@ def run_openmm_heating(modeller,
                        deuterate_option='water',
                        potential=None,
                        ml_idx=None,
+                       calculator=None,
                        ):
     """
     Gently heat a system from 0 K to the target temperature with backbone restraints.
@@ -364,6 +368,7 @@ def run_openmm_heating(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -373,6 +378,7 @@ def run_openmm_heating(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     if deuterate:
         print("Deuterating system...", flush=True)
@@ -452,6 +458,7 @@ def run_openmm_npt(modeller,
                    deuterate_option='water',
                    potential=None,
                    ml_idx=None,
+                   calculator=None,
                    ):
     """
     Run a two-phase NPT density equilibration.
@@ -536,6 +543,7 @@ def run_openmm_npt(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -545,6 +553,7 @@ def run_openmm_npt(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     if deuterate:
         print("Deuterating system...", flush=True)
@@ -621,6 +630,7 @@ def run_openmm_prod(modeller,
                     deuterate_option='water',
                     potential=None,
                     ml_idx=None,
+                    calculator=None,
                     ):
     """
     Run an NPT production MD simulation, optionally with PLUMED enhanced sampling.
@@ -698,6 +708,7 @@ def run_openmm_prod(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -707,6 +718,7 @@ def run_openmm_prod(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     if deuterate:
@@ -774,6 +786,7 @@ def run_openmm_rpmd_equilibration(modeller,
                                   deuterate_option='water',
                                   potential=None,
                                   ml_idx=None,
+                                  calculator=None,
                                   atoms_to_watch=None):
     """
     Equilibrate a ring-polymer molecular dynamics (RPMD) simulation.
@@ -849,6 +862,7 @@ def run_openmm_rpmd_equilibration(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -858,6 +872,7 @@ def run_openmm_rpmd_equilibration(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     if deuterate:
@@ -940,7 +955,8 @@ def run_openmm_rpmd_contracted(modeller,
                                deuterate_option='water',
                                potential=None,
                                ml_idx=None,
-                               atoms_to_watch=None):
+                               atoms_to_watch=None,
+                               calculator=None):
     """
     Run a contracted ring-polymer MD (RPMD) production simulation.
 
@@ -1036,6 +1052,7 @@ def run_openmm_rpmd_contracted(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -1045,6 +1062,7 @@ def run_openmm_rpmd_contracted(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     if deuterate:
@@ -1170,7 +1188,8 @@ def run_openmm_rpmd_prod(modeller,
                          deuterate_option='water',
                          potential=None,
                          ml_idx=None,
-                         atoms_to_watch=None):
+                         atoms_to_watch=None,
+                         calculator=None):
     """
     Run a full ring-polymer MD (RPMD) production simulation.
 
@@ -1253,6 +1272,7 @@ def run_openmm_rpmd_prod(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -1262,6 +1282,7 @@ def run_openmm_rpmd_prod(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     if deuterate:
@@ -1353,6 +1374,7 @@ def run_openmm_adqtb_eq(modeller,
                         deuterate_option='water',
                         potential=None,
                         ml_idx=None,
+                        calculator=None,
                         ):
     """
     Run an adaptive quantum thermal bath (adQTB) equilibration simulation.
@@ -1425,6 +1447,7 @@ def run_openmm_adqtb_eq(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -1434,6 +1457,7 @@ def run_openmm_adqtb_eq(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     if deuterate:
@@ -1497,6 +1521,7 @@ def run_openmm_adqtb_prod(modeller,
                           deuterate_option='water',
                           potential=None,
                           ml_idx=None,
+                          calculator=None,
                           ):
     """
     Run an adaptive quantum thermal bath (adQTB) production simulation.
@@ -1577,6 +1602,7 @@ def run_openmm_adqtb_prod(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -1586,6 +1612,7 @@ def run_openmm_adqtb_prod(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     if deuterate:
