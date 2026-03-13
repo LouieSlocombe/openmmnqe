@@ -750,3 +750,22 @@ def check_platform(platform=None):
         else:
             platform = 'CPU'
     return platform
+
+
+def temperature_to_kbt(temperature):
+    """
+    Converts a temperature to kBT (Boltzmann constant times temperature) in kilojoules per mole.
+
+    Parameters
+    ----------
+    temperature : openmm.unit.Quantity or float
+        The temperature to convert. If a Quantity, it should have units of kelvin.
+        If a float, it is assumed to be in kelvin.
+
+    Returns
+    -------
+    float
+        The value of kBT at the given temperature, in kilojoules per mole.
+    """
+    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
+    return kt.value_in_unit(unit.kilojoule_per_mole)

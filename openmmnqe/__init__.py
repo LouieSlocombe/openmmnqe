@@ -79,4 +79,5 @@ from .tools import (zero_velocities,
                     distance_between_atoms,
                     angle_between_atoms,
                     check_platform,
+                    temperature_to_kbt,
                     )
