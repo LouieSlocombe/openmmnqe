@@ -1,7 +1,7 @@
 import numpy as np
 import openmm.unit as unit
 
-from .tools import atom_indices_to_plumed, distance_between_atoms
+from .tools import atom_indices_to_plumed, distance_between_atoms, temperature_to_kbt
 
 
 def plumed_input_1pt(modeller,
@@ -75,22 +75,20 @@ def plumed_input_1pt(modeller,
     # Convert angle limit to radians and round
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    temperature_str = str(temperature.value_in_unit(unit.kelvin))
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
-    plumed_input = f"""
-    c_d: COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}
-    c_a: COORDINATION GROUPA={idx[2]} GROUPB={idx[1]} R_0={r_0}
-    pt_cv: COMBINE ARG=c_d,c_a COEFFICIENTS=1,-1 PERIODIC=NO
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
+    plumed_input = f"""c_d: COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}
+c_a: COORDINATION GROUPA={idx[2]} GROUPB={idx[1]} R_0={r_0}
+pt_cv: COMBINE ARG=c_d,c_a COEFFICIENTS=1,-1 PERIODIC=NO
 
-    dist_da: DISTANCE ATOMS={idx[2]},{idx[0]}
-    uwall: UPPER_WALLS ARG=dist_da AT={wall} KAPPA=3000
-    
-    ang_1: ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}
-    w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
+dist_da: DISTANCE ATOMS={idx[2]},{idx[0]}
+uwall: UPPER_WALLS ARG=dist_da AT={wall} KAPPA=3000
 
-    metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
-    PRINT ARG=c_d,c_a,pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
+ang_1: ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}
+w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
+
+metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
+PRINT ARG=c_d,c_a,pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
@@ -176,34 +174,33 @@ def plumed_input_2pt_1d(modeller,
     # Convert angle limit to radians and round
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    temperature_str = str(temperature.value_in_unit(unit.kelvin))
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
     plumed_input = f"""
-    # Proton transfer 1
-    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
-    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
-    cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
-    # Limits
-    dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
-    u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
-    ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
-    w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
+# Proton transfer 1
+c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
+c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
+cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
+# Limits
+dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
+u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
+ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
+w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
 
-    # Proton transfer 2
-    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
-    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
-    cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
-    # Limits
-    dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
-    u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
-    ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
-    w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+# Proton transfer 2
+c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
+c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
+cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
+# Limits
+dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
+u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
+ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
+w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
 
-    pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=0.5,0.5 PERIODIC=NO
+pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=0.5,0.5 PERIODIC=NO
 
-    metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
-    PRINT ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
+metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
+PRINT ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
@@ -288,31 +285,30 @@ def plumed_input_2pt_2d(modeller,
     # Convert angle limit to radians and round
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    temperature_str = str(temperature.value_in_unit(unit.kelvin))
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
     plumed_input = f"""
-    # Proton transfer 1
-    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
-    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
-    cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
-    # Limits
-    dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
-    u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
-    ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
-    w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
-    
-    # Proton transfer 2
-    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
-    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
-    cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
-    dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
-    u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
-    ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
-    w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+# Proton transfer 1
+c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
+c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
+cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
+# Limits
+dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
+u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
+ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
+w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
 
-    metad: METAD ARG=cv_diff1,cv_diff2 PACE={pace} HEIGHT={height} SIGMA={sigma},{sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min},{grid_min} GRID_MAX={grid_max},{grid_max} GRID_BIN={grid_bin},{grid_bin}
-    PRINT ARG=cv_diff1,cv_diff2,metad.bias STRIDE={pace} FILE=COLVAR
+# Proton transfer 2
+c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
+c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
+cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
+dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
+u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
+ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
+w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+
+metad: METAD ARG=cv_diff1,cv_diff2 PACE={pace} HEIGHT={height} SIGMA={sigma},{sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min},{grid_min} GRID_MAX={grid_max},{grid_max} GRID_BIN={grid_bin},{grid_bin}
+PRINT ARG=cv_diff1,cv_diff2,metad.bias STRIDE={pace} FILE=COLVAR
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min},{grid_min} --max {grid_max},{grid_max} --bin {grid_bin},{grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
@@ -383,34 +379,33 @@ def plumed_input_wob_1(idx1,
     # Convert angle limit to radians and round
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    temperature_str = str(temperature.value_in_unit(unit.kelvin))
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
     plumed_input = f"""
-    c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r_0}
-    c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r_0}
-    cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
+c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r_0}
+c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r_0}
+cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
 
-    dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
-    u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
+dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
+u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
 
-    ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
-    w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
+ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
+w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
 
-    c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r_0}
-    c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r_0}
-    cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
+c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r_0}
+c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r_0}
+cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
 
-    dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
-    u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
+dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
+u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
 
-    ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
-    w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
+w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
 
-    pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
+pt_cv: COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=1.0,-1.0 PERIODIC=NO
 
-    metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
-    PRINT ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
+metad: METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
+PRINT ARG=pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
@@ -509,9 +504,8 @@ def plumed_input_wob_2(modeller,
     idx_h1 += 1
     idx_n2 += 1
 
-    temperature_str = str(temperature.value_in_unit(unit.kelvin))
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
     plumed_input = f"""
 # z1: top PT reaction coordinate
 c_1: COORDINATION GROUPA={idx_n3} GROUPB={idx_h3} R_0={r_1}
@@ -600,9 +594,8 @@ def plumed_input_wob_3(modeller,
     idx_nr1 = atom_indices_to_plumed(idx_nr1)[0]
     idx_nr2 = atom_indices_to_plumed(idx_nr2)[0]
 
-    temperature_str = str(temperature.value_in_unit(unit.kelvin))
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
     plumed_input = f"""
 # z1: PT reaction coordinate
 c_1: DISTANCE ATOMS={idx_o4},{idx_h3}
@@ -654,9 +647,8 @@ def plumed_input_wob_4(modeller,
     idx = atom_indices_to_plumed(idx)
     # Unpack indices
     n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2 = idx
-    temperature_str = str(temperature.value_in_unit(unit.kelvin))
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    kt_str = kt.value_in_unit(unit.kilojoule_per_mole)
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
     plumed_input = f"""
 # Get the distances
 n3_h3: DISTANCE ATOMS={n3},{h3}
