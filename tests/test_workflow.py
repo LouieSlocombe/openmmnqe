@@ -81,7 +81,7 @@ def test_run_openmm_npt():
     nqe.center_in_box(modeller)
 
     nqe.run_openmm_npt(modeller, forcefield)
-    nqe.remove_file_pattern('npt_equilibrated*')
+    nqe.remove_file_pattern('npt_equilibrate*')
 
 
 def test_eq_workflow():
@@ -111,7 +111,7 @@ def test_eq_workflow():
 
     nqe.remove_file('minimized.pdb')
     nqe.remove_file_pattern('equilibrate*')
-    nqe.remove_file_pattern('npt_equilibrated*')
+    nqe.remove_file_pattern('npt_equilibrate*')
 
 
 def test_eq_workflow_mixed():
@@ -146,7 +146,7 @@ def test_eq_workflow_mixed():
 
     nqe.remove_file('minimized.pdb')
     nqe.remove_file_pattern('equilibrate*')
-    nqe.remove_file_pattern('npt_equilibrated*')
+    nqe.remove_file_pattern('npt_equilibrate*')
 
 
 def test_eq_workflow_plumed_dihedral():
@@ -190,7 +190,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_npt(modeller, forcefield)
 
-    pdb = app.PDBFile("npt_equilibrated.pdb")
+    pdb = app.PDBFile("npt_equilibrate.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_prod(modeller,
                         forcefield,
@@ -207,7 +207,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     plt.show()
 
     n_beads = 4
-    pdb = app.PDBFile("npt_equilibrated.pdb")
+    pdb = app.PDBFile("npt_equilibrate.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_rpmd_equilibration(modeller,
                                       forcefield,
@@ -236,7 +236,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
-    nqe.remove_file_pattern('npt_equilibrated*')
+    nqe.remove_file_pattern('npt_equilibrate*')
     nqe.remove_file_pattern('prod*')
 
     nqe.remove_file_pattern('rpmd_ready*')
@@ -586,7 +586,7 @@ def test_malonaldehyde_pt_solvated_full():
                        potential=potential,
                        ml_idx=ml_atoms)
 
-    pdb = app.PDBFile("npt_equilibrated.pdb")
+    pdb = app.PDBFile("npt_equilibrate.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
@@ -619,7 +619,7 @@ def test_malonaldehyde_pt_solvated_full():
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
-    nqe.remove_file_pattern('npt_equilibrated*')
+    nqe.remove_file_pattern('npt_equilibrate*')
     nqe.remove_file_pattern('prod*')
 
     nqe.remove_file('COLVAR')

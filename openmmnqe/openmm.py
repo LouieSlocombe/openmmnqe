@@ -451,7 +451,7 @@ def run_openmm_heating(modeller,
 
 def run_openmm_npt(modeller,
                    forcefield,
-                   output_prefix='npt_equilibrated',
+                   output_prefix='npt_equilibrate',
                    pressure=1.0 * unit.bar,
                    temperature=300.0 * unit.kelvin,
                    gamma=1.0 / unit.picosecond,
@@ -482,7 +482,7 @@ def run_openmm_npt(modeller,
     forcefield : openmm.app.ForceField
         The force field used to parameterise the system.
     output_prefix : str, optional
-        Prefix for output files. Default is ``'npt_equilibrated'``.
+        Prefix for output files. Default is ``'npt_equilibrate'``.
     pressure : openmm.unit.Quantity, optional
         Target pressure for the barostat. Default is 1.0 bar.
     temperature : openmm.unit.Quantity, optional
