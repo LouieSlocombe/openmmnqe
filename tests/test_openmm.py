@@ -45,6 +45,7 @@ def test_ase_mace():
                                      calculator=calculator)
     nqe.remove_file_pattern('minimized*')
 
+
 def test_ase_orca():
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/malonaldehyde.pdb")
@@ -742,3 +743,11 @@ def test_center_in_box():
     centroid = np.mean(centered_positions, axis=0)
     box_center = np.array([5.0, 5.0, 5.0])  # Half of box dimensions
     assert np.allclose(centroid, box_center, atol=1e-6), f"Centroid {centroid} not at box center {box_center}"
+
+
+def test_temperature_to_kbt():
+    print(flush=True)
+    temperature = 300.0 * unit.kelvin
+    kbt = nqe.temperature_to_kbt(temperature)
+    print(kbt, flush=True)
+    assert np.allclose(kbt, 2.494338785445972, atol=1e-6)
