@@ -11,6 +11,7 @@ from ase.visualize import view
 from openmmml import MLPotential
 from scipy.stats import linregress
 from mace.calculators.foundations_models import mace_off
+from ase.calculators.orca import ORCA, OrcaProfile
 import openmmnqe as nqe
 
 
@@ -32,7 +33,8 @@ def test_ase_mace():
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
 
     potential = MLPotential('ase')
-    calculator = mace_off('small', default_dtype='float32')
+    calculator = mace_off('small',
+                          default_dtype='float32')
 
     modeller = app.Modeller(pdb.topology, pdb.positions)
     modeller.deleteWater()
@@ -42,6 +44,24 @@ def test_ase_mace():
                                      potential,
                                      calculator=calculator)
     nqe.remove_file_pattern('minimized*')
+
+def test_ase_orca():
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/malonaldehyde.pdb")
+
+    potential = MLPotential('ase')
+    profile = OrcaProfile(command=os.environ['ORCA_PATH'])
+    calculator = ORCA(profile=profile, orcasimpleinput='ENGRAD')
+
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     potential,
+                                     calculator=calculator)
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('orca*')
 
 
 def test_openmm_ml_mixed_system():
