@@ -99,27 +99,49 @@ def run_openmm_relaxation(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     current_positions = modeller.positions
     restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
@@ -228,27 +250,49 @@ def run_openmm_relaxation_simple(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
@@ -359,27 +403,50 @@ def run_openmm_heating(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
+
     if deuterate:
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
@@ -534,27 +601,50 @@ def run_openmm_npt(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
+
     if deuterate:
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
@@ -699,27 +789,49 @@ def run_openmm_prod(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     if deuterate:
         print("Deuterating system...", flush=True)
@@ -853,27 +965,49 @@ def run_openmm_rpmd_equilibration(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     if deuterate:
         print("Deuterating system...", flush=True)
@@ -1043,27 +1177,49 @@ def run_openmm_rpmd_contracted(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     if deuterate:
         print("Deuterating system...", flush=True)
@@ -1263,27 +1419,49 @@ def run_openmm_rpmd_prod(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     if deuterate:
         print("Deuterating system...", flush=True)
@@ -1438,27 +1616,49 @@ def run_openmm_adqtb_eq(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     if deuterate:
         print("Deuterating system...", flush=True)
@@ -1593,27 +1793,49 @@ def run_openmm_adqtb_prod(modeller,
             rigidWater=False,
             removeCMMotion=True,
         )
-        system = potential.createMixedSystem(
-            modeller.topology,
-            mm_system,
-            ml_idx,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
     else:
-        system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-            calculator=calculator,
-        )
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
 
     if deuterate:
         print("Deuterating system...", flush=True)
