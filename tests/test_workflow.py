@@ -16,9 +16,13 @@ def test_run_openmm_relaxation():
     modeller.deleteWater()
     modeller.addHydrogens()
 
+    padding = 1.5
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
-                        padding=1.5 * unit.nanometer,
-                        boxShape='dodecahedron')
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
     nqe.run_openmm_relaxation(modeller, forcefield, platform_name='CUDA')
     nqe.remove_file('minimized.pdb')
 
@@ -31,9 +35,13 @@ def test_run_openmm_heating():
     modeller.deleteWater()
     modeller.addHydrogens()
 
+    padding = 1.5
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
-                        padding=1.5 * unit.nanometer,
-                        boxShape='dodecahedron')
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
     nqe.run_openmm_heating(modeller, forcefield)
     nqe.remove_file_pattern('equilibrate*')
 
@@ -46,9 +54,13 @@ def test_run_openmm_heating_deuterate():
     modeller.deleteWater()
     modeller.addHydrogens()
 
+    padding = 1.5
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
-                        padding=1.5 * unit.nanometer,
-                        boxShape='dodecahedron')
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
     nqe.run_openmm_heating(modeller, forcefield, deuterate=True)
     nqe.remove_file_pattern('equilibrate*')
 
@@ -61,9 +73,13 @@ def test_run_openmm_npt():
     modeller.deleteWater()
     modeller.addHydrogens()
 
+    padding = 1.5
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
-                        padding=1.5 * unit.nanometer,
-                        boxShape='dodecahedron')
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
     nqe.run_openmm_npt(modeller, forcefield)
     nqe.remove_file_pattern('npt_equilibrated*')
 
@@ -75,9 +91,13 @@ def test_eq_workflow():
     modeller = app.Modeller(pdb.topology, pdb.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
+
+    padding = 1.5
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
-                        padding=1.5 * unit.nanometer,
-                        boxShape='dodecahedron')
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
 
     nqe.run_openmm_relaxation(modeller, forcefield)
 
@@ -105,12 +125,12 @@ def test_eq_workflow_mixed():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    # Solvate
-    padding = 2.0
-    box_shape = 'dodecahedron'
+    padding = 1.5
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
+    nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
@@ -139,10 +159,13 @@ def test_eq_workflow_plumed_dihedral():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    # Solvate
+    padding = 1.5
+    box_shape = 'cube'
     modeller.addSolvent(forcefield,
-                        padding=1.0 * unit.nanometer,
-                        boxShape='cube')
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['ALA1:C', 'ALA2:N', 'ALA2:CA', 'ALA2:C'])
     idx_str = ",".join([str(i + 1) for i in idx])
 
@@ -310,7 +333,6 @@ def test_malonaldehyde_pt_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -385,7 +407,6 @@ def test_malonaldehyde_pt_quantum_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -469,7 +490,6 @@ def test_malonaldehyde_pt_adqtb_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -552,7 +572,6 @@ def test_malonaldehyde_pt_solvated_full():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -640,7 +659,6 @@ def test_fad_pt_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -716,7 +734,6 @@ def test_gc_pt_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -793,7 +810,6 @@ def test_gc_pt_quantum_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -879,7 +895,6 @@ def test_g_enol_t_pt_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -955,7 +970,6 @@ def test_gt_wob_pt_solvated():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
@@ -1030,6 +1044,13 @@ def test_eq_workflow_plumed_pt():
     modeller = app.Modeller(pdb.topology, pdb.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
+
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
     plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller, idx, temperature)
