@@ -1,5 +1,4 @@
 import os
-import sys
 from itertools import combinations
 
 import matplotlib.pyplot as plt
@@ -8,11 +7,10 @@ import openmm.app as app
 import openmm.unit as unit
 import pandas as pd
 from ase.io import read
-from openmm import openmm
-from openmmml import MLPotential
-from openmmplumed import PlumedForce
-from scipy.stats import linregress
 from ase.visualize import view
+from openmmml import MLPotential
+from scipy.stats import linregress
+
 import openmmnqe as nqe
 
 
@@ -683,3 +681,27 @@ def test_convert_sdfs_to_pdb():
     nqe.convert_sdfs_to_pdb(["tests/data/DGN.sdf", "tests/data/DTN.sdf"], "combined_ligands.pdb")
     assert os.path.isfile('combined_ligands.pdb')
     os.remove('combined_ligands.pdb')
+
+
+def test_center_in_box():
+    print(flush=True)
+    # Create a simple topology and positions
+    topology = app.Topology()
+    chain = topology.addChain()
+    residue = topology.addResidue("RES", chain)
+    atom1 = topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
+    atom2 = topology.addAtom("A2", app.Element.getByAtomicNumber(6), residue)
+    # Set box dimensions (e.g., 10x10x10 nm)
+    topology.setUnitCellDimensions(unit.Quantity((10.0, 10.0, 10.0), unit.nanometer))
+    # Place atoms at arbitrary positions
+    positions = unit.Quantity(np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]), unit.nanometer)
+    modeller = app.Modeller(topology, positions)
+
+    # Call the function under test
+    nqe.center_in_box(modeller)
+
+    # Check that the centroid is at the box center
+    centered_positions = modeller.positions.value_in_unit(unit.nanometer)
+    centroid = np.mean(centered_positions, axis=0)
+    box_center = np.array([5.0, 5.0, 5.0])  # Half of box dimensions
+    assert np.allclose(centroid, box_center, atol=1e-6), f"Centroid {centroid} not at box center {box_center}"
