@@ -6,6 +6,7 @@ import numpy as np
 import openmm.unit as unit
 from openmm import openmm, app
 from scipy import constants
+import torch
 
 
 def zero_velocities(n_atoms):
@@ -721,3 +722,31 @@ def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
 
     theta = math.acos(cos_theta)
     return math.degrees(theta) if degrees else theta
+
+
+def check_platform(platform=None):
+    """
+    Determines the computation platform to use, auto-detecting CUDA if not specified.
+
+    If the `platform` argument is not provided, this function checks if CUDA is
+    available via PyTorch (`torch.cuda.is_available()`). It returns 'CUDA' if
+    available, otherwise defaults to 'CPU'. If a specific platform string is
+    passed, it is returned directly.
+
+    Parameters
+    ----------
+    platform : str, optional
+        The name of the platform to force (e.g., 'CUDA', 'OpenCL', 'CPU').
+        If None (default), the platform is automatically detected based on hardware.
+
+    Returns
+    -------
+    str
+        The platform name string (e.g., 'CUDA' or 'CPU').
+    """
+    if platform is None:
+        if torch.cuda.is_available():
+            platform = 'CUDA'
+        else:
+            platform = 'CPU'
+    return platform
