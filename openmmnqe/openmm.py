@@ -167,7 +167,6 @@ def run_openmm_relaxation_simple(modeller,
                                  temperature=300.0 * unit.kelvin,
                                  gamma=1.0 / unit.picosecond,
                                  time_step=1.0 * unit.femtoseconds,
-                                 n_report=1,
                                  platform_name=None,
                                  potential=None,
                                  ml_idx=None,
@@ -193,8 +192,6 @@ def run_openmm_relaxation_simple(modeller,
         Friction coefficient. Default is 1.0 / ps.
     time_step : openmm.unit.Quantity, optional
         Integration time step. Default is 1.0 fs.
-    n_report : int, optional
-        Reporter interval in steps. Default is 1.
     platform_name : str, optional
         OpenMM platform name. Default is ``'CUDA'``.
     potential : object or None, optional
@@ -251,23 +248,6 @@ def run_openmm_relaxation_simple(modeller,
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
-
-    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
 
     # Local energy minimization
     print("Minimizing energy", flush=True)
