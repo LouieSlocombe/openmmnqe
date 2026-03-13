@@ -10,7 +10,7 @@ from ase.io import read
 from ase.visualize import view
 from openmmml import MLPotential
 from scipy.stats import linregress
-
+from mace.calculators.foundations_models import mace_off
 import openmmnqe as nqe
 
 
@@ -22,9 +22,26 @@ def test_openmm_ml():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    nqe.run_openmm_relaxation(modeller,
-                              forcefield)
-    nqe.remove_file('minimized.pdb')
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield)
+    nqe.remove_file_pattern('minimized*')
+
+
+def test_ase_mace():
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+
+    potential = MLPotential('ase')
+    calculator = mace_off('small', default_dtype='float32')
+
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     potential,
+                                     calculator=calculator)
+    nqe.remove_file_pattern('minimized*')
 
 
 def test_openmm_ml_mixed_system():
@@ -50,7 +67,7 @@ def test_openmm_ml_mixed_system():
                               forcefield,
                               potential=potential,
                               ml_idx=ml_atoms)
-    nqe.remove_file('minimized.pdb')
+    nqe.remove_file_pattern('minimized*')
 
 
 def test_prepare_ligand_ff():
@@ -111,7 +128,7 @@ def test_nonstandard_ligand():
 
     nqe.run_openmm_relaxation(modeller,
                               forcefield)
-    nqe.remove_file('minimized.pdb')
+    nqe.remove_file_pattern('minimized*')
 
 
 def test_prepare_ligand_ff_multiple():

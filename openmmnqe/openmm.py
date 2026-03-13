@@ -170,6 +170,7 @@ def run_openmm_relaxation_simple(modeller,
                                  platform_name=None,
                                  potential=None,
                                  ml_idx=None,
+                                 calculator=None,
                                  ):
     """
     Perform a simple, unrestrained energy minimisation.
@@ -198,6 +199,8 @@ def run_openmm_relaxation_simple(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Returns
     -------
@@ -231,6 +234,7 @@ def run_openmm_relaxation_simple(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
     else:
         system = forcefield.createSystem(
@@ -240,6 +244,7 @@ def run_openmm_relaxation_simple(modeller,
             constraints=None,
             rigidWater=False,
             removeCMMotion=True,
+            calculator=calculator,
         )
 
     integrator = openmm.LangevinMiddleIntegrator(temperature,
