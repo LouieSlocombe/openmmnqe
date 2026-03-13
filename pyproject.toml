@@ -16,6 +16,18 @@ authors = [
 
 dependencies = [
     "numpy",
+    "scipy",
+    "pandas",
+    "matplotlib",
+    "torch",
+    "openmm",
+    "MDAnalysis",
+    "ase",
+    "openff-toolkit",
+    "openmmforcefields",
+    "pdbfixer",
+    "rdkit",
+    "mace-torch",
 ]
 
 classifiers = [
