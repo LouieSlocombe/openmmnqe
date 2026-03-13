@@ -251,6 +251,76 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     nqe.remove_file('bck.0.HILLS')
     nqe.remove_file('bck.0.fes.dat')
 
+def test_eq_workflow_plumed_dihedral_opes():
+    print(flush=True)
+    n_steps = 100_000
+
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml',
+                                'amber14/tip3pfb.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['ALA1:C', 'ALA2:N', 'ALA2:CA', 'ALA2:C'])
+    idx_str = ",".join([str(i + 1) for i in idx])
+
+    plumed_input = f"""
+phi: TORSION ATOMS={idx_str}
+metad: OPES_METAD ARG=phi PACE=500 BARRIER=4.0 SIGMA=0.35 TEMP=300 STATE_WFILE=STATE STATE_WSTRIDE=500
+PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
+"""
+
+    # Write PLUMED script to a temporary file
+    plumed_script_path = "plumed.dat"
+    with open(plumed_script_path, 'w') as f:
+        f.write(plumed_input)
+    # Minimise the system first
+    nqe.run_openmm_relaxation_simple(modeller, forcefield)
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_heating(modeller, forcefield)
+
+    pdb = app.PDBFile("equilibrate.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_npt(modeller, forcefield)
+
+    pdb = app.PDBFile("npt_equilibrate.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_prod(modeller,
+                        forcefield,
+                        plumed_script_path=plumed_script_path,
+                        steps=n_steps)
+
+    # Run PLUMED sum_hills to get FES
+    os.system(f'python3 openmmnqe/opes/FES_from_State.py --state STATE --min -3.14 --max 3.14 --bin 300 --kt 2.494')
+    # Plot FES
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('equilibrate*')
+    nqe.remove_file_pattern('npt_equilibrate*')
+    nqe.remove_file_pattern('prod*')
+
+
+    nqe.remove_file('COLVAR')
+    nqe.remove_file('KERNELS')
+    nqe.remove_file_pattern('*STATE')
+    nqe.remove_file('fes.dat')
+    nqe.remove_file('plumed.dat')
+
 
 def test_malonaldehyde_pt():
     print(flush=True)
@@ -280,7 +350,7 @@ def test_malonaldehyde_pt():
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
-
+    forcefield = MLPotential('mace-off23-small')
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
