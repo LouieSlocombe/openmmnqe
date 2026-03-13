@@ -4,7 +4,8 @@ cd $HOME/skunkworks/openmmnqe/build_tools
 #conda remove -n openmmnqe_custom --all -y
 
 conda init bash
-conda env create -f environment_custom_2.yml
+source $(conda info --base)/etc/profile.d/conda.sh
+conda env create -f environment_custom.yml
 conda activate openmmnqe_custom
 cd ../..
 
@@ -53,6 +54,3 @@ make PythonInstall
 cd python
 pip install . --no-build-isolation
 cd ../../..
-
-# Return to the build tools directory
-cd openmm/build_tools
