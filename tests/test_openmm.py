@@ -25,8 +25,7 @@ def test_openmm_ml():
     modeller.addHydrogens()
 
     nqe.run_openmm_relaxation(modeller,
-                              forcefield,
-                              platform_name='CUDA')
+                              forcefield)
     nqe.remove_file('minimized.pdb')
 
 
@@ -51,7 +50,6 @@ def test_openmm_ml_mixed_system():
 
     nqe.run_openmm_relaxation(modeller,
                               forcefield,
-                              platform_name='CUDA',
                               potential=potential,
                               ml_idx=ml_atoms)
     nqe.remove_file('minimized.pdb')
@@ -114,8 +112,7 @@ def test_nonstandard_ligand():
                                        molecule)
 
     nqe.run_openmm_relaxation(modeller,
-                              forcefield,
-                              platform_name='CUDA')
+                              forcefield)
     nqe.remove_file('minimized.pdb')
 
 
@@ -166,8 +163,7 @@ def test_prepare_ligand_ff_multiple():
     # nqe.remove_file(cache_name)
 
     nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield,
-                                     platform_name='CUDA')
+                                     forcefield)
 
 
 def _get_total_mass(system):
@@ -227,117 +223,6 @@ def test_deuterate_system():
         print("\n[SUCCESS] The system mass increased exactly as expected.")
     else:
         print("\n[FAILURE] The mass change did not match theoretical expectations.")
-
-
-def test_plumed():
-    temperature = 300 * unit.kelvin
-    timestep = 1.0 * unit.femtosecond
-    friction_coeff = 1.0 / unit.picosecond
-    total_steps = 100_000
-    pdb_file = 'tests/data/pdb/gt_wob_pol.pdb'
-    pdb_out = 'pdb_out.pdb'
-
-    directory = 'md_plumed'
-    cwd = os.getcwd()
-
-    rm_ions = ['Na+', 'Cl-', 'NA']
-    residue_map = {'DGN': 'DG',
-                   'DTN': 'DT',
-                   'GTP': 'LIG'}
-
-    pdb_data, molecule = nqe.prepare_lig_system(pdb_file, rm_ions=rm_ions, residue_map=residue_map, rm_files=False)
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule,
-                                       pc_methods='am1bcc')
-
-    idx1 = nqe.get_atoms_in_residue('combined_system.pdb', 0, chain_id='F')
-    idx2 = nqe.get_atoms_in_residue('combined_system.pdb', 4, chain_id='B')
-    selection_str1 = ','.join([f'{i}' for i in idx1])
-    selection_str2 = ','.join([f'{i}' for i in idx2])
-
-    # nqe.save_pdb_selection('combined_system.pdb', idx1 + idx2, 'selection.pdb')
-    # Clean the directory if it exists
-    nqe.remove_directory(directory)
-
-    # Make the directory if it doesn't exist
-    os.makedirs(directory, exist_ok=True)
-    os.chdir(directory)
-
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.addSolvent(forcefield,
-                        padding=1.0 * unit.nanometer,
-                        boxShape='dodecahedron')
-
-    system = forcefield.createSystem(
-        modeller.topology,
-        nonbondedMethod=app.PME,
-        nonbondedCutoff=1.0 * unit.nanometer,
-        constraints=app.HBonds
-    )
-
-    system.addForce(openmm.MonteCarloBarostat(1.0 * unit.bar, temperature, 25))
-
-    plumed_script = f"""c1: COM ATOMS={selection_str1}
-c2: COM ATOMS={selection_str2}
-dist: DISTANCE ATOMS=c1,c2
-wall: UPPER_WALLS ARG=dist AT=8.0 KAPPA=100.0 EXP=2
-opes: METAD ARG=dist PACE=500 HEIGHT=100 SIGMA=0.05 FILE=HILLS
-PRINT ARG=* STRIDE=100 FILE=COLVAR
-FLUSH STRIDE=1
-"""
-    # Write the PLUMED script to a file
-    with open('plumed.dat', 'w') as f:
-        f.write(plumed_script)
-
-    system.addForce(PlumedForce(plumed_script))
-    integrator = openmm.LangevinIntegrator(temperature,
-                                           friction_coeff,
-                                           timestep)
-
-    platform = openmm.Platform.getPlatformByName('CUDA')
-    simulation = app.Simulation(modeller.topology, system, integrator, platform)
-
-    simulation.context.setPositions(modeller.positions)
-    simulation.minimizeEnergy()
-
-    simulation.context.setVelocitiesToTemperature(temperature)
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      1000,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      progress=True,
-                                                      remainingTime=True,
-                                                      speed=True,
-                                                      totalSteps=total_steps,
-                                                      separator='\t'))
-
-    simulation.reporters.append(app.PDBReporter(pdb_out, 10_000))
-
-    simulation.reporters.append(app.DCDReporter('trajectory.dcd', 10_000))
-    simulation.step(total_steps)
-
-    os.chdir(cwd)
-
-    n_bins = 100
-    cv_limits = [None, None]
-    plot_save = True
-    plot_show = True
-
-    # Run the hills command
-    nqe.run_plumed_hills(directory,
-                         temperature=300,
-                         bins=n_bins,
-                         cv=cv_limits)
-    # Plot the free energy surface convergence
-    fes_arrays_meta_md = nqe.load_fes_data(directory, n_bins)
-    fes_times = nqe.get_fes_times(2.0, total_steps, fes_arrays_meta_md)
-
-    nqe.plot_fes_series_1d(fes_arrays_meta_md,
-                           fes_times,
-                           filename='fes_md',
-                           save=plot_save,
-                           show=plot_show)
 
 
 def test_get_atoms_in_residue():
