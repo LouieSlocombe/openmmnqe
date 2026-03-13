@@ -9,7 +9,7 @@ from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
                         )
-from .tools import deuterate_system
+from .tools import deuterate_system, check_platform
 
 
 def run_openmm_relaxation(modeller,
@@ -25,7 +25,7 @@ def run_openmm_relaxation(modeller,
                           ks_1=100.0,
                           ks_2=10.0,
                           ks_3=0.0,
-                          platform_name='CPU',
+                          platform_name=None,
                           potential=None,
                           ml_idx=None,
                           ):
@@ -86,7 +86,7 @@ def run_openmm_relaxation(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:
@@ -168,7 +168,7 @@ def run_openmm_relaxation_simple(modeller,
                                  gamma=1.0 / unit.picosecond,
                                  time_step=1.0 * unit.femtoseconds,
                                  n_report=1,
-                                 platform_name='CUDA',
+                                 platform_name=None,
                                  potential=None,
                                  ml_idx=None,
                                  ):
@@ -213,7 +213,7 @@ def run_openmm_relaxation_simple(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:
@@ -292,7 +292,7 @@ def run_openmm_heating(modeller,
                        n_report=1_000,
                        steps_per_stage=5_000,
                        steps_final=10_000,
-                       platform_name='CPU',
+                       platform_name=None,
                        deuterate=False,
                        deuterate_option='water',
                        potential=None,
@@ -359,7 +359,7 @@ def run_openmm_heating(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
     if run_mixed:
         mm_system = forcefield.createSystem(
@@ -462,7 +462,7 @@ def run_openmm_npt(modeller,
                    n_report=500,
                    n_1=5_000,
                    n_2=25_000,
-                   platform_name='CPU',
+                   platform_name=None,
                    deuterate=False,
                    deuterate_option='water',
                    potential=None,
@@ -530,7 +530,7 @@ def run_openmm_npt(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:
@@ -631,7 +631,7 @@ def run_openmm_prod(modeller,
                     n_report=1_000,
                     steps=500_000,
                     output_prefix='prod',
-                    platform_name='CPU',
+                    platform_name=None,
                     deuterate=False,
                     deuterate_option='water',
                     potential=None,
@@ -692,7 +692,7 @@ def run_openmm_prod(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:
@@ -784,7 +784,7 @@ def run_openmm_rpmd_equilibration(modeller,
                                   n_report=1_000,
                                   n_1=1_000,
                                   n_2=5_000,
-                                  platform_name='CPU',
+                                  platform_name=None,
                                   deuterate=False,
                                   deuterate_option='water',
                                   potential=None,
@@ -843,7 +843,7 @@ def run_openmm_rpmd_equilibration(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:
@@ -950,7 +950,7 @@ def run_openmm_rpmd_contracted(modeller,
                                steps=100_000,
                                n_report=1_000,
                                contractions=None,
-                               platform_name='CPU',
+                               platform_name=None,
                                deuterate=False,
                                deuterate_option='water',
                                potential=None,
@@ -1021,7 +1021,7 @@ def run_openmm_rpmd_contracted(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if contractions is None:
@@ -1180,7 +1180,7 @@ def run_openmm_rpmd_prod(modeller,
                          barostat_freq=50,
                          n_report=1_000,
                          steps=500_000,
-                         platform_name='CPU',
+                         platform_name=None,
                          deuterate=False,
                          deuterate_option='water',
                          potential=None,
@@ -1247,7 +1247,7 @@ def run_openmm_rpmd_prod(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:
@@ -1363,7 +1363,7 @@ def run_openmm_adqtb_eq(modeller,
                         n_report=1_000,
                         steps=500_000,
                         output_prefix='adqtb_ready',
-                        platform_name='CPU',
+                        platform_name=None,
                         deuterate=False,
                         deuterate_option='water',
                         potential=None,
@@ -1419,7 +1419,7 @@ def run_openmm_adqtb_eq(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:
@@ -1507,7 +1507,7 @@ def run_openmm_adqtb_prod(modeller,
                           n_report=1_000,
                           steps=500_000,
                           output_prefix='adqtb_prod',
-                          platform_name='CPU',
+                          platform_name=None,
                           deuterate=False,
                           deuterate_option='water',
                           potential=None,
@@ -1571,7 +1571,7 @@ def run_openmm_adqtb_prod(modeller,
     else:
         run_mixed = False
 
-    platform = openmm.Platform.getPlatformByName(platform_name)
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
     if run_mixed:

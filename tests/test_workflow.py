@@ -21,9 +21,9 @@ def test_run_openmm_relaxation():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-    nqe.center_in_box(modeller)
+    # nqe.center_in_box(modeller)
 
-    nqe.run_openmm_relaxation(modeller, forcefield, platform_name='CUDA')
+    nqe.run_openmm_relaxation(modeller, forcefield)
     nqe.remove_file('minimized.pdb')
 
 
@@ -180,22 +180,21 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
     # Minimise the system first
-    nqe.run_openmm_relaxation_simple(modeller, forcefield, platform_name='CUDA')
+    nqe.run_openmm_relaxation_simple(modeller, forcefield)
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_heating(modeller, forcefield, platform_name='CUDA')
+    nqe.run_openmm_heating(modeller, forcefield)
 
     pdb = app.PDBFile("equilibrate.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_npt(modeller, forcefield, platform_name='CUDA')
+    nqe.run_openmm_npt(modeller, forcefield)
 
     pdb = app.PDBFile("npt_equilibrated.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         steps=50_000)
 
     # Run PLUMED sum_hills to get FES
@@ -212,7 +211,6 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_rpmd_equilibration(modeller,
                                       forcefield,
-                                      platform_name='CUDA',
                                       n_beads=n_beads,
                                       n_report=100,
                                       n_1=1_000,
@@ -225,7 +223,6 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                              n_beads=n_beads,
                              steps=50_000,
                              plumed_script_path=plumed_script_path,
-                             platform_name='CUDA',
                              checkpoint_file='rpmd_ready.chk')
 
     # Run PLUMED sum_hills to get FES
@@ -268,8 +265,7 @@ def test_malonaldehyde_pt():
 
     forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
     nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield,
-                                     platform_name='CUDA')
+                                     forcefield)
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -288,7 +284,6 @@ def test_malonaldehyde_pt():
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod)
@@ -359,7 +354,6 @@ def test_malonaldehyde_pt_solvated():
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod,
@@ -423,7 +417,6 @@ def test_malonaldehyde_pt_quantum_solvated():
                                       forcefield,
                                       n_beads=n_beads,
                                       n_report=1,
-                                      platform_name='CUDA',
                                       n_1=100,
                                       n_2=100)
 
@@ -442,7 +435,6 @@ def test_malonaldehyde_pt_quantum_solvated():
                              forcefield,
                              n_beads=n_beads,
                              plumed_script_path=plumed_script_path,
-                             platform_name='CUDA',
                              temperature=temperature,
                              barostat_freq=None,
                              steps=steps_prod,
@@ -504,7 +496,6 @@ def test_malonaldehyde_pt_adqtb_solvated():
 
     nqe.run_openmm_adqtb_eq(modeller,
                             forcefield,
-                            platform_name='CUDA',
                             n_report=1,
                             steps=100)
 
@@ -525,7 +516,6 @@ def test_malonaldehyde_pt_adqtb_solvated():
     nqe.run_openmm_adqtb_prod(modeller,
                               forcefield,
                               plumed_script_path=plumed_script_path,
-                              platform_name='CUDA',
                               temperature=temperature,
                               steps=steps_prod,
                               potential=potential,
@@ -613,7 +603,6 @@ def test_malonaldehyde_pt_solvated_full():
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod,
@@ -690,7 +679,6 @@ def test_fad_pt_solvated():
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod,
@@ -765,7 +753,6 @@ def test_gc_pt_solvated():
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod,
@@ -827,7 +814,6 @@ def test_gc_pt_quantum_solvated():
                                       forcefield,
                                       n_beads=n_beads,
                                       n_report=1,
-                                      platform_name='CUDA',
                                       n_1=100,
                                       n_2=100)
 
@@ -850,7 +836,6 @@ def test_gc_pt_quantum_solvated():
                              forcefield,
                              n_beads=n_beads,
                              plumed_script_path=plumed_script_path,
-                             platform_name='CUDA',
                              temperature=temperature,
                              barostat_freq=None,
                              steps=steps_prod,
@@ -926,7 +911,6 @@ def test_g_enol_t_pt_solvated():
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod,
@@ -1010,7 +994,6 @@ def test_gt_wob_pt_solvated():
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod,
@@ -1100,15 +1083,13 @@ def test_eq_workflow_plumed_pt():
 
     # Minimise the system first
     nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield,
-                                     platform_name='CUDA')
+                                     forcefield)
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
-                        platform_name='CUDA',
                         temperature=temperature,
                         steps=steps_prod)
 
@@ -1126,7 +1107,6 @@ def test_eq_workflow_plumed_pt():
     # modeller = app.Modeller(pdb.topology, pdb.positions)
     # nqe.run_openmm_rpmd_equilibration(modeller,
     #                                   forcefield,
-    #                                   platform_name='CUDA',
     #                                   n_beads=n_beads,
     #                                   n_report=10,
     #                                   n_1=100,
@@ -1139,7 +1119,6 @@ def test_eq_workflow_plumed_pt():
     #                          n_beads=n_beads,
     #                          steps=steps_prod,
     #                          plumed_script_path=plumed_script_path,
-    #                          platform_name='CUDA',
     #                          checkpoint_file='rpmd_ready.chk')
     #
     # # Run PLUMED sum_hills to get FES
