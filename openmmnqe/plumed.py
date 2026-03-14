@@ -1,8 +1,10 @@
+import os
 import numpy as np
 import openmm.unit as unit
 
 from .tools import atom_indices_to_plumed, distance_between_atoms, temperature_to_kbt
 
+openmm_nqe_dir = os.path.dirname(os.path.realpath(__file__))
 
 def plumed_input_1pt(modeller,
                      idx,
@@ -16,12 +18,14 @@ def plumed_input_1pt(modeller,
                      bias=20.0,
                      grid_min=-1.1,
                      grid_max=1.1,
-                     grid_bin=200):
-
+                     grid_bin=200,
+                     f_opes=False):
+    # Distances
     r_01 = distance_between_atoms(modeller, idx[0], idx[1])
     r_21 = distance_between_atoms(modeller, idx[2], idx[1])
     r_02 = distance_between_atoms(modeller, idx[0], idx[2])
     r_0 = np.round(min(r_01, r_21) * r_0, decimals=2)
+
     # Limits
     wall = np.round(r_02 * wall, decimals=2)
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
@@ -31,6 +35,15 @@ def plumed_input_1pt(modeller,
 
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
+
+    if f_opes:
+        metad_line = f"metad:      OPES_METAD ARG=pt_cv PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
+        fes_cmd = os.path.join(openmm_nqe_dir, "opes", "FES_from_State.py")
+        sum_hills_input =f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+    else:
+        metad_line = f"metad:      METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
+        sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+
     plumed_input = f"""
 # Proton transfer
 c_d:        COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}
@@ -44,10 +57,9 @@ ang_1:      ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}
 ang_wall:   LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
 
 # Metadynamics
-metad:      METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}
+{metad_line}
 PRINT       ARG=c_d,c_a,pt_cv,metad.bias STRIDE={pace} FILE=COLVAR
         """
-    sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
 
 
@@ -87,6 +99,15 @@ def plumed_input_2pt_1d(modeller,
 
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
+
+    if f_opes:
+        metad_line = f"metad:      OPES_METAD ARG=pt_cv PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
+        fes_cmd = os.path.join(openmm_nqe_dir, "opes", "FES_from_State.py")
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+    else:
+        metad_line = f"metad:      METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
+        sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+
     plumed_input = f"""
 # Proton transfer 1
 c_d1:       COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
@@ -95,7 +116,7 @@ cv_diff1:   COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
 
 # Limits
 dist_da_1:  DISTANCE ATOMS={idx1[2]},{idx1[0]}
-u_wall_1:   UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
+u_wall_1:   UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=500.0
 ang_1:      ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
 w_1:        LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
 
@@ -106,7 +127,7 @@ cv_diff2:   COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
 
 # Limits
 dist_da_2:  DISTANCE ATOMS={idx2[2]},{idx2[0]}
-u_wall_2:   UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
+u_wall_2:   UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=500.0
 ang_2:      ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
 w_2:        LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
 
@@ -134,47 +155,62 @@ def plumed_input_2pt_2d(modeller,
                         grid_min=-1.1,
                         grid_max=1.1,
                         grid_bin=200):
+    # Proton transfer 1
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
     r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
     r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
     r1_0 = np.round(min(r1_01, r1_21) * r_0, decimals=2)
 
+    # Proton transfer 2
     r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1])
     r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1])
     r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2])
     r2_0 = np.round(min(r2_01, r2_21) * r_0, decimals=2)
 
+    # Limits
     wall = np.round(max(r1_02, r2_02) * wall, decimals=2)
+    angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
+    # Convert atom indices to PLUMED format
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
-    # Convert angle limit to radians and round
-    angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
+
+    if f_opes:
+        metad_line = f"metad:      OPES_METAD ARG=pt_cv PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
+        fes_cmd = os.path.join(openmm_nqe_dir, "opes", "FES_from_State.py")
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+    else:
+        metad_line = f"metad:      METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
+        sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+
     plumed_input = f"""
 # Proton transfer 1
-c_d1: COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
-c_a1: COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
-cv_diff1: COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
+c_d1:       COORDINATION GROUPA={idx1[0]} GROUPB={idx1[1]} R_0={r1_0}
+c_a1:       COORDINATION GROUPA={idx1[2]} GROUPB={idx1[1]} R_0={r1_0}
+cv_diff1:   COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
+
 # Limits
-dist_da_1: DISTANCE ATOMS={idx1[2]},{idx1[0]}
-u_wall_1: UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
-ang_1: ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
-w_1: LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
+dist_da_1:  DISTANCE ATOMS={idx1[2]},{idx1[0]}
+u_wall_1:   UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=3000
+ang_1:      ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
+w_1:        LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500.0
 
 # Proton transfer 2
-c_d2: COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
-c_a2: COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
-cv_diff2: COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
-dist_da_2: DISTANCE ATOMS={idx2[2]},{idx2[0]}
-u_wall_2: UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
-ang_2: ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
-w_2: LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+c_d2:       COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
+c_a2:       COORDINATION GROUPA={idx2[2]} GROUPB={idx2[1]} R_0={r2_0}
+cv_diff2:   COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
 
-metad: METAD ARG=cv_diff1,cv_diff2 PACE={pace} HEIGHT={height} SIGMA={sigma},{sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min},{grid_min} GRID_MAX={grid_max},{grid_max} GRID_BIN={grid_bin},{grid_bin}
-PRINT ARG=cv_diff1,cv_diff2,metad.bias STRIDE={pace} FILE=COLVAR
+# Limits
+dist_da_2:  DISTANCE ATOMS={idx2[2]},{idx2[0]}
+u_wall_2:   UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=3000
+ang_2:      ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
+w_2:        LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500.0
+
+metad:      METAD ARG=cv_diff1,cv_diff2 PACE={pace} HEIGHT={height} SIGMA={sigma},{sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min},{grid_min} GRID_MAX={grid_max},{grid_max} GRID_BIN={grid_bin},{grid_bin}
+PRINT       ARG=cv_diff1,cv_diff2,metad.bias STRIDE={pace} FILE=COLVAR
         """
     sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min},{grid_min} --max {grid_max},{grid_max} --bin {grid_bin},{grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input
