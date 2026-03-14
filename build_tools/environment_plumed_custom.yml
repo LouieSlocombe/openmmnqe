@@ -6,12 +6,13 @@ channels:
   - nodefaults
 
 dependencies:
-  # Python toolchain
   - python=3.13.*
   - pytest
   - pip
   - setuptools
   - wheel
+
+  # Scientific Python Stack
   - numpy
   - pandas
   - scipy
@@ -22,31 +23,25 @@ dependencies:
   - pymace
   - ase
 
-  # OpenMM source-build prerequisites
+  # Build tools & compilers (Crucial for OpenMM/PLUMED)
+  - compilers
   - cmake
   - make
+  - ninja
   - cython
   - swig
   - doxygen
-
-  # Practical build helpers
-  - git
-  - ninja
   - pkg-config
+  - sysroot_linux-64
 
-  # openmm-ml runtime/build-adjacent deps
-  - cuda-toolkit
-  - pytorch-gpu
-
-  # Plumed
+  # Math & Core Libraries
   - zlib
   - mkl
   - mkl-include
-  - sysroot_linux-64
-  - compilers
   - libblas
   - liblapack
 
-  # downstream
-  - openmmforcefields
-  - pdbfixer
+  # ML / GPU Stack
+  - cuda-toolkit
+  - pytorch
+  - pytorch-gpu
