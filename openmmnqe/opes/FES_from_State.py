@@ -78,7 +78,7 @@ try:
 
     data = datatable.fread(filename, header=False).to_numpy()
 except ImportError:
-    data = pd.read_table(filename, sep='\s+', header=None).to_numpy()
+    data = pd.read_table(filename, sep=r'\s+', header=None).to_numpy()
 fields_pos = []
 tot_lines = data.shape[0]
 for i in range(tot_lines):

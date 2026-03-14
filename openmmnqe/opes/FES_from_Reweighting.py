@@ -144,8 +144,8 @@ with open(filename, 'r') as f:
                             col_bias.append(i - 2)
                 if len(col_bias) != len(args_bias.split(',')):
                     sys.exit(error % (
-                                'found %d matching biases, but %d were requested. Use columns number to avoid ambiguity' % (
-                            len(col_bias), len(args_bias.split(',')))))
+                            'found %d matching biases, but %d were requested. Use columns number to avoid ambiguity' % (
+                        len(col_bias), len(args_bias.split(',')))))
     print(' using cv "%s" found at column %d' % (name_cv_x, col_x + 1))
     if dim2:
         print(' using cv "%s" found at column %d' % (name_cv_y, col_y + 1))
