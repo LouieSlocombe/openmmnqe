@@ -21,8 +21,13 @@ dependencies:
   - rdkit
   - pymace
   - ase
-  - openmm=8.4.0
-  - openmm-ml=1.5
+
+  # OpenMM source-build prerequisites
+  - cmake
+  - make
+  - cython
+  - swig
+  - doxygen
 
   # Practical build helpers
   - git
