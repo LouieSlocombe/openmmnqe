@@ -17,7 +17,7 @@ fi
 mkdir -p sources && cd sources
 
 # OpenMM
-git clone https://github.com/openmm/openmm.git && cd openmm
+git clone --depth 1 --filter=blob:none https://github.com/openmm/openmm.git && cd openmm
 mkdir -p build && cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
          -DPYTHON_EXECUTABLE=$(which python)
@@ -27,12 +27,16 @@ make PythonInstall
 cd ../..
 
 # OpenMM-ML
-git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
+git clone --depth 1 --filter=blob:none https://github.com/openmm/openmm-ml.git && cd openmm-ml
 pip install .
 cd ..
 
 # PLUMED
-git clone --branch v2.10.0 https://github.com/plumed/plumed2.git && cd plumed2
+git clone \
+  --branch v2.10.0 \
+  --depth 1 \
+  --filter=blob:none \
+  https://github.com/plumed/plumed2.git && cd plumed2
 ./configure --prefix=$CONDA_PREFIX --enable-modules=opes
 make -j$(nproc)
 make install
