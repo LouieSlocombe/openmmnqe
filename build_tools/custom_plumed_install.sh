@@ -1,35 +1,20 @@
 # cd to the build tools directory
 cd $HOME/skunkworks/openmmnqe/build_tools
-#bash custom_install.sh
-#conda remove -n openmmnqe_custom --all -y
+#bash custom_plumed_install.sh
+#conda remove -n openmmnqe_plumed_custom --all -y
 
 conda init bash
 source $(conda info --base)/etc/profile.d/conda.sh
-conda env create -f environment_custom.yml
-conda activate openmmnqe_custom
+conda env create -f environment_plumed_custom.yml
+conda activate openmmnqe_plumed_custom
 cd ../..
 
 # if the sources directory exists remove it to ensure a clean build
-if [ -d "sources" ]; then
-    rm -rf sources
+if [ -d "sources_plumed" ]; then
+    rm -rf sources_plumed
 fi
 
-mkdir -p sources && cd sources
-
-# OpenMM
-git clone https://github.com/openmm/openmm.git && cd openmm
-mkdir -p build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-         -DPYTHON_EXECUTABLE=$(which python)
-make -j$(nproc)
-make install
-make PythonInstall
-cd ../..
-
-# OpenMM-ML
-git clone https://github.com/openmm/openmm-ml.git && cd openmm-ml
-pip install .
-cd ..
+mkdir -p sources_plumed && cd sources_plumed
 
 # PLUMED
 git clone --branch v2.10.0 https://github.com/plumed/plumed2.git && cd plumed2

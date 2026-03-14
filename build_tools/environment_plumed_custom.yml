@@ -1,0 +1,47 @@
+name: openmmnqe_plumed_custom
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  # Python toolchain
+  - python=3.13.*
+  - pytest
+  - pip
+  - setuptools
+  - wheel
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - mdanalysis
+  - sympy
+  - rdkit
+  - pymace
+  - ase
+  - openmm=8.4.0
+  - openmm-ml=1.5
+
+  # Practical build helpers
+  - git
+  - ninja
+  - pkg-config
+
+  # openmm-ml runtime/build-adjacent deps
+  - cuda-toolkit
+  - pytorch-gpu
+
+  # Plumed
+  - zlib
+  - mkl
+  - mkl-include
+  - sysroot_linux-64
+  - compilers
+  - libblas
+  - liblapack
+
+  # downstream
+  - openmmforcefields
+  - pdbfixer
