@@ -254,6 +254,8 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 def test_eq_workflow_plumed_dihedral_opes():
     print(flush=True)
     n_steps = 100_000
+    temperature = 300.0 * unit.kelvin
+    kbt = nqe.temperature_to_kbt(temperature)
 
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml',
@@ -274,7 +276,7 @@ def test_eq_workflow_plumed_dihedral_opes():
 
     plumed_input = f"""
 phi: TORSION ATOMS={idx_str}
-metad: OPES_METAD ARG=phi PACE=500 BARRIER=4.0 SIGMA=0.35 TEMP=300 STATE_WFILE=STATE STATE_WSTRIDE=500
+metad: OPES_METAD ARG=phi PACE=500 BARRIER=4.0 SIGMA=0.2 TEMP={temperature.value_in_unit(unit.kelvin)} STATE_WFILE=STATE STATE_WSTRIDE=500
 PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 """
 
@@ -301,7 +303,8 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         steps=n_steps)
 
     # Run PLUMED sum_hills to get FES
-    os.system(f'python3 openmmnqe/opes/FES_from_State.py --state STATE --min -3.14 --max 3.14 --bin 300 --kt 2.494')
+    fes_cmd = os.path.join(nqe.openmm_nqe_dir, "opes", "FES_from_State.py")
+    os.system(f'python3 {fes_cmd} --state STATE --min 0 --max 4.0 --bin 100 --kt {kbt}')
     # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()

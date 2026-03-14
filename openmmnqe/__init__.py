@@ -81,3 +81,7 @@ from .tools import (zero_velocities,
                     check_platform,
                     temperature_to_kbt,
                     )
+
+import os
+
+openmm_nqe_dir = os.path.dirname(os.path.realpath(__file__))
