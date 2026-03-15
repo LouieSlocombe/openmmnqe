@@ -6,6 +6,7 @@ from .tools import atom_indices_to_plumed, distance_between_atoms, temperature_t
 
 fes_cmd = os.path.join(os.path.dirname(os.path.realpath(__file__)), "opes", "FES_from_State.py")
 
+
 def plumed_input_1pt(modeller,
                      idx,
                      temperature,
@@ -19,6 +20,7 @@ def plumed_input_1pt(modeller,
                      grid_min=-1.1,
                      grid_max=1.1,
                      grid_bin=200,
+                     kappa=500.0,
                      f_opes=False):
     # Distances
     r_01 = distance_between_atoms(modeller, idx[0], idx[1])
@@ -51,9 +53,9 @@ pt_cv:      COMBINE ARG=c_d,c_a COEFFICIENTS=1,-1 PERIODIC=NO
 
 # Limits
 dist_da:    DISTANCE ATOMS={idx[2]},{idx[0]}
-dist_wall:  UPPER_WALLS ARG=dist_da AT={wall} KAPPA=500
+dist_wall:  UPPER_WALLS ARG=dist_da AT={wall} KAPPA={kappa}
 ang_1:      ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}
-ang_wall:   LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500
+ang_wall:   LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA={kappa}
 
 # Metadynamics
 {metad_line}
@@ -76,6 +78,7 @@ def plumed_input_2pt_1d(modeller,
                         grid_min=-1.1,
                         grid_max=1.1,
                         grid_bin=200,
+                        kappa=500.0,
                         f_opes=False):
     # Proton transfer 1
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
@@ -115,9 +118,9 @@ cv_diff1:   COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
 
 # Limits
 dist_da_1:  DISTANCE ATOMS={idx1[2]},{idx1[0]}
-u_wall_1:   UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=500
+u_wall_1:   UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA={kappa}
 ang_1:      ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
-w_1:        LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500
+w_1:        LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA={kappa}
 
 # Proton transfer 2
 c_d2:       COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
@@ -126,9 +129,9 @@ cv_diff2:   COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
 
 # Limits
 dist_da_2:  DISTANCE ATOMS={idx2[2]},{idx2[0]}
-u_wall_2:   UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=500
+u_wall_2:   UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA={kappa}
 ang_2:      ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
-w_2:        LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500
+w_2:        LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA={kappa}
 
 # Combine the two proton transfers into a single CV
 pt_cv:      COMBINE ARG=cv_diff1,cv_diff2 COEFFICIENTS=0.5,0.5 PERIODIC=NO
@@ -154,6 +157,7 @@ def plumed_input_2pt_2d(modeller,
                         grid_min=-1.1,
                         grid_max=1.1,
                         grid_bin=200,
+                        kappa=500.0,
                         f_opes=False):
     # Proton transfer 1
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
@@ -193,9 +197,9 @@ cv_diff1:   COMBINE ARG=c_d1,c_a1 COEFFICIENTS=1,-1 PERIODIC=NO
 
 # Limits
 dist_da_1:  DISTANCE ATOMS={idx1[2]},{idx1[0]}
-u_wall_1:   UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA=500
+u_wall_1:   UPPER_WALLS ARG=dist_da_1 AT={wall} KAPPA={kappa}
 ang_1:      ANGLE ATOMS={idx1[2]},{idx1[1]},{idx1[0]}
-w_1:        LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA=500
+w_1:        LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA={kappa}
 
 # Proton transfer 2
 c_d2:       COORDINATION GROUPA={idx2[0]} GROUPB={idx2[1]} R_0={r2_0}
@@ -204,9 +208,9 @@ cv_diff2:   COMBINE ARG=c_d2,c_a2 COEFFICIENTS=1,-1 PERIODIC=NO
 
 # Limits
 dist_da_2:  DISTANCE ATOMS={idx2[2]},{idx2[0]}
-u_wall_2:   UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA=500
+u_wall_2:   UPPER_WALLS ARG=dist_da_2 AT={wall} KAPPA={kappa}
 ang_2:      ANGLE ATOMS={idx2[2]},{idx2[1]},{idx2[0]}
-w_2:        LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA=500
+w_2:        LOWER_WALLS ARG=ang_2 AT={angle_lim} KAPPA={kappa}
 
 # Metadynamics
 {metad_line}
@@ -447,7 +451,9 @@ def plumed_input_wob_4(modeller,
                        height=15.0,  # kJ/mol
                        sigma=0.05,  # nm
                        bias=20.0,
-                       grid_bin=200):
+                       grid_bin=200,
+                       kappa=1000.0,
+                       f_opes=False):
     rr_u = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * wall, decimals=2)
     rr_l = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * (2.0 - wall), decimals=2)
 
@@ -457,6 +463,14 @@ def plumed_input_wob_4(modeller,
     n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2 = idx
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
+
+    if f_opes:
+        metad_line = f"metad:      OPES_METAD ARG=z PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --bin {grid_bin} --kt {kt_str}'
+    else:
+        metad_line = f"metad:      METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS"
+        sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
+
     plumed_input = f"""
 # Get the distances
 n3_h3: DISTANCE ATOMS={n3},{h3}
@@ -474,25 +488,25 @@ z2: COMBINE ARG=o6_h3,o4_h3 COEFFICIENTS=1,-1 PERIODIC=NO
 z3: COMBINE ARG=n1_h1,n3_h1 COEFFICIENTS=1,-1 PERIODIC=NO
 z4: COMBINE ARG=n1_o2,n2_o2 COEFFICIENTS=1,-1 PERIODIC=NO
 z5: COMBINE ARG=n1_o2,n1_n3 COEFFICIENTS=1,-1 PERIODIC=NO
+
 # Combine into a single CV
 z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
 
 # Constraints to keep the bases together
 nr_dist: DISTANCE ATOMS={nr1},{nr2}
-uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA=500
-lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA=500
+uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
+lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
 
 # nr_1: DISTANCE ATOMS={nr1},{o2}
-# UPPER_WALLS ARG=nr_1 AT={0.39} KAPPA=500
-# LOWER_WALLS ARG=nr_1 AT={0.28} KAPPA=500
+# UPPER_WALLS ARG=nr_1 AT={0.39} KAPPA={kappa}
+# LOWER_WALLS ARG=nr_1 AT={0.28} KAPPA={kappa}
 
 # Constraints to prevent excessive opening of the base pair
 nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}
-w_a1: LOWER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(120.0), decimals=2)} KAPPA=500
-w_a2: UPPER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(140.0), decimals=2)} KAPPA=500
+w_a1: LOWER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(120.0), decimals=2)} KAPPA={kappa}
+w_a2: UPPER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(140.0), decimals=2)} KAPPA={kappa}
 
-metad: METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS
+{metad_line}
 PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
         """
-    sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
     return plumed_input, sum_hills_input

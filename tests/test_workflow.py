@@ -336,7 +336,7 @@ def test_malonaldehyde_pt():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
+    forcefield = MLPotential('mace-omol-0-extra-large')  # mace-off23-large mace-off23-small
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield)
 
@@ -1013,7 +1013,7 @@ def test_gt_wob_pt_solvated():
     steps_prod = 10_000
 
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
-    potential = MLPotential('mace-omat-0-medium')  # mace-off23-large mace-off23-small
+    potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
@@ -1057,8 +1057,9 @@ def test_gt_wob_pt_solvated():
                                                            idx,
                                                            temperature,
                                                            wall=1.0,
-                                                           height=10.0,
-                                                           bias=10.0)
+                                                           height=100.0,
+                                                           bias=10.0,
+                                                           f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1088,130 +1089,3 @@ def test_gt_wob_pt_solvated():
     nqe.remove_file('HILLS')
     nqe.remove_file('fes.dat')
     nqe.remove_file('plumed.dat')
-
-
-def test_eq_workflow_plumed_pt():
-    print(flush=True)
-    temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
-
-    pdb = app.PDBFile("tests/data/pdb/gt_wob_solv_clean.pdb")
-    forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
-    nqe.center_in_box(modeller)
-
-    idx = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller, idx, temperature)
-
-    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
-    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:O2', 'DGN1:H1', 'DGN1:N1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller, idx1, idx2, temperature)
-
-    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
-    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:O2', 'DGN1:H1', 'DGN1:N1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_2d(modeller, idx1, idx2, temperature)
-
-    # idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:N3'])
-    # idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['DGN1:O6', 'DTN1:H3', 'DTN1:O4'])
-    # plumed_input, sum_hills_input = nqe.plumed_input_wob_1(idx1, idx2, temperature)
-
-    # idx_n3,
-    # idx_h3,
-    # idx_o6,
-    # idx_o4,
-    # idx_n1,
-    # idx_h1,
-    # idx_o2,
-    # idx_n2,
-    # DGN1 DTN1
-    picks = ['DTN1:N3',
-             'DTN1:H3',
-             'DGN1:O6',
-             'DTN1:O4',
-             'DGN1:N1',
-             'DGN1:H1',
-             'DTN1:O2',
-             'DGN1:N2',
-             ]
-
-    idx = nqe.atom_indices_from_vmd_picks(modeller, picks)
-
-    (plumed_input,
-     sum_hills_input) = nqe.plumed_input_wob_2(modeller,
-                                               idx,
-                                               temperature)
-
-    # Write PLUMED script to a temporary file
-    plumed_script_path = "plumed.dat"
-    with open(plumed_script_path, 'w') as f:
-        f.write(plumed_input)
-
-    # Minimise the system first
-    nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield)
-
-    pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    nqe.run_openmm_prod(modeller,
-                        forcefield,
-                        plumed_script_path=plumed_script_path,
-                        temperature=temperature,
-                        steps=steps_prod)
-
-    # Run PLUMED sum_hills to get FES
-    os.system(sum_hills_input)
-    # Plot FES
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
-
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
-
-    # n_beads = 4
-    # pdb = app.PDBFile("minimized.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_rpmd_equilibration(modeller,
-    #                                   forcefield,
-    #                                   n_beads=n_beads,
-    #                                   n_report=10,
-    #                                   n_1=100,
-    #                                   n_2=100)
-    #
-    # pdb = app.PDBFile("rpmd_ready_centroid.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_rpmd_prod(modeller,
-    #                          forcefield,
-    #                          n_beads=n_beads,
-    #                          steps=steps_prod,
-    #                          plumed_script_path=plumed_script_path,
-    #                          checkpoint_file='rpmd_ready.chk')
-    #
-    # # Run PLUMED sum_hills to get FES
-    # os.system(sum_hills_input)
-    # # Plot FES
-    # nqe.plot_plumed_fes("fes.dat")
-    # plt.show()
-    # nqe.plot_plumed_colvar("COLVAR")
-    # plt.show()
-
-    nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('prod*')
-    nqe.remove_file_pattern('rpmd_ready*')
-    nqe.remove_file_pattern('rpmd_prod*')
-
-    nqe.remove_file('COLVAR')
-    nqe.remove_file('HILLS')
-    nqe.remove_file('fes.dat')
-    nqe.remove_file('plumed.dat')
-
-    nqe.remove_file('bck.0.COLVAR')
-    nqe.remove_file('bck.0.HILLS')
-    nqe.remove_file('bck.0.fes.dat')
