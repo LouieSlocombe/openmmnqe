@@ -4,20 +4,15 @@
 #bash custom_install.sh
 #conda remove -n openmmnqe_plumed_custom --all -y
 
-# ==========================================
-# Configuration Variables
-# ==========================================
 OPENMM_VERSION="8.4.0" # master
 OPENMM_ML_VERSION="1.5"
 PLUMED_VERSION="v2.10.0"
 OPENMM_PLUMED_VERSION="master"
 
-# Determine the absolute directory of the script and set the working dir
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="${SCRIPT_DIR}/../../sources_plumed"
 
 echo "=== Initializing Conda Environment ==="
-# Source conda.sh directly instead of modifying user's .bashrc with 'conda init'
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
 conda env create -f "${SCRIPT_DIR}/environment_plumed_custom.yml"
@@ -75,10 +70,6 @@ cmake .. \
 make -j"$(nproc)"
 make install
 
-# Install the Python bindings
-cd ..
-pip install . --no-build-isolation --no-deps
-
 cd "${WORK_DIR}"
 
 echo "=== Compiling OpenMM-ML ${OPENMM_ML_VERSION} ==="
@@ -118,12 +109,5 @@ cd python
 pip install . --no-build-isolation
 
 cd "${WORK_DIR}"
-
-#echo "=== Installing Downstream Dependencies ==="
-#pip install openmmforcefields --no-deps
-#git clone --depth 1 --filter=blob:none https://github.com/openmm/pdbfixer.git
-#cd pdbfixer
-#pip install . --no-deps
-#cd "${WORK_DIR}"
 
 echo "=== Build Complete! ==="
