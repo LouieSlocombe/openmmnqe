@@ -1,6 +1,6 @@
 #!/bin/bash
 # Exit immediately on error, treat unset variables as errors, fail pipelines cleanly
-set -eo pipefail
+#set -eo pipefail
 #bash custom_install.sh
 #conda remove -n openmmnqe_plumed_custom --all -y
 
@@ -48,6 +48,39 @@ make PythonInstall
 
 cd "${WORK_DIR}"
 
+echo "=== Compiling openmm-torch ==="
+git clone --depth 1 --filter=blob:none https://github.com/openmm/openmm-torch.git
+cd openmm-torch
+mkdir -p build && cd build
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DOPENMM_DIR="${CONDA_PREFIX}" \
+    -DCMAKE_PREFIX_PATH="$(python -c 'import torch.utils; print(torch.utils.cmake_prefix_path)')"
+make -j"$(nproc)"
+make install
+make PythonInstall
+
+cd "${WORK_DIR}"
+
+
+echo "=== Compiling NNPOps ==="
+git clone --depth 1 --filter=blob:none https://github.com/openmm/NNPOps.git
+cd NNPOps
+mkdir -p build && cd build
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="$(python -c 'import torch.utils; print(torch.utils.cmake_prefix_path)')"
+make -j"$(nproc)"
+make install
+
+# Install the Python bindings
+cd ..
+pip install . --no-build-isolation --no-deps
+
+cd "${WORK_DIR}"
+
 echo "=== Compiling OpenMM-ML ${OPENMM_ML_VERSION} ==="
 git clone --branch "${OPENMM_ML_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm-ml.git
 cd openmm-ml
@@ -86,11 +119,11 @@ pip install . --no-build-isolation
 
 cd "${WORK_DIR}"
 
-echo "=== Installing Downstream Dependencies ==="
-pip install openmmforcefields --no-deps
-git clone --depth 1 --filter=blob:none https://github.com/openmm/pdbfixer.git
-cd pdbfixer
-pip install . --no-deps
-cd "${WORK_DIR}"
+#echo "=== Installing Downstream Dependencies ==="
+#pip install openmmforcefields --no-deps
+#git clone --depth 1 --filter=blob:none https://github.com/openmm/pdbfixer.git
+#cd pdbfixer
+#pip install . --no-deps
+#cd "${WORK_DIR}"
 
 echo "=== Build Complete! ==="
