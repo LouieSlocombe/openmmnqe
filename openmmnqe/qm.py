@@ -13,10 +13,10 @@ from ase.io import read
 def orca_calc_preset(orca_path=None,
                      directory=None,
                      calc_type='DFT',
-                     xc='wB97X',
+                     xc='r2SCAN-3c',
                      charge=0,
                      multiplicity=1,
-                     basis_set='def2-SVP',
+                     basis_set='',
                      n_procs=1,
                      f_solv=False,
                      f_disp=False,
@@ -105,39 +105,29 @@ def orca_optimise_atoms(atoms,
                         multiplicity=1,
                         orca_path=None,
                         xc='r2SCAN-3c',
-                        basis_set='def2-QZVP',
-                        tight_opt=False,
+                        basis_set='',
+                        tight_opt=True,
                         tight_scf=False,
                         f_solv=False,
                         f_disp=False,
                         n_procs=1):
-    # Determine the ORCA path
     if orca_path is None:
-        # Try to read the path from the environment variable
         orca_path = os.environ.get('ORCA_PATH')
     else:
-        # Convert the provided path to an absolute path
         orca_path = os.path.abspath(orca_path)
 
     if tight_opt:
-        # Set up geometry optimization and frequency calculation parameters
         opt_option = 'TIGHTOPT'
     else:
-        # Set up frequency calculation parameters only
         opt_option = 'OPT'
 
     if tight_scf:
-        # Set up tight SCF convergence parameters
         calc_extra = f'{opt_option} TIGHTSCF'
     else:
-        # Use default SCF convergence parameters
         calc_extra = f'{opt_option}'
 
-    # Create a temporary working directory
     with tempfile.TemporaryDirectory() as temp_dir:
         orca_file = os.path.join(temp_dir, "orca.xyz")
-
-        # Set up the ORCA calculator with the specified parameters
         calc = orca_calc_preset(orca_path=orca_path,
                                 directory=temp_dir,
                                 charge=charge,
@@ -148,13 +138,8 @@ def orca_optimise_atoms(atoms,
                                 f_solv=f_solv,
                                 f_disp=f_disp,
                                 calc_extra=calc_extra)
-        # Assign the calculator to the molecule
         atoms.calc = calc
-
-        # Trigger the calculation to optimise the geometry
         _ = atoms.get_potential_energy()
-
-        # Load the optimised geometry from the ORCA output file
         return read(orca_file, format="xyz")
 
 
@@ -221,7 +206,7 @@ def orca_calculate_goat(atoms,
             charge=charge,
             mult=multiplicity,
             directory=temp_dir,
-            orcasimpleinput='GOAT XTB',
+            orcasimpleinput='GOAT',
             orcablocks=inpt_procs
         )
         atoms.calc = calc
