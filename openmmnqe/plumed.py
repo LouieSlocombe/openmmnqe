@@ -492,19 +492,23 @@ z5: COMBINE ARG=n1_o2,n1_n3 COEFFICIENTS=1,-1 PERIODIC=NO
 # Combine into a single CV
 z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
 
-# Constraints to keep the bases together
-nr_dist: DISTANCE ATOMS={nr1},{nr2}
-uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
-lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
+# # Constraints to keep the bases together
+# nr_dist: DISTANCE ATOMS={nr1},{nr2}
+# uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
+# lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
+# 
+# # rise restraint
+# base1: GROUP ATOMS={nr1},{o6},{n1},{n2}
+# base2: GROUP ATOMS={nr2},{o4},{n3},{o2}
+# com1: COM ATOMS=base1
+# com2: COM ATOMS=base2
+# dist: DISTANCE ATOMS=com1,com2 COMPONENTS
+# RESTRAINT ARG=dist.z AT=0.0 KAPPA={kappa}
 
-# nr_1: DISTANCE ATOMS={nr1},{o2}
-# UPPER_WALLS ARG=nr_1 AT={0.39} KAPPA={kappa}
-# LOWER_WALLS ARG=nr_1 AT={0.28} KAPPA={kappa}
-
-# Constraints to prevent excessive opening of the base pair
-nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}
-w_a1: LOWER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(120.0), decimals=2)} KAPPA={kappa}
-w_a2: UPPER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(140.0), decimals=2)} KAPPA={kappa}
+# # Constraints to prevent excessive opening of the base pair
+# nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}
+# w_a1: LOWER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(120.0), decimals=2)} KAPPA={kappa}
+# w_a2: UPPER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(140.0), decimals=2)} KAPPA={kappa}
 
 {metad_line}
 PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
