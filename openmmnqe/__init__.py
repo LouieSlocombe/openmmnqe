@@ -94,6 +94,7 @@ from .tools import (zero_velocities,
                     angle_between_atoms,
                     check_platform,
                     temperature_to_kbt,
+                    swap_bonding_configuration,
                     )
 
 import os

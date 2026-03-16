@@ -769,3 +769,33 @@ def temperature_to_kbt(temperature):
     """
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     return kt.value_in_unit(unit.kilojoule_per_mole)
+
+
+def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index):
+    """
+    Swap the bonding configuration from O-H...O to O...H-O in an Atoms object.
+
+    Parameters:
+    atoms (Atoms): The ASE Atoms object.
+    donor_index (int): The index of the donor oxygen atom.
+    hydrogen_index (int): The index of the hydrogen atom.
+    acceptor_index (int): The index of the acceptor oxygen atom.
+
+    Returns:
+    Atoms: The updated Atoms object with the swapped bonding configuration.
+    """
+    atoms = atoms.copy()
+    # Get the positions of the donor, hydrogen, and acceptor atoms
+    donor_pos = atoms.positions[donor_index]
+    hydrogen_pos = atoms.positions[hydrogen_index]
+    acceptor_pos = atoms.positions[acceptor_index]
+
+    # Calculate the new position for the hydrogen atom
+    direction = acceptor_pos - donor_pos
+    direction /= np.linalg.norm(direction)  # Normalise the direction vector
+    new_hydrogen_pos = acceptor_pos - direction * np.linalg.norm(hydrogen_pos - donor_pos)
+
+    # Update the position of the hydrogen atom
+    atoms.positions[hydrogen_index] = new_hydrogen_pos
+
+    return atoms

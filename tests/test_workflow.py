@@ -251,6 +251,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     nqe.remove_file('bck.0.HILLS')
     nqe.remove_file('bck.0.fes.dat')
 
+
 def test_eq_workflow_plumed_dihedral_opes():
     print(flush=True)
     n_steps = 100_000
@@ -316,7 +317,6 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     nqe.remove_file_pattern('equilibrate*')
     nqe.remove_file_pattern('npt_equilibrate*')
     nqe.remove_file_pattern('prod*')
-
 
     nqe.remove_file('COLVAR')
     nqe.remove_file('KERNELS')
@@ -1089,3 +1089,105 @@ def test_gt_wob_pt_solvated():
     nqe.remove_file('HILLS')
     nqe.remove_file('fes.dat')
     nqe.remove_file('plumed.dat')
+
+
+def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file):
+    with open(template_pdb, 'r') as f:
+        template_atoms = [line for line in f if line.startswith("HETATM")]
+
+    with open(xyz_file, 'r') as f:
+        lines = f.readlines()
+
+    num_atoms = int(lines[0].strip())
+    frames = []
+    for i in range(0, len(lines), num_atoms + 2):
+        frame_coords = lines[i + 2: i + num_atoms + 2]
+        frames.append([l.split()[1:] for l in frame_coords])
+
+    with open(output_file, 'w') as f:
+        f.write("REMARK TYPE=MULTI-ST-PDB\n")
+        f.write("REMARK ARG=path.s,path.z\n")
+        for i, frame in enumerate(frames):
+            f.write(f"REMARK NUMBER={i + 1}\n")
+            f.write(f"REMARK STEP={i}\n")
+            for j, coords in enumerate(frame):
+                t_line = template_atoms[j]
+                new_line = (t_line[:30] +
+                            f"{float(coords[0]):8.3f}{float(coords[1]):8.3f}{float(coords[2]):8.3f}" +
+                            t_line[54:])
+                f.write(new_line)
+            f.write("ENDMDL\n")
+
+def test_malonaldehyde_pathmsd():
+    from ase.io import read, write
+    from ase.visualize import view
+    from mace.calculators.foundations_models import mace_off
+
+    print(flush=True)
+    temperature = 300.0 * unit.kelvin
+    steps_prod = 10_000
+
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    pdb = app.PDBFile(input_pdb)
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield)
+
+    reactant = read("minimized.pdb")
+    # view(reactant)
+
+    product = nqe.swap_bonding_configuration(reactant, 0,8,1)
+
+    calc = mace_off(model_name='mace-off23-small', device='cuda')
+    product = nqe.optimise_geom(product,calc)
+    # view(product)
+
+    neb_path = nqe.quick_guess_path(reactant, product)
+    # view(neb_path)
+
+    write("neb_path.xyz", neb_path)
+    convert_xyz_to_plumed_ref("neb_path.xyz", "minimized.pdb", "reference.pdb")
+
+
+
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
+    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
+                                                         idx,
+                                                         temperature,
+                                                         height=8.0,
+                                                         bias=5.0)
+
+    plumed_script_path = "plumed.dat"
+    with open(plumed_script_path, 'w') as f:
+        f.write(plumed_input)
+    forcefield = MLPotential('mace-off23-small')
+    nqe.run_openmm_prod(modeller,
+                        forcefield,
+                        plumed_script_path=plumed_script_path,
+                        temperature=temperature,
+                        barostat_freq=None,
+                        steps=steps_prod)
+
+    # Run PLUMED sum_hills to get FES
+    os.system(sum_hills_input)
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+    #
+    # nqe.remove_file_pattern('minimized*')
+    # nqe.remove_file_pattern('prod*')
+    #
+    # nqe.remove_file('COLVAR')
+    # nqe.remove_file('HILLS')
+    # nqe.remove_file('fes.dat')
+    # nqe.remove_file('plumed.dat')
