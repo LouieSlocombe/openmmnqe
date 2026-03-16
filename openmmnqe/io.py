@@ -1607,6 +1607,7 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
     This function reads a template PDB file and a multi-frame XYZ file, then writes a new PDB file
     where each frame from the XYZ is inserted as a model, using the atom records from the template.
     The coordinates in each model are replaced with those from the corresponding XYZ frame.
+    Terminal entries (TER) are preserved in their original locations.
     The output is formatted for use as a reference structure in PLUMED metadynamics simulations.
 
     Parameters
@@ -1617,25 +1618,23 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
         Path to the template PDB file whose atom records will be used as a base.
     output_file : str
         Path to the output PDB file to be written in multi-model format.
-    atom_line : str, optional
-        The record type to match in the template PDB (default: 'HETATM').
+    atom_line : str, tuple, optional
+        The record type to match in the template PDB (default: 'HETATM'). Can also be ('ATOM', 'HETATM').
 
     Returns
     -------
     None
-        The function writes the output directly to the specified file.
-
-    Notes
-    -----
-    - The XYZ file is expected to have standard formatting: number of atoms, comment, then atom lines per frame.
-    - The number of atoms in the XYZ and the number of matching lines in the template PDB must be the same.
-    - The output PDB will contain REMARK lines for PLUMED, and each model will be separated by ENDMDL.
     """
+    # 1. Read template and keep BOTH atom lines and TER lines
     with open(template_pdb, 'r') as f:
-        template_atoms = [line for line in f if line.startswith(atom_line)]
+        template_lines = [line for line in f if line.startswith(atom_line) or line.startswith('TER')]
 
+    # 2. Parse the XYZ file
     with open(xyz_file, 'r') as f:
         lines = f.readlines()
+
+    if not lines:
+        return
 
     num_atoms = int(lines[0].strip())
     frames = []
@@ -1643,18 +1642,30 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
         frame_coords = lines[i + 2: i + num_atoms + 2]
         frames.append([l.split()[1:] for l in frame_coords])
 
+    # 3. Write out the PLUMED-formatted multi-model PDB
     with open(output_file, 'w') as f:
         f.write("REMARK TYPE=MULTI-ST-PDB\n")
         f.write("REMARK ARG=path.s,path.z\n")
+
         for i, frame in enumerate(frames):
             f.write(f"REMARK NUMBER={i + 1}\n")
             f.write(f"REMARK STEP={i}\n")
-            for j, coords in enumerate(frame):
-                t_line = template_atoms[j]
-                new_line = (t_line[:30] +
-                            f"{float(coords[0]):8.3f}{float(coords[1]):8.3f}{float(coords[2]):8.3f}" +
-                            t_line[54:])
-                f.write(new_line)
+
+            coord_idx = 0  # Independent counter for the XYZ coordinates
+
+            for t_line in template_lines:
+                if t_line.startswith('TER'):
+                    # Write TER lines exactly as they appear in the template
+                    f.write(t_line)
+                else:
+                    # Inject XYZ coordinates into the ATOM/HETATM lines
+                    coords = frame[coord_idx]
+                    new_line = (t_line[:30] +
+                                f"{float(coords[0]):8.3f}{float(coords[1]):8.3f}{float(coords[2]):8.3f}" +
+                                t_line[54:])
+                    f.write(new_line)
+                    coord_idx += 1  # Only advance coordinate index for actual atoms
+
             f.write("ENDMDL\n")
 
 

@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
 from openmmml import MLPotential
-
+from ase.io import read, write
+from mace.calculators.foundations_models import mace_off
+from ase.visualize import view
 import openmmnqe as nqe
 
 
@@ -1085,13 +1087,11 @@ def test_gt_wob_pt_solvated():
 
 
 def test_malonaldehyde_pathmsd():
-    from ase.io import read, write
-    from mace.calculators.foundations_models import mace_off
-    from ase.visualize import view
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 20_000
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
@@ -1110,6 +1110,7 @@ def test_malonaldehyde_pathmsd():
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
+    ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
 
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
@@ -1122,7 +1123,11 @@ def test_malonaldehyde_pathmsd():
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    # view(reactant)
+
+    # product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
+    # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.1)
     neb_path = nqe.quick_guess_path(reactant, product)
