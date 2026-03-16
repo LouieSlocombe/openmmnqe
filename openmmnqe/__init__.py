@@ -61,6 +61,7 @@ from .plumed import (plumed_input_1pt,
                      plumed_input_wob_2,
                      plumed_input_wob_3,
                      plumed_input_wob_4,
+                     plumed_input_neb_path,
                      )
 from .qm import (orca_calc_preset,
                  orca_optimise_atoms,

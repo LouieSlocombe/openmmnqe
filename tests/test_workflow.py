@@ -1090,7 +1090,7 @@ def test_malonaldehyde_pathmsd():
     from ase.visualize import view
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 20_000
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
@@ -1101,12 +1101,12 @@ def test_malonaldehyde_pathmsd():
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule)
 
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
-    nqe.center_in_box(modeller)
+    # padding = 1.5
+    # box_shape = 'cube'
+    # modeller.addSolvent(forcefield,
+    #                     padding=padding * unit.nanometer,
+    #                     boxShape=box_shape)
+    # nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
@@ -1127,25 +1127,13 @@ def test_malonaldehyde_pathmsd():
     product = nqe.optimise_geom(product, calc, fmax=0.1)
     neb_path = nqe.quick_guess_path(reactant, product)
     # view(neb_path)
-
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
+    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
 
-    temperature_str = temperature.value_in_unit(unit.kelvin)
-    kt_str = nqe.temperature_to_kbt(temperature)
-    # metad: METAD ARG=path.sss PACE=500 HEIGHT=8.0 SIGMA=0.1 BIASFACTOR=5 TEMP={temperature_str} FILE=HILLS
-
-    plumed_input = f'''
-FIT_TO_TEMPLATE REFERENCE=neb_path.pdb TYPE=OPTIMAL
-path: PATHMSD REFERENCE=neb_path.pdb LAMBDA=250.0 NEIGH_SIZE=8
-metad: METAD ARG=path.sss PACE=500 HEIGHT=8.0 SIGMA=0.1 BIASFACTOR=5 TEMP={temperature_str} FILE=HILLS
-path_limit: UPPER_WALLS ARG=path.zzz AT=0.05 KAPPA=1000.0
-PRINT ARG=path.sss,path.zzz,metad.bias STRIDE=500 FILE=COLVAR
-    '''
-    sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --kt {kt_str}'
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)

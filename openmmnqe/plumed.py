@@ -514,3 +514,36 @@ z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
 PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
         """
     return plumed_input, sum_hills_input
+
+
+def plumed_input_neb_path(temperature,
+                          wall=0.1,
+                          pace=500,
+                          height=15.0,  # kJ/mol
+                          sigma=0.1,  # nm
+                          bias=5.0,
+                          grid_min=12.0,
+                          grid_max=14.0,
+                          grid_bin=200,
+                          kappa=500.0,
+                          f_opes=True):
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
+
+    if f_opes:
+        metad_line = f"metad: OPES_METAD ARG=path.sss PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+    else:
+        metad_line = f"metad: METAD ARG=path.sss PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
+        sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+
+    lambda_val = 250.0
+    neigh_size = 8
+    plumed_input = f'''
+FIT_TO_TEMPLATE REFERENCE=neb_path.pdb TYPE=OPTIMAL
+path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
+{metad_line}
+path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}
+PRINT ARG=path.sss,path.zzz,metad.bias STRIDE={pace} FILE=COLVAR
+        '''
+    return plumed_input, sum_hills_input
