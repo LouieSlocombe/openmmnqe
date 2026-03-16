@@ -326,6 +326,10 @@ def get_ts_image(neb_images, calc):
     return neb_images[index]
 
 
+def quick_guess_path(reactant, product, n_images=25):
+    return gi.geodesic_interpolate([reactant, product], n_images=n_images)
+
+
 def quick_guess_ts(reactant, product, n_images=25):
     atoms_ts = gi.geodesic_interpolate([reactant, product], n_images=n_images)
     atoms_ts = atoms_ts[n_images // 2]
