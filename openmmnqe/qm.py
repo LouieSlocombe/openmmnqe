@@ -1,13 +1,18 @@
+import copy
 import os
 import re
 import tempfile
 from pathlib import Path
 from typing import Union
 
+import geodesic_interpolate as gi
+import numpy as np
 import pandas as pd
-from ase.calculators.orca import ORCA
-from ase.calculators.orca import OrcaProfile
+from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
+from ase.mep import NEB
+from ase.optimize import BFGS
+from scipy.interpolate import CubicSpline
 
 
 def orca_calc_preset(orca_path=None,
@@ -217,3 +222,111 @@ def orca_calculate_goat(atoms,
         df = _extract_conformer_info(orca_file)
         atoms = read(xyz_file, format="xyz", index=':')
         return atoms, df
+
+
+def get_neb_path(images):
+    positions = [atoms.positions for atoms in images]
+    path = [0] + [np.linalg.norm(positions[i + 1] - positions[i]) for i in range(len(positions) - 1)]
+    return np.cumsum(path)
+
+
+def stitch_path(path1, path2, f_reverse_path=False):
+    irc = list(path1)[::-1] + list(path2)[1:]
+    if f_reverse_path:
+        irc = irc[::-1]
+    return irc
+
+
+def resample_path(path, n_resample):
+    path_distance = get_neb_path(path)
+    path_interp = np.linspace(0, path_distance[-1], n_resample)
+    positions = np.array([image.positions for image in path])
+    positions_interp = CubicSpline(path_distance, positions)(path_interp)
+    irc_resampled = [path[0]]
+    for ii in range(1, n_resample - 1):
+        atoms = path[0].copy()
+        atoms.positions = positions_interp[ii, :, :]
+        irc_resampled.append(atoms)
+    irc_resampled.append(path[-1])
+    return irc_resampled
+
+
+def optimise_geom(atoms, calc,
+                  fmax=0.01,
+                  steps=1000,
+                  opti_traj='opti.traj'):
+    atoms = atoms.copy()
+    atoms.calc = calc
+    BFGS(atoms, trajectory=opti_traj).run(fmax=fmax, steps=steps)
+    atoms = read(opti_traj, index=-1)
+    os.remove(opti_traj)
+    return atoms
+
+
+def optimise_reactant_product(reactant, product, calc,
+                              fmax=0.01,
+                              steps=1000,
+                              reactant_opti='reactant_opti.traj',
+                              product_opti='product_opti.traj'):
+    print('Optimising reactant...', flush=True)
+    reactant = optimise_geom(reactant, calc,
+                             fmax=fmax,
+                             steps=steps,
+                             opti_traj=reactant_opti)
+
+    print('Optimizing product...', flush=True)
+    product = optimise_geom(product, calc,
+                            fmax=fmax,
+                            steps=steps,
+                            opti_traj=product_opti)
+    return reactant, product
+
+
+def prepare_neb(reactant, product, calc,
+                n_images=5,
+                climb=True,
+                rm_ro_trans=True,
+                geo_int=True,
+                k=2.0):
+    neb_images = [reactant]
+    for ii in range(n_images - 2):
+        neb_images.append(reactant.copy())
+    neb_images.append(product)
+
+    if geo_int:
+        neb_images = gi.geodesic_interpolate(neb_images, n_images=n_images)
+
+    for image in neb_images:
+        image.calc = copy.copy(calc)
+        image.get_potential_energy()
+
+    neb = NEB(neb_images,
+              climb=climb,
+              remove_rotation_and_translation=rm_ro_trans,
+              k=k)
+    if not geo_int:
+        neb.interpolate()
+        neb.interpolate("idpp")
+    return neb
+
+
+def optimise_neb(neb,
+                 fmax=0.01,
+                 steps=1000,
+                 ts_traj='ts.traj',
+                 n_images=5):
+    BFGS(neb, trajectory=ts_traj).run(fmax=fmax, steps=steps)
+    return read(ts_traj, index=f"-{n_images}:")
+
+
+def get_ts_image(neb_images, calc):
+    for image in neb_images:
+        image.calc = copy.copy(calc)
+    index = np.argmax([image.get_potential_energy() for image in neb_images])
+    return neb_images[index]
+
+
+def quick_guess_ts(reactant, product, n_images=25):
+    atoms_ts = gi.geodesic_interpolate([reactant, product], n_images=n_images)
+    atoms_ts = atoms_ts[n_images // 2]
+    return atoms_ts
