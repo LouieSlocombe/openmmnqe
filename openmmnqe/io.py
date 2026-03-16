@@ -1656,3 +1656,32 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
                             t_line[54:])
                 f.write(new_line)
             f.write("ENDMDL\n")
+
+
+def save_only_index_atoms(modeller, idx_list, file_idx='index_atoms.pdb'):
+    """
+    Saves only the atoms with specified indices from a Modeller object to a PDB file.
+
+    This function creates a new Modeller object from the provided modeller's topology and positions,
+    selects atoms whose indices are in the given idx_list, deletes all other atoms, and writes the
+    resulting structure to a PDB file.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The Modeller object containing the molecular system.
+    idx_list : list of int
+        List of atom indices to retain in the output PDB file.
+    file_idx : str, optional
+        Filename for the output PDB file. Default is 'index_atoms.pdb'.
+
+    Returns
+    -------
+    None
+        The function writes the selected atoms to the specified PDB file.
+    """
+    modeller_new = app.Modeller(modeller.topology, modeller.positions)
+    atoms_to_keep = [atom for atom in modeller_new.topology.atoms() if atom.index in idx_list]
+    modeller_new.delete([atom for atom in modeller_new.topology.atoms() if atom not in atoms_to_keep])
+    with open(file_idx, 'w') as f:
+        app.PDBFile.writeFile(modeller_new.topology, modeller_new.positions, f)
