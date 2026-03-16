@@ -1086,34 +1086,6 @@ def test_gt_wob_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file):
-    with open(template_pdb, 'r') as f:
-        template_atoms = [line for line in f if line.startswith("HETATM")]
-
-    with open(xyz_file, 'r') as f:
-        lines = f.readlines()
-
-    num_atoms = int(lines[0].strip())
-    frames = []
-    for i in range(0, len(lines), num_atoms + 2):
-        frame_coords = lines[i + 2: i + num_atoms + 2]
-        frames.append([l.split()[1:] for l in frame_coords])
-
-    with open(output_file, 'w') as f:
-        f.write("REMARK TYPE=MULTI-ST-PDB\n")
-        f.write("REMARK ARG=path.s,path.z\n")
-        for i, frame in enumerate(frames):
-            f.write(f"REMARK NUMBER={i + 1}\n")
-            f.write(f"REMARK STEP={i}\n")
-            for j, coords in enumerate(frame):
-                t_line = template_atoms[j]
-                new_line = (t_line[:30] +
-                            f"{float(coords[0]):8.3f}{float(coords[1]):8.3f}{float(coords[2]):8.3f}" +
-                            t_line[54:])
-                f.write(new_line)
-            f.write("ENDMDL\n")
-
-
 def calculate_plumed_lambda(xyz_path, units_to_nm=True):
     """
     Calculates the optimal LAMBDA for PLUMED PATHMSD.
@@ -1204,7 +1176,7 @@ def test_malonaldehyde_pathmsd():
     # view(neb_path)
 
     write("neb_path.xyz", neb_path)
-    convert_xyz_to_plumed_ref("neb_path.xyz", "minimized.pdb", "neb_path.pdb")
+    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "minimized.pdb", "neb_path.pdb")
     lam = calculate_plumed_lambda("neb_path.xyz")
 
     pdb = app.PDBFile("minimized.pdb")

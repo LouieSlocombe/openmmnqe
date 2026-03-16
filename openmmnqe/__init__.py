@@ -28,6 +28,7 @@ from .io import (remove_directory,
                  fix_pdb_chains,
                  fix_pdb_atom_labels,
                  convert_xyz_to_pdb,
+                 convert_xyz_to_plumed_ref,
                  )
 from .openmm import (run_openmm_relaxation,
                      run_openmm_relaxation_simple,
