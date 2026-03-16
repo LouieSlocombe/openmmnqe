@@ -1,8 +1,10 @@
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 import openmm.app as app
 import openmm.unit as unit
+from ase.io import read
 from openmmml import MLPotential
 
 import openmmnqe as nqe
@@ -385,11 +387,7 @@ def test_malonaldehyde_pt_solvated():
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
-
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
@@ -459,10 +457,7 @@ def test_malonaldehyde_pt_quantum_solvated():
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
@@ -1118,63 +1113,125 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file):
                 f.write(new_line)
             f.write("ENDMDL\n")
 
+
+def calculate_plumed_lambda(xyz_path, units_to_nm=True):
+    """
+    Calculates the optimal LAMBDA for PLUMED PATHMSD.
+    Logic: lambda = 2.3 / average_MSD_between_frames
+
+    Parameters:
+    xyz_path (str): Path to your .xyz NEB trajectory.
+    units_to_nm (bool): Convert ASE Angstroms to nm (standard for PLUMED).
+    """
+    # Load all frames from the xyz file
+    frames = read(xyz_path, index=':')
+    num_frames = len(frames)
+
+    if num_frames < 2:
+        raise ValueError("The path file must contain at least 2 frames.")
+
+    msd_values = []
+
+    for i in range(num_frames - 1):
+        # Get positions as numpy arrays
+        pos1 = frames[i].get_positions()
+        pos2 = frames[i + 1].get_positions()
+
+        # Convert to nm if necessary
+        if units_to_nm:
+            pos1 /= 10.0
+            pos2 /= 10.0
+
+        # Calculate MSD between frame i and frame i+1
+        # Squared displacement per atom, then averaged over all atoms
+        sq_diff = np.sum((pos2 - pos1) ** 2, axis=1)
+        msd = np.mean(sq_diff)
+        msd_values.append(msd)
+
+    avg_msd = np.mean(msd_values)
+
+    # The heuristic for a smooth path is lambda = 2.3 / avg_msd
+    optimal_lambda = 2.3 / avg_msd
+
+    print(f"--- Path Analysis ---")
+    print(f"Total frames: {num_frames}")
+    print(f"Average MSD:  {avg_msd:.6f} {'nm^2' if units_to_nm else 'A^2'}")
+    print(f"Suggested LAMBDA: {optimal_lambda:.2f}")
+
+    return optimal_lambda
+
+
 def test_malonaldehyde_pathmsd():
     from ase.io import read, write
-    from ase.visualize import view
     from mace.calculators.foundations_models import mace_off
-
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
-
+    steps_prod = 20_000
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
-    pdb = app.PDBFile(input_pdb)
-    modeller = app.Modeller(pdb.topology, pdb.positions)
+    potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule)
 
-    forcefield = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
+    # padding = 1.5
+    # box_shape = 'cube'
+    # modeller.addSolvent(forcefield,
+    #                     padding=padding * unit.nanometer,
+    #                     boxShape=box_shape)
+    # nqe.center_in_box(modeller)
+
+    chains = list(modeller.topology.chains())
+    ml_atoms = [atom.index for atom in chains[0].atoms()]
+
     nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield)
+                                     forcefield,
+                                     potential=potential,
+                                     ml_idx=ml_atoms)
 
     reactant = read("minimized.pdb")
     # view(reactant)
 
-    product = nqe.swap_bonding_configuration(reactant, 0,8,1)
+    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
 
     calc = mace_off(model_name='mace-off23-small', device='cuda')
-    product = nqe.optimise_geom(product,calc)
+    product = nqe.optimise_geom(product, calc, fmax=0.1)
     # view(product)
 
     neb_path = nqe.quick_guess_path(reactant, product)
     # view(neb_path)
 
     write("neb_path.xyz", neb_path)
-    convert_xyz_to_plumed_ref("neb_path.xyz", "minimized.pdb", "reference.pdb")
-
-
-
+    convert_xyz_to_plumed_ref("neb_path.xyz", "minimized.pdb", "neb_path.pdb")
+    lam = calculate_plumed_lambda("neb_path.xyz")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
-    idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
-                                                         idx,
-                                                         temperature,
-                                                         height=8.0,
-                                                         bias=5.0)
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = nqe.temperature_to_kbt(temperature)
 
+    plumed_input = f'''
+FIT_TO_TEMPLATE REFERENCE=neb_path.pdb TYPE=OPTIMAL
+path: PATHMSD REFERENCE=neb_path.pdb LAMBDA=250.0 NEIGH_SIZE=8 
+metad: METAD ARG=path.sss PACE=500 HEIGHT=8.0 SIGMA=0.1 BIASFACTOR=5 TEMP={temperature_str} FILE=HILLS CALC_RCT GRID_MIN=1.0 GRID_MAX=25.0 GRID_BIN=500
+path_limit: UPPER_WALLS ARG=path.zzz AT=0.05 KAPPA=500.0
+PRINT ARG=path.sss,path.zzz,metad.bias STRIDE=500 FILE=COLVAR
+    '''
+    sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --kt {kt_str}'
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
-    forcefield = MLPotential('mace-off23-small')
     nqe.run_openmm_prod(modeller,
                         forcefield,
                         plumed_script_path=plumed_script_path,
                         temperature=temperature,
                         barostat_freq=None,
-                        steps=steps_prod)
+                        steps=steps_prod,
+                        potential=potential,
+                        ml_idx=ml_atoms)
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
