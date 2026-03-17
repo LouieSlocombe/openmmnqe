@@ -526,7 +526,7 @@ def plumed_input_neb_path(temperature,
                           grid_max=14.0,
                           grid_bin=200,
                           kappa=500.0,
-                          f_opes=True):
+                          f_opes=False):
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
 
@@ -540,7 +540,7 @@ def plumed_input_neb_path(temperature,
     lambda_val = 250.0
     neigh_size = 8
     plumed_input = f'''
-FIT_TO_TEMPLATE REFERENCE=neb_path.pdb TYPE=OPTIMAL
+FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
 path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
 {metad_line}
 path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}
