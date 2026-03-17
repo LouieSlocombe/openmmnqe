@@ -1086,43 +1086,6 @@ def test_gt_wob_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def clean_openmm_pdb(input_path, output_path):
-    with open(input_path, 'r') as f:
-        lines = f.readlines()
-
-    clean_lines = []
-    atom_serial = 1
-    index_map = {}
-
-    for line in lines:
-        if line.startswith("MODEL") or line.startswith("REMARK NUMBER="):
-            atom_serial = 1
-            clean_lines.append(line)
-        elif line.startswith(("ATOM  ", "HETATM")):
-            old_serial = line[6:11].strip()
-            new_serial_int = atom_serial
-            if old_serial not in index_map:
-                index_map[old_serial] = f"{new_serial_int:>5}"
-            new_line = line[:6] + f"{new_serial_int:5d}" + line[11:]
-            clean_lines.append(new_line)
-            atom_serial += 1
-        elif line.startswith("TER"):
-            clean_lines.append("TER\n")
-        elif line.startswith("CONECT"):
-            new_conect = line[:6]
-            for i in range(6, len(line.strip()), 5):
-                old_idx = line[i:i + 5].strip()
-                if old_idx in index_map:
-                    new_conect += index_map[old_idx]
-                else:
-                    new_conect += line[i:i + 5]
-            clean_lines.append(new_conect.rstrip() + "\n")
-        else:
-            clean_lines.append(line)
-    with open(output_path, 'w') as f:
-        f.writelines(clean_lines)
-
-
 def test_malonaldehyde_pathmsd():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -1169,8 +1132,16 @@ def test_malonaldehyde_pathmsd():
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    clean_openmm_pdb("index_atoms.pdb", "index_atoms.pdb")
-    clean_openmm_pdb("neb_path.pdb", "neb_path.pdb")
+    # nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms_fixed.pdb")
+    # nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path_fixed.pdb")
+    #
+    # os.remove("index_atoms.pdb")
+    # os.remove("neb_path.pdb")
+    #
+    # # rename files
+    # os.rename("index_atoms_fixed.pdb", "index_atoms.pdb")
+    # os.rename("neb_path_fixed.pdb", "neb_path.pdb")
+
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -1195,14 +1166,16 @@ def test_malonaldehyde_pathmsd():
 
     nqe.plot_plumed_colvar("COLVAR")
     plt.show()
-    #
-    # nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('prod*')
-    #
-    # nqe.remove_file('COLVAR')
-    # nqe.remove_file('HILLS')
-    # nqe.remove_file('fes.dat')
-    # nqe.remove_file('plumed.dat')
+
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('prod*')
+    nqe.remove_file('COLVAR')
+    nqe.remove_file('HILLS')
+    nqe.remove_file('fes.dat')
+    nqe.remove_file('plumed.dat')
+    nqe.remove_file('index_atoms.pdb')
+    nqe.remove_file('neb_path.pdb')
+    nqe.remove_file('neb_path.xyz')
 
 
 def test_gt_wob_pathmsd():
@@ -1250,6 +1223,9 @@ def test_gt_wob_pathmsd():
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
+    # nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
+    # nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
+
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
@@ -1273,11 +1249,13 @@ def test_gt_wob_pathmsd():
 
     nqe.plot_plumed_colvar("COLVAR")
     plt.show()
-    #
-    # nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('prod*')
-    #
-    # nqe.remove_file('COLVAR')
-    # nqe.remove_file('HILLS')
-    # nqe.remove_file('fes.dat')
-    # nqe.remove_file('plumed.dat')
+
+    nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('prod*')
+    nqe.remove_file('COLVAR')
+    nqe.remove_file('HILLS')
+    nqe.remove_file('fes.dat')
+    nqe.remove_file('plumed.dat')
+    nqe.remove_file('index_atoms.pdb')
+    nqe.remove_file('neb_path.pdb')
+    nqe.remove_file('neb_path.xyz')
