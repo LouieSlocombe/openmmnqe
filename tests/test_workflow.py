@@ -1198,7 +1198,7 @@ def test_gt_wob_pathmsd():
                                      forcefield,
                                      potential=potential,
                                      ml_idx=ml_atoms)
-
+    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
@@ -1217,7 +1217,7 @@ def test_gt_wob_pathmsd():
 
     nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
     nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
-
+    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)

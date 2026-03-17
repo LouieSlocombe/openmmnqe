@@ -1743,6 +1743,7 @@ def pdb_remove_ter_index(input_path, output_path):
         elif line.startswith("TER"):
             # Normalize TER formatting.
             clean_lines.append("TER\n")
+            pass
         elif line.startswith("CONECT"):
             # Rewrite CONECT atom references using the reindex map.
             new_conect = line[:6]
