@@ -1132,15 +1132,15 @@ def test_malonaldehyde_pathmsd():
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    # nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms_fixed.pdb")
-    # nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path_fixed.pdb")
-    #
-    # os.remove("index_atoms.pdb")
-    # os.remove("neb_path.pdb")
-    #
-    # # rename files
-    # os.rename("index_atoms_fixed.pdb", "index_atoms.pdb")
-    # os.rename("neb_path_fixed.pdb", "neb_path.pdb")
+    nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms_fixed.pdb")
+    nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path_fixed.pdb")
+
+    os.remove("index_atoms.pdb")
+    os.remove("neb_path.pdb")
+
+    # rename files
+    os.rename("index_atoms_fixed.pdb", "index_atoms.pdb")
+    os.rename("neb_path_fixed.pdb", "neb_path.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
