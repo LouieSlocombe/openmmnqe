@@ -3,10 +3,10 @@ import os
 import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
-from openmmml import MLPotential
 from ase.io import read, write
 from mace.calculators.foundations_models import mace_off
-from ase.visualize import view
+from openmmml import MLPotential
+
 import openmmnqe as nqe
 
 
@@ -1086,12 +1086,48 @@ def test_gt_wob_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
+def clean_openmm_pdb(input_path, output_path):
+    with open(input_path, 'r') as f:
+        lines = f.readlines()
+
+    clean_lines = []
+    atom_serial = 1
+    index_map = {}
+
+    for line in lines:
+        if line.startswith("MODEL") or line.startswith("REMARK NUMBER="):
+            atom_serial = 1
+            clean_lines.append(line)
+        elif line.startswith(("ATOM  ", "HETATM")):
+            old_serial = line[6:11].strip()
+            new_serial_int = atom_serial
+            if old_serial not in index_map:
+                index_map[old_serial] = f"{new_serial_int:>5}"
+            new_line = line[:6] + f"{new_serial_int:5d}" + line[11:]
+            clean_lines.append(new_line)
+            atom_serial += 1
+        elif line.startswith("TER"):
+            clean_lines.append("TER\n")
+        elif line.startswith("CONECT"):
+            new_conect = line[:6]
+            for i in range(6, len(line.strip()), 5):
+                old_idx = line[i:i + 5].strip()
+                if old_idx in index_map:
+                    new_conect += index_map[old_idx]
+                else:
+                    new_conect += line[i:i + 5]
+            clean_lines.append(new_conect.rstrip() + "\n")
+        else:
+            clean_lines.append(line)
+    with open(output_path, 'w') as f:
+        f.writelines(clean_lines)
+
+
 def test_malonaldehyde_pathmsd():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
-    input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
@@ -1101,16 +1137,15 @@ def test_malonaldehyde_pathmsd():
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule)
 
-    # padding = 1.5
-    # box_shape = 'cube'
-    # modeller.addSolvent(forcefield,
-    #                     padding=padding * unit.nanometer,
-    #                     boxShape=box_shape)
-    # nqe.center_in_box(modeller)
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
-    ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
 
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
@@ -1125,8 +1160,7 @@ def test_malonaldehyde_pathmsd():
     reactant = read('index_atoms.pdb')
     # view(reactant)
 
-    # product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
-    product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
+    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
     # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.1)
@@ -1134,6 +1168,9 @@ def test_malonaldehyde_pathmsd():
     # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+
+    clean_openmm_pdb("index_atoms.pdb", "index_atoms.pdb")
+    clean_openmm_pdb("neb_path.pdb", "neb_path.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -1167,11 +1204,11 @@ def test_malonaldehyde_pathmsd():
     # nqe.remove_file('fes.dat')
     # nqe.remove_file('plumed.dat')
 
+
 def test_gt_wob_pathmsd():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
-    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
@@ -1190,7 +1227,6 @@ def test_gt_wob_pathmsd():
     # nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
-    ml_atoms = [atom.index for atom in chains[0].atoms()]
     ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
 
     nqe.run_openmm_relaxation_simple(modeller,
@@ -1205,8 +1241,6 @@ def test_gt_wob_pathmsd():
 
     reactant = read('index_atoms.pdb')
     # view(reactant)
-
-    # product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
     product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
     # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
