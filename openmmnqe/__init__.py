@@ -30,7 +30,7 @@ from .io import (remove_directory,
                  convert_xyz_to_pdb,
                  convert_xyz_to_plumed_ref,
                  save_only_index_atoms,
-                 pdb_remove_ter_index,
+                 # pdb_remove_ter_index,
                  )
 from .openmm import (run_openmm_relaxation,
                      run_openmm_relaxation_simple,

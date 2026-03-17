@@ -1142,7 +1142,6 @@ def test_malonaldehyde_pathmsd():
     # os.rename("index_atoms_fixed.pdb", "index_atoms.pdb")
     # os.rename("neb_path_fixed.pdb", "neb_path.pdb")
 
-
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
