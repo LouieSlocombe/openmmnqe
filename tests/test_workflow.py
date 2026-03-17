@@ -1089,7 +1089,88 @@ def test_gt_wob_pt_solvated():
 def test_malonaldehyde_pathmsd():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 20_000
+    steps_prod = 10_000
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    input_pdb = 'tests/data/pdb/G_T_wob.pdb'
+    ml_model = 'mace-off23-small'
+    potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule)
+
+    # padding = 1.5
+    # box_shape = 'cube'
+    # modeller.addSolvent(forcefield,
+    #                     padding=padding * unit.nanometer,
+    #                     boxShape=box_shape)
+    # nqe.center_in_box(modeller)
+
+    chains = list(modeller.topology.chains())
+    ml_atoms = [atom.index for atom in chains[0].atoms()]
+    ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
+
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     potential=potential,
+                                     ml_idx=ml_atoms)
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+
+    nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
+
+    reactant = read('index_atoms.pdb')
+    # view(reactant)
+
+    # product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
+    # view(product)
+    calc = mace_off(model_name=ml_model, device='cuda')
+    product = nqe.optimise_geom(product, calc, fmax=0.1)
+    neb_path = nqe.quick_guess_path(reactant, product)
+    # view(neb_path)
+    write("neb_path.xyz", neb_path)
+    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
+
+    plumed_script_path = "plumed.dat"
+    with open(plumed_script_path, 'w') as f:
+        f.write(plumed_input)
+    nqe.run_openmm_prod(modeller,
+                        forcefield,
+                        plumed_script_path=plumed_script_path,
+                        temperature=temperature,
+                        barostat_freq=None,
+                        steps=steps_prod,
+                        potential=potential,
+                        ml_idx=ml_atoms)
+
+    # Run PLUMED sum_hills to get FES
+    os.system(sum_hills_input)
+    nqe.plot_plumed_fes("fes.dat")
+    plt.show()
+
+    nqe.plot_plumed_colvar("COLVAR")
+    plt.show()
+    #
+    # nqe.remove_file_pattern('minimized*')
+    # nqe.remove_file_pattern('prod*')
+    #
+    # nqe.remove_file('COLVAR')
+    # nqe.remove_file('HILLS')
+    # nqe.remove_file('fes.dat')
+    # nqe.remove_file('plumed.dat')
+
+def test_gt_wob_pathmsd():
+    print(flush=True)
+    temperature = 300.0 * unit.kelvin
+    steps_prod = 10_000
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     ml_model = 'mace-off23-small'
