@@ -526,6 +526,8 @@ def plumed_input_neb_path(temperature,
                           grid_max=14.0,
                           grid_bin=200,
                           kappa=500.0,
+                          lambda_val=250.0,
+                          neigh_size=8,
                           f_opes=False):
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
@@ -537,10 +539,8 @@ def plumed_input_neb_path(temperature,
         metad_line = f"metad: METAD ARG=path.sss PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
 
-    lambda_val = 250.0
-    neigh_size = 8
     plumed_input = f'''
-FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
+FIT_TO_TEMPLATE REFERENCE=neb_path.pdb TYPE=OPTIMAL
 path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
 {metad_line}
 path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}

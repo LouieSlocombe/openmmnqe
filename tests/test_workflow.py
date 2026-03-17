@@ -1100,12 +1100,12 @@ def test_malonaldehyde_pathmsd():
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule)
 
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
-    nqe.center_in_box(modeller)
+    # padding = 1.5
+    # box_shape = 'cube'
+    # modeller.addSolvent(forcefield,
+    #                     padding=padding * unit.nanometer,
+    #                     boxShape=box_shape)
+    # nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
@@ -1126,21 +1126,14 @@ def test_malonaldehyde_pathmsd():
     product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
     # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
-    product = nqe.optimise_geom(product, calc, fmax=0.1)
+    product = nqe.optimise_geom(product, calc, fmax=0.01)
     neb_path = nqe.quick_guess_path(reactant, product)
     # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms_fixed.pdb")
-    nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path_fixed.pdb")
-
-    os.remove("index_atoms.pdb")
-    os.remove("neb_path.pdb")
-
-    # rename files
-    os.rename("index_atoms_fixed.pdb", "index_atoms.pdb")
-    os.rename("neb_path_fixed.pdb", "neb_path.pdb")
+    nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
+    nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -1222,8 +1215,8 @@ def test_gt_wob_pathmsd():
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    # nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
-    # nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
+    nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
+    nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
