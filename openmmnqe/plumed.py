@@ -527,7 +527,7 @@ def plumed_input_neb_path(temperature,
                           grid_bin=200,
                           kappa=500.0,
                           lambda_val=250.0,
-                          neigh_size=8,
+                          neigh_size=4,
                           f_opes=False):
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
@@ -540,6 +540,7 @@ def plumed_input_neb_path(temperature,
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
 
     plumed_input = f'''
+WHOLEMOLECULES ENTITY0=1-9
 FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
 path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
 {metad_line}

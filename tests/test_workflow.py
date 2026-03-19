@@ -1100,12 +1100,12 @@ def test_malonaldehyde_pathmsd():
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule)
 
-    # padding = 1.5
-    # box_shape = 'cube'
-    # modeller.addSolvent(forcefield,
-    #                     padding=padding * unit.nanometer,
-    #                     boxShape=box_shape)
-    # nqe.center_in_box(modeller)
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
@@ -1114,7 +1114,7 @@ def test_malonaldehyde_pathmsd():
                                      forcefield,
                                      potential=potential,
                                      ml_idx=ml_atoms)
-
+    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
@@ -1134,6 +1134,7 @@ def test_malonaldehyde_pathmsd():
 
     nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
     nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
+    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
