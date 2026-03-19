@@ -1089,7 +1089,7 @@ def test_gt_wob_pt_solvated():
 def test_malonaldehyde_pathmsd():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 20_000
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
@@ -1173,6 +1173,12 @@ def test_malonaldehyde_pathmsd():
 
 def test_gt_wob_pathmsd():
     print(flush=True)
+    import numpy as np
+    print(np.round(np.deg2rad(150.0), decimals=2))
+    print(np.round(np.deg2rad(190.0), decimals=2))
+    print(np.round(np.deg2rad(-150.0), decimals=2))
+    print(np.round(np.deg2rad(-190.0), decimals=2))
+
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
@@ -1185,12 +1191,12 @@ def test_gt_wob_pathmsd():
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule)
 
-    # padding = 1.5
-    # box_shape = 'cube'
-    # modeller.addSolvent(forcefield,
-    #                     padding=padding * unit.nanometer,
-    #                     boxShape=box_shape)
-    # nqe.center_in_box(modeller)
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
@@ -1199,7 +1205,6 @@ def test_gt_wob_pathmsd():
                                      forcefield,
                                      potential=potential,
                                      ml_idx=ml_atoms)
-    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
@@ -1210,18 +1215,25 @@ def test_gt_wob_pathmsd():
     product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
     # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
-    product = nqe.optimise_geom(product, calc, fmax=0.1)
+    product = nqe.optimise_geom(product, calc, fmax=0.01)
     neb_path = nqe.quick_guess_path(reactant, product)
     # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-
     nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
     nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
-    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
+
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
+
+    idx = ['AAA1:C4',
+           'AAA1:C1',
+           'AAB1:C1',
+           'AAB1:C3',
+           'AAA1:N1',
+           'AAB1:N1']
+    idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
+    plumed_input, sum_hills_input = nqe.plumed_input_neb_path_wob(idx, temperature)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1243,12 +1255,12 @@ def test_gt_wob_pathmsd():
     nqe.plot_plumed_colvar("COLVAR")
     plt.show()
 
-    nqe.remove_file_pattern('minimized*')
-    nqe.remove_file_pattern('prod*')
-    nqe.remove_file('COLVAR')
-    nqe.remove_file('HILLS')
-    nqe.remove_file('fes.dat')
-    nqe.remove_file('plumed.dat')
-    nqe.remove_file('index_atoms.pdb')
-    nqe.remove_file('neb_path.pdb')
-    nqe.remove_file('neb_path.xyz')
+    # nqe.remove_file_pattern('minimized*')
+    # nqe.remove_file_pattern('prod*')
+    # nqe.remove_file('COLVAR')
+    # nqe.remove_file('HILLS')
+    # nqe.remove_file('fes.dat')
+    # nqe.remove_file('plumed.dat')
+    # nqe.remove_file('index_atoms.pdb')
+    # nqe.remove_file('neb_path.pdb')
+    # nqe.remove_file('neb_path.xyz')

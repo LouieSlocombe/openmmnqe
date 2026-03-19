@@ -642,22 +642,22 @@ def test_ase_rc2():
 
 def test_ase_load():
     print(flush=True)
-    # name = 'tests/data/G_T_wob.traj'
-    # atoms = read(name, index=':')
+    name = 'tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj'
+    atoms = read(name, index=':')
     # write(name.replace('.traj', '.xyz'), atoms[0])
-    # print(atoms)
-    # view(atoms)
-    input_file = 'tests/data/G_enol_T.traj'
-    output_file = 'tests/data/pdb/G_enol_T.pdb'
-    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
-
-    input_file = 'tests/data/G_T_enol.traj'
-    output_file = 'tests/data/pdb/G_T_enol.pdb'
-    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
-
-    input_file = 'tests/data/G_T_wob.traj'
-    output_file = 'tests/data/pdb/G_T_wob.pdb'
-    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    print(atoms)
+    view(atoms)
+    # input_file = 'tests/data/G_enol_T.traj'
+    # output_file = 'tests/data/pdb/G_enol_T.pdb'
+    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    #
+    # input_file = 'tests/data/G_T_enol.traj'
+    # output_file = 'tests/data/pdb/G_T_enol.pdb'
+    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    #
+    # input_file = 'tests/data/G_T_wob.traj'
+    # output_file = 'tests/data/pdb/G_T_wob.pdb'
+    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
 
 
 def test_fix_pdb_chains():
