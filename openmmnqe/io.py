@@ -1705,7 +1705,7 @@ def pdb_remove_ter_index(input_path, output_path):
     This function reads a PDB-like file, rewrites atom serial numbers sequentially,
     and updates `CONECT` records to remain consistent with the new numbering. It also:
     - resets numbering at each new model marker (`MODEL` or `REMARK NUMBER=`),
-    - rewrites any `TER` record as a plain `TER\\n`,
+    - updates any `TER` record to share the serial index of the following atom,
     - preserves all non-target lines unchanged.
 
     Parameters
@@ -1733,6 +1733,7 @@ def pdb_remove_ter_index(input_path, output_path):
             # Start a fresh atom numbering sequence for each model.
             atom_serial = 1
             clean_lines.append(line)
+
         elif line.startswith(("ATOM  ", "HETATM")):
             # Reindex ATOM/HETATM serial field (columns 7-11 in PDB format).
             old_serial = line[6:11].strip()
@@ -1740,10 +1741,18 @@ def pdb_remove_ter_index(input_path, output_path):
             new_line = line[:6] + f"{atom_serial:5d}" + line[11:]
             clean_lines.append(new_line)
             atom_serial += 1
+
         elif line.startswith("TER"):
-            # Normalize TER formatting.
-            clean_lines.append("TER\n")
-            pass
+            # Preserve the TER line and update its serial number (columns 7-11).
+            # We explicitly do NOT increment `atom_serial` so the next ATOM
+            # line receives this exact same index.
+            if len(line) >= 11:
+                new_line = line[:6] + f"{atom_serial:5d}" + line[11:]
+            else:
+                # Fallback just in case the TER line is truncated
+                new_line = f"{line.strip():<6}{atom_serial:5d}\n"
+            clean_lines.append(new_line)
+
         elif line.startswith("CONECT"):
             # Rewrite CONECT atom references using the reindex map.
             new_conect = line[:6]
@@ -1751,6 +1760,7 @@ def pdb_remove_ter_index(input_path, output_path):
                 old_idx = line[i:i + 5].strip()
                 new_conect += index_map.get(old_idx, line[i:i + 5])
             clean_lines.append(new_conect.rstrip() + "\n")
+
         else:
             # Preserve unrelated records (e.g., REMARK, END, CRYST1).
             clean_lines.append(line)
