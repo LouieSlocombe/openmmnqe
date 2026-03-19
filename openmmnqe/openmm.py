@@ -323,7 +323,7 @@ def run_openmm_heating(modeller,
                        time_step=1.0 * unit.femtoseconds,
                        n_report=1_000,
                        steps_per_stage=5_000,
-                       steps_final=10_000,
+                       steps_final=5_000,
                        platform_name=None,
                        deuterate=False,
                        deuterate_option='water',
@@ -365,7 +365,7 @@ def run_openmm_heating(modeller,
         Number of MD steps per heating stage. Default is 5000.
     steps_final : int, optional
         Number of MD steps for the final equilibration at target temperature.
-        Default is 10000.
+        Default is 5000.
     platform_name : str, optional
         OpenMM platform name. Default is ``'CPU'``.
     deuterate : bool, optional
