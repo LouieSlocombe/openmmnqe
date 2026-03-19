@@ -522,12 +522,12 @@ def plumed_input_neb_path(temperature,
                           height=15.0,  # kJ/mol
                           sigma=0.1,  # nm
                           bias=5.0,
-                          grid_min=12.0,
-                          grid_max=14.0,
-                          grid_bin=200,
+                          grid_min=0.0,
+                          grid_max=26.0,
+                          grid_bin=500,
                           kappa=500.0,
                           lambda_val=250.0,
-                          neigh_size=4,
+                          neigh_size=8,
                           f_opes=False):
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
@@ -540,11 +540,62 @@ def plumed_input_neb_path(temperature,
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
 
     plumed_input = f'''
-WHOLEMOLECULES ENTITY0=1-9
 FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
 path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
 {metad_line}
 path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}
 PRINT ARG=path.sss,path.zzz,metad.bias STRIDE={pace} FILE=COLVAR
+        '''
+    return plumed_input, sum_hills_input
+
+
+def plumed_input_neb_path_wob(idx,
+                              temperature,
+                              wall=0.1,
+                              pace=500,
+                              height=10.0,  # kJ/mol
+                              sigma=0.1,  # nm
+                              bias=5.0,
+                              grid_min=0.0,
+                              grid_max=26.0,
+                              grid_bin=500,
+                              kappa=500.0,
+                              lambda_val=500.0,
+                              neigh_size=8,
+                              f_opes=False):
+    # Convert atom indices to PLUMED format
+    idx = atom_indices_to_plumed(idx)
+    # Unpack indices
+    ca1, ca2, cb1, cb2, nr1, nr2 = idx
+
+    temperature_str = temperature.value_in_unit(unit.kelvin)
+    kt_str = temperature_to_kbt(temperature)
+
+    if f_opes:
+        metad_line = f"metad: OPES_METAD ARG=path.sss PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+    else:
+        metad_line = f"metad: METAD ARG=path.sss PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
+        sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+
+    plumed_input = f'''
+FIT_TO_TEMPLATE REFERENCE=index_atoms.pdb TYPE=OPTIMAL
+path: PATHMSD REFERENCE=neb_path.pdb LAMBDA={lambda_val} NEIGH_SIZE={neigh_size}
+{metad_line}
+path_limit: UPPER_WALLS ARG=path.zzz AT={wall} KAPPA={kappa}
+
+# Constraint to bound the sliding of the bases
+dih: TORSION ATOMS={ca1},{nr1},{cb1},{nr2}
+w_a1: LOWER_WALLS ARG=dih AT=-1.0 KAPPA={kappa}
+w_a2: UPPER_WALLS ARG=dih AT=1.0 KAPPA={kappa}
+
+# w_a1: LOWER_WALLS ARG=dih AT={np.round(np.deg2rad(150.0), decimals=2)} KAPPA={kappa}
+# w_a2: UPPER_WALLS ARG=dih AT={np.round(np.deg2rad(190.0), decimals=2)} KAPPA={kappa}
+
+# Constraint to R-groups to keep bases together
+d_rr: DISTANCE ATOMS={nr1},{nr2}
+# w_d1: UPPER_WALLS ARG=d_rr AT=1.0 KAPPA={kappa}
+
+PRINT ARG=path.sss,path.zzz,metad.bias,dih,d_rr STRIDE={pace} FILE=COLVAR
         '''
     return plumed_input, sum_hills_input
