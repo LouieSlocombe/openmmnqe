@@ -1667,6 +1667,8 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
                     coord_idx += 1  # Only advance coordinate index for actual atoms
 
             f.write("ENDMDL\n")
+    pdb_remove_ter_index(template_pdb, template_pdb)
+    pdb_remove_ter_index(output_file, output_file)
 
 
 def save_only_index_atoms(modeller, idx_list, file_idx='index_atoms.pdb'):

@@ -50,8 +50,6 @@ if __name__ == "__main__":
     neb_path = nqe.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-    nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
-    nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
 
     plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
 

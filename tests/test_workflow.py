@@ -1131,9 +1131,6 @@ def test_malonaldehyde_pathmsd():
     # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-
-    nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
-    nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
     nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
@@ -1220,8 +1217,6 @@ def test_gt_wob_pathmsd():
     # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-    nqe.pdb_remove_ter_index("index_atoms.pdb", "index_atoms.pdb")
-    nqe.pdb_remove_ter_index("neb_path.pdb", "neb_path.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
