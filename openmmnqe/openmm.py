@@ -519,7 +519,7 @@ def run_openmm_npt(modeller,
                    k=10.0,
                    n_report=500,
                    n_1=5_000,
-                   n_2=25_000,
+                   n_2=15_000,
                    platform_name=None,
                    deuterate=False,
                    deuterate_option='water',
@@ -563,7 +563,7 @@ def run_openmm_npt(modeller,
     n_1 : int, optional
         Number of steps for restrained NPT (Phase 1). Default is 5000.
     n_2 : int, optional
-        Number of steps for unrestrained NPT (Phase 2). Default is 25000.
+        Number of steps for unrestrained NPT (Phase 2). Default is 15000.
     platform_name : str, optional
         OpenMM platform name. Default is ``'CPU'``.
     deuterate : bool, optional
@@ -678,7 +678,8 @@ def run_openmm_npt(modeller,
                                                       step=True,
                                                       potentialEnergy=True,
                                                       temperature=True,
-                                                      speed=True))
+                                                      speed=True,
+                                                      volume=True))
     simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
                                                       n_report,
                                                       step=True,
