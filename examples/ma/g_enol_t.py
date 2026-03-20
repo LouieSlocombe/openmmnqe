@@ -11,7 +11,7 @@ import openmmnqe as nqe
 if __name__ == "__main__":
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 30_000
     input_pdb = os.path.join(os.path.dirname(nqe.openmm_nqe_dir), 'tests/data/pdb/G_enol_T.pdb')
     ml_model = 'mace-off23-small'
     forcefield_names = ("amber14-all.xml", "amber14/tip3pfb.xml")
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    view(reactant)
+    # view(reactant)
     product = nqe.swap_bonding_configuration(reactant, 15, 9, 30)
     product = nqe.swap_bonding_configuration(product, 28, 21, 12)
     # view(product)
@@ -54,7 +54,10 @@ if __name__ == "__main__":
     # view(neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
+    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature,
+                                                              f_opes=True,
+                                                              height=30.0,
+                                                              lambda_val=100.0)
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -101,6 +104,8 @@ if __name__ == "__main__":
     # nqe.remove_file_pattern('prod*')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
+    nqe.remove_file('STATE')
+    nqe.remove_file('KERNELS')
     nqe.remove_file('fes.dat')
     nqe.remove_file('plumed.dat')
     nqe.remove_file('index_atoms.pdb')
