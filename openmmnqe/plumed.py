@@ -457,9 +457,14 @@ def plumed_input_wob_4(modeller,
     rr_u = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * wall, decimals=2)
     rr_l = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * (2.0 - wall), decimals=2)
 
+    r1 = np.round(distance_between_atoms(modeller, idx[2], idx[3]), decimals=2)
+    r2 = np.round(distance_between_atoms(modeller, idx[4], idx[0]), decimals=2)
+    r3 = np.round(distance_between_atoms(modeller, idx[6], idx[7]), decimals=2)
+
     # Convert atom indices to PLUMED format
     idx = atom_indices_to_plumed(idx)
     # Unpack indices
+    # 0 1   2   3   4   5   6   7   8    9
     n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2 = idx
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
@@ -493,9 +498,18 @@ z5: COMBINE ARG=n1_o2,n1_n3 COEFFICIENTS=1,-1 PERIODIC=NO
 z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
 
 # # Constraints to keep the bases together
-# nr_dist: DISTANCE ATOMS={nr1},{nr2}
-# uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
-# lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
+nr_dist: DISTANCE ATOMS={nr1},{nr2}
+uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
+lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
+
+
+# other distances
+o6_o2: DISTANCE ATOMS={o6},{o2}
+UPPER_WALLS ARG=o6_o2 AT={r1} KAPPA={kappa}
+UPPER_WALLS ARG=n1_n3 AT={r2} KAPPA={kappa}
+UPPER_WALLS ARG=n2_o2 AT={r3} KAPPA={kappa}
+
+
 # 
 # # rise restraint
 # base1: GROUP ATOMS={nr1},{o6},{n1},{n2}
