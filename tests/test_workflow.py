@@ -1005,7 +1005,7 @@ def test_g_enol_t_pt_solvated():
 def test_gt_wob_pt_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 100_000
 
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -1052,7 +1052,7 @@ def test_gt_wob_pt_solvated():
                                                            idx,
                                                            temperature,
                                                            wall=1.0,
-                                                           height=100.0,
+                                                           height=10.0,
                                                            bias=10.0,
                                                            f_opes=True)
 
@@ -1079,7 +1079,8 @@ def test_gt_wob_pt_solvated():
 
     # nqe.remove_file_pattern('minimized*')
     # nqe.remove_file_pattern('prod*')
-
+    nqe.remove_file('STATE')
+    nqe.remove_file('KERNELS')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
     nqe.remove_file('fes.dat')
@@ -1170,12 +1171,6 @@ def test_malonaldehyde_pathmsd():
 
 def test_gt_wob_pathmsd():
     print(flush=True)
-    import numpy as np
-    print(np.round(np.deg2rad(150.0), decimals=2))
-    print(np.round(np.deg2rad(190.0), decimals=2))
-    print(np.round(np.deg2rad(-150.0), decimals=2))
-    print(np.round(np.deg2rad(-190.0), decimals=2))
-
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
@@ -1228,7 +1223,12 @@ def test_gt_wob_pathmsd():
            'AAA1:N1',
            'AAB1:N1']
     idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
-    plumed_input, sum_hills_input = nqe.plumed_input_neb_path_wob(idx, temperature)
+    plumed_input, sum_hills_input = nqe.plumed_input_neb_path_wob(idx,
+                                                                  temperature,
+                                                                  height=10.0,
+                                                                  kappa=1000.0,
+                                                                  lambda_val=1000.0,
+                                                                  f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1250,12 +1250,14 @@ def test_gt_wob_pathmsd():
     nqe.plot_plumed_colvar("COLVAR")
     plt.show()
 
-    # nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('minimized*')
     # nqe.remove_file_pattern('prod*')
-    # nqe.remove_file('COLVAR')
-    # nqe.remove_file('HILLS')
-    # nqe.remove_file('fes.dat')
-    # nqe.remove_file('plumed.dat')
-    # nqe.remove_file('index_atoms.pdb')
-    # nqe.remove_file('neb_path.pdb')
-    # nqe.remove_file('neb_path.xyz')
+    nqe.remove_file('COLVAR')
+    nqe.remove_file('HILLS')
+    nqe.remove_file('STATE')
+    nqe.remove_file('KERNELS')
+    nqe.remove_file('fes.dat')
+    nqe.remove_file('plumed.dat')
+    nqe.remove_file('index_atoms.pdb')
+    nqe.remove_file('neb_path.pdb')
+    nqe.remove_file('neb_path.xyz')
