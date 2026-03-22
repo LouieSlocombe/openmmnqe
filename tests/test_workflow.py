@@ -1094,7 +1094,7 @@ def test_gt_wob_pt_solvated():
 def test_malonaldehyde_pathmsd():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 20_000
+    steps_prod = 10_000
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
@@ -1104,7 +1104,6 @@ def test_malonaldehyde_pathmsd():
     modeller.addHydrogens()
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule)
-
     padding = 1.5
     box_shape = 'cube'
     modeller.addSolvent(forcefield,
@@ -1132,15 +1131,28 @@ def test_malonaldehyde_pathmsd():
     # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product)
+    neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
     # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
+    lambda_val = nqe.estimate_path_lambda("neb_path.pdb")
 
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
+    nqe.strip_hydrogens_keep_indices("neb_path.pdb", "neb_path_tmp.pdb", keep=idx)
+    nqe.strip_hydrogens_keep_indices("index_atoms.pdb", "index_atoms_tmp.pdb", keep=idx)
+    # rename the files to overwrite
+    os.rename("neb_path_tmp.pdb", "neb_path.pdb")
+    os.rename("index_atoms_tmp.pdb", "index_atoms.pdb")
+
+    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
+    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature,
+                                                              grid_min=0.0,
+                                                              grid_max=6.0,
+                                                              lambda_val=lambda_val,
+                                                              neigh_size=5,
+                                                              f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1163,9 +1175,11 @@ def test_malonaldehyde_pathmsd():
     plt.show()
 
     nqe.remove_file_pattern('minimized*')
-    nqe.remove_file_pattern('prod*')
+    # nqe.remove_file_pattern('prod*')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
+    nqe.remove_file('KERNELS')
+    nqe.remove_file('STATE')
     nqe.remove_file('fes.dat')
     nqe.remove_file('plumed.dat')
     nqe.remove_file('index_atoms.pdb')
@@ -1355,7 +1369,6 @@ def test_strip_hydrogens_keep_indices():
     # idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
     # nqe.strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
     # nqe.strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")
-
 
     input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     ml_model = 'mace-off23-small'
