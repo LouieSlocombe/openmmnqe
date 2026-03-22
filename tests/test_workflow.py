@@ -996,7 +996,7 @@ def test_g_enol_t_pt_solvated():
     plt.show()
 
     nqe.remove_file_pattern('minimized*')
-    #nqe.remove_file_pattern('prod*')
+    # nqe.remove_file_pattern('prod*')
 
     nqe.remove_file('STATE')
     nqe.remove_file('KERNELS')
@@ -1265,3 +1265,82 @@ def test_gt_wob_pathmsd():
     nqe.remove_file('index_atoms.pdb')
     nqe.remove_file('neb_path.pdb')
     nqe.remove_file('neb_path.xyz')
+
+
+import mdtraj as md
+import numpy as np
+
+
+def estimate_path_lambda(pdb_path):
+    traj = md.load(pdb_path)
+    traj.superpose(traj[0])
+
+    msds = [
+        np.mean(np.sum((traj.xyz[i] - traj.xyz[i + 1]) ** 2, axis=1)) * 100
+        for i in range(len(traj) - 1)
+    ]
+    avg_msd = np.mean(msds)
+    max_msd = np.max(msds)
+    ideal_lambda = 2.3 / avg_msd
+
+    print(f"--- Path Analysis ---", flush=True)
+    print(f"Number of frames: {len(traj)} (aim for 15 to 30)", flush=True)
+    print(f"Average MSD between frames: {avg_msd:.6f} nm^2", flush=True)
+    print(f"Maximum MSD between frames: {max_msd:.6f} nm^2", flush=True)
+    print(f"Recommended LAMBDA for PLUMED: {ideal_lambda:.2f}", flush=True)
+
+    if max_msd > 2 * avg_msd:
+        print("WARNING: Your path frames are unevenly spaced.", flush=True)
+        print("Consider interpolating your path for better stability.", flush=True)
+
+    if ideal_lambda > 500.0:
+        print("WARNING: The recommended LAMBDA is very high", flush=True)
+
+    return ideal_lambda
+
+
+def test_estimate_path_lambda():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    ml_model = 'mace-off23-large'
+    potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule)
+
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
+    chains = list(modeller.topology.chains())
+    ml_atoms = [atom.index for atom in chains[0].atoms()]
+
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     potential=potential,
+                                     ml_idx=ml_atoms)
+    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+
+    nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
+
+    reactant = read('index_atoms.pdb')
+    # view(reactant)
+
+    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    # view(product)
+    calc = mace_off(model_name=ml_model, device='cuda')
+    product = nqe.optimise_geom(product, calc, fmax=0.01)
+    neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
+    # view(neb_path)
+    write("neb_path.xyz", neb_path)
+    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+
+    my_lambda = estimate_path_lambda("neb_path.pdb")
