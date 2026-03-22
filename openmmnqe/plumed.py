@@ -10,6 +10,40 @@ fes_cmd = os.path.join(os.path.dirname(os.path.realpath(__file__)), "opes", "FES
 
 
 def estimate_path_lambda(pdb_path):
+    """
+    Estimate the optimal LAMBDA parameter for PLUMED's PATH collective variable
+    based on the mean squared displacement (MSD) between consecutive frames in a
+    path (trajectory) provided as a PDB file.
+
+    This function loads a multi-frame PDB file, aligns all frames to the first frame,
+    computes the MSD between each pair of consecutive frames, and suggests a LAMBDA
+    value for use in PLUMED path-based collective variables. It also prints a summary
+    of the path statistics and warnings if the path is unevenly spaced or if the
+    recommended LAMBDA is unusually high.
+
+    Parameters
+    ----------
+    pdb_path : str
+        Path to the multi-frame PDB file representing the path.
+
+    Returns
+    -------
+    float
+        The recommended LAMBDA value for PLUMED.
+
+    Prints
+    ------
+    - Number of frames in the path
+    - Average and maximum MSD between frames (in nm^2)
+    - Recommended LAMBDA value for PLUMED
+    - Warnings if frames are unevenly spaced or if LAMBDA is very high
+
+    Notes
+    -----
+    - The function assumes the input PDB contains multiple frames (e.g., a NEB path).
+    - The MSD is multiplied by 100 to convert from nm^2 to Å^2 before use in the LAMBDA calculation.
+    - A typical path should have 15 to 30 frames for best results.
+    """
     traj = md.load(pdb_path)
     traj.superpose(traj[0])
 
