@@ -483,6 +483,7 @@ o6_h3: DISTANCE ATOMS={o6},{h3}
 o4_h3: DISTANCE ATOMS={o4},{h3}
 n1_h1: DISTANCE ATOMS={n1},{h1}
 n3_h1: DISTANCE ATOMS={n3},{h1}
+
 n1_o2: DISTANCE ATOMS={n1},{o2}
 n2_o2: DISTANCE ATOMS={n2},{o2}
 n1_n3: DISTANCE ATOMS={n1},{n3}
@@ -503,11 +504,28 @@ uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
 lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
 
 
-# other distances
-o6_o2: DISTANCE ATOMS={o6},{o2}
-UPPER_WALLS ARG=o6_o2 AT={r1} KAPPA={kappa}
-UPPER_WALLS ARG=n1_n3 AT={r2} KAPPA={kappa}
-UPPER_WALLS ARG=n2_o2 AT={r3} KAPPA={kappa}
+# # other distances
+# o6_o2: DISTANCE ATOMS={o6},{o2}
+# UPPER_WALLS ARG=o6_o2 AT={r1} KAPPA={kappa}
+# UPPER_WALLS ARG=n1_n3 AT={r2} KAPPA={kappa}
+# UPPER_WALLS ARG=n2_o2 AT={r3} KAPPA={kappa}
+
+
+o6_o4: DISTANCE ATOMS={o6},{o4}
+UPPER_WALLS ARG=o6_o4 AT=0.36  KAPPA={kappa}
+LOWER_WALLS ARG=o6_o4 AT=0.25  KAPPA={kappa}
+o6_n3: DISTANCE ATOMS={o6},{n3}
+UPPER_WALLS ARG=o6_n3 AT=0.34  KAPPA={kappa}
+LOWER_WALLS ARG=o6_n3 AT=0.26  KAPPA={kappa}
+
+UPPER_WALLS ARG=n1_n3 AT=0.38  KAPPA={kappa}
+LOWER_WALLS ARG=n1_n3 AT=0.29  KAPPA={kappa}
+
+UPPER_WALLS ARG=n1_o2 AT=0.37  KAPPA={kappa}
+LOWER_WALLS ARG=n1_o2 AT=0.29  KAPPA={kappa}
+
+UPPER_WALLS ARG=n2_o2 AT=0.37  KAPPA={kappa}
+LOWER_WALLS ARG=n2_o2 AT=0.30  KAPPA={kappa}
 
 
 # 
@@ -519,10 +537,10 @@ UPPER_WALLS ARG=n2_o2 AT={r3} KAPPA={kappa}
 # dist: DISTANCE ATOMS=com1,com2 COMPONENTS
 # RESTRAINT ARG=dist.z AT=0.0 KAPPA={kappa}
 
-# # Constraints to prevent excessive opening of the base pair
-# nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}
-# w_a1: LOWER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(120.0), decimals=2)} KAPPA={kappa}
-# w_a2: UPPER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(140.0), decimals=2)} KAPPA={kappa}
+# Constraints to prevent excessive opening of the base pair
+nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}
+w_a1: LOWER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(120.0), decimals=2)} KAPPA={kappa}
+w_a2: UPPER_WALLS ARG=nr_ang AT={np.round(np.deg2rad(140.0), decimals=2)} KAPPA={kappa}
 
 {metad_line}
 PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR
