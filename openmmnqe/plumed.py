@@ -1,10 +1,40 @@
 import os
+
+import mdtraj as md
 import numpy as np
 import openmm.unit as unit
 
 from .tools import atom_indices_to_plumed, distance_between_atoms, temperature_to_kbt
 
 fes_cmd = os.path.join(os.path.dirname(os.path.realpath(__file__)), "opes", "FES_from_State.py")
+
+
+def estimate_path_lambda(pdb_path):
+    traj = md.load(pdb_path)
+    traj.superpose(traj[0])
+
+    msds = [
+        np.mean(np.sum((traj.xyz[i] - traj.xyz[i + 1]) ** 2, axis=1)) * 100
+        for i in range(len(traj) - 1)
+    ]
+    avg_msd = np.mean(msds)
+    max_msd = np.max(msds)
+    ideal_lambda = 2.3 / avg_msd
+
+    print(f"--- Path Analysis ---", flush=True)
+    print(f"Number of frames: {len(traj)} (aim for 15 to 30)", flush=True)
+    print(f"Average MSD between frames: {avg_msd:.6f} nm^2", flush=True)
+    print(f"Maximum MSD between frames: {max_msd:.6f} nm^2", flush=True)
+    print(f"Recommended LAMBDA for PLUMED: {ideal_lambda:.2f}", flush=True)
+
+    if max_msd > 2 * avg_msd:
+        print("WARNING: Your path frames are unevenly spaced.", flush=True)
+        print("Consider interpolating your path for better stability.", flush=True)
+
+    if ideal_lambda > 500.0:
+        print("WARNING: The recommended LAMBDA is very high", flush=True)
+
+    return ideal_lambda
 
 
 def plumed_input_1pt(modeller,

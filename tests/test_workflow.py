@@ -1267,38 +1267,6 @@ def test_gt_wob_pathmsd():
     nqe.remove_file('neb_path.xyz')
 
 
-import mdtraj as md
-import numpy as np
-
-
-def estimate_path_lambda(pdb_path):
-    traj = md.load(pdb_path)
-    traj.superpose(traj[0])
-
-    msds = [
-        np.mean(np.sum((traj.xyz[i] - traj.xyz[i + 1]) ** 2, axis=1)) * 100
-        for i in range(len(traj) - 1)
-    ]
-    avg_msd = np.mean(msds)
-    max_msd = np.max(msds)
-    ideal_lambda = 2.3 / avg_msd
-
-    print(f"--- Path Analysis ---", flush=True)
-    print(f"Number of frames: {len(traj)} (aim for 15 to 30)", flush=True)
-    print(f"Average MSD between frames: {avg_msd:.6f} nm^2", flush=True)
-    print(f"Maximum MSD between frames: {max_msd:.6f} nm^2", flush=True)
-    print(f"Recommended LAMBDA for PLUMED: {ideal_lambda:.2f}", flush=True)
-
-    if max_msd > 2 * avg_msd:
-        print("WARNING: Your path frames are unevenly spaced.", flush=True)
-        print("Consider interpolating your path for better stability.", flush=True)
-
-    if ideal_lambda > 500.0:
-        print("WARNING: The recommended LAMBDA is very high", flush=True)
-
-    return ideal_lambda
-
-
 def test_estimate_path_lambda():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
@@ -1332,15 +1300,13 @@ def test_estimate_path_lambda():
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    # view(reactant)
 
     product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
-    # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.01)
     neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
-    # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    my_lambda = estimate_path_lambda("neb_path.pdb")
+    my_lambda = nqe.estimate_path_lambda("neb_path.pdb")
+    assert my_lambda > 0.0, "Estimated lambda should be positive"
