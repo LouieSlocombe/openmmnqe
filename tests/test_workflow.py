@@ -1270,8 +1270,8 @@ def test_gt_wob_pathmsd():
 def test_estimate_path_lambda():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
-    ml_model = 'mace-off23-large'
-    potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
+    ml_model = 'mace-off23-small'
+    potential = MLPotential(ml_model)
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
@@ -1293,7 +1293,7 @@ def test_estimate_path_lambda():
                                      forcefield,
                                      potential=potential,
                                      ml_idx=ml_atoms)
-    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
+
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
@@ -1308,5 +1308,4 @@ def test_estimate_path_lambda():
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    my_lambda = nqe.estimate_path_lambda("neb_path.pdb")
-    assert my_lambda > 0.0, "Estimated lambda should be positive"
+    assert nqe.estimate_path_lambda("neb_path.pdb") > 0.0, "Estimated lambda should be positive"

@@ -9,7 +9,7 @@ from .tools import atom_indices_to_plumed, distance_between_atoms, temperature_t
 fes_cmd = os.path.join(os.path.dirname(os.path.realpath(__file__)), "opes", "FES_from_State.py")
 
 
-def estimate_path_lambda(pdb_path):
+def estimate_path_lambda(pdb_path: str) -> float:
     """
     Estimate the optimal LAMBDA parameter for PLUMED's PATH collective variable
     based on the mean squared displacement (MSD) between consecutive frames in a
