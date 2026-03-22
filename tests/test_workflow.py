@@ -1313,7 +1313,51 @@ def test_estimate_path_lambda():
 
 def test_strip_hydrogens_keep_indices():
     print(flush=True)
-    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    # input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    # ml_model = 'mace-off23-small'
+    # potential = MLPotential(ml_model)
+    # pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
+    # modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    # modeller.deleteWater()
+    # modeller.addHydrogens()
+    # forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+    #                                    molecule)
+    #
+    # padding = 1.5
+    # box_shape = 'cube'
+    # modeller.addSolvent(forcefield,
+    #                     padding=padding * unit.nanometer,
+    #                     boxShape=box_shape)
+    # nqe.center_in_box(modeller)
+    #
+    # chains = list(modeller.topology.chains())
+    # ml_atoms = [atom.index for atom in chains[0].atoms()]
+    #
+    # nqe.run_openmm_relaxation_simple(modeller,
+    #                                  forcefield,
+    #                                  potential=potential,
+    #                                  ml_idx=ml_atoms)
+    #
+    # pdb = app.PDBFile("minimized.pdb")
+    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    #
+    # nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
+    #
+    # reactant = read('index_atoms.pdb')
+    #
+    # product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    # calc = mace_off(model_name=ml_model, device='cuda')
+    # product = nqe.optimise_geom(product, calc, fmax=0.01)
+    # neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
+    # write("neb_path.xyz", neb_path)
+    # nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+    #
+    # idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
+    # nqe.strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
+    # nqe.strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")
+
+
+    input_pdb = 'tests/data/pdb/G_T_wob.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
@@ -1331,27 +1375,24 @@ def test_strip_hydrogens_keep_indices():
     nqe.center_in_box(modeller)
 
     chains = list(modeller.topology.chains())
-    ml_atoms = [atom.index for atom in chains[0].atoms()]
+    ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
 
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
                                      potential=potential,
                                      ml_idx=ml_atoms)
-
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-
-    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
+    neb_path = nqe.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-
-    idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:H6'])
     nqe.strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
     nqe.strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")
