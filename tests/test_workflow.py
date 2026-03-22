@@ -1309,3 +1309,75 @@ def test_estimate_path_lambda():
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
     assert nqe.estimate_path_lambda("neb_path.pdb") > 0.0, "Estimated lambda should be positive"
+
+
+def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
+    if keep is None:
+        keep = set()
+    else:
+        keep = set([i +1 for i in keep])
+    with open(input_pdb, 'r') as fin, open(output_pdb, 'w') as fout:
+        for line in fin:
+            if line.startswith("MODEL"):
+                fout.write(line)
+            elif line.startswith("ATOM") or line.startswith("HETATM"):
+                element = line[76:78].strip().upper()
+                atom_idx = int(line[6:11].strip())
+                if not element:
+                    atom_name = line[12:16].strip()
+                    if atom_name.startswith('H') or (atom_name[0].isdigit() and 'H' in atom_name[:2]):
+                        element = 'H'
+                is_hydrogen = (element == 'H')
+                if not is_hydrogen:
+                    fout.write(line)
+                else:
+                    if atom_idx in keep:
+                        fout.write(line)
+            else:
+                fout.write(line)
+
+
+def test_strip_hydrogens_keep_indices():
+    print(flush=True)
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
+    ml_model = 'mace-off23-small'
+    potential = MLPotential(ml_model)
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecule)
+
+    padding = 1.5
+    box_shape = 'cube'
+    modeller.addSolvent(forcefield,
+                        padding=padding * unit.nanometer,
+                        boxShape=box_shape)
+    nqe.center_in_box(modeller)
+
+    chains = list(modeller.topology.chains())
+    ml_atoms = [atom.index for atom in chains[0].atoms()]
+
+    nqe.run_openmm_relaxation_simple(modeller,
+                                     forcefield,
+                                     potential=potential,
+                                     ml_idx=ml_atoms)
+
+    pdb = app.PDBFile("minimized.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+
+    nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
+
+    reactant = read('index_atoms.pdb')
+
+    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    calc = mace_off(model_name=ml_model, device='cuda')
+    product = nqe.optimise_geom(product, calc, fmax=0.01)
+    neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
+    write("neb_path.xyz", neb_path)
+    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+
+    idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
+    strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
+    strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")
