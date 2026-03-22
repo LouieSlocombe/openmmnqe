@@ -452,7 +452,7 @@ def plumed_input_wob_4(modeller,
                        sigma=0.05,  # nm
                        bias=20.0,
                        grid_bin=200,
-                       kappa=1000.0,
+                       kappa=2000.0,
                        f_opes=False):
     rr_u = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * wall, decimals=2)
     rr_l = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * (2.0 - wall), decimals=2)
@@ -498,10 +498,10 @@ z5: COMBINE ARG=n1_o2,n1_n3 COEFFICIENTS=1,-1 PERIODIC=NO
 # Combine into a single CV
 z: COMBINE ARG=z1,z2,z3,z4,z5 COEFFICIENTS=1,1,1,1,1 PERIODIC=NO
 
-# # Constraints to keep the bases together
-nr_dist: DISTANCE ATOMS={nr1},{nr2}
-uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
-lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
+# # # Constraints to keep the bases together
+# nr_dist: DISTANCE ATOMS={nr1},{nr2}
+# uw_nr: UPPER_WALLS ARG=nr_dist AT={rr_u} KAPPA={kappa}
+# lw_nr: LOWER_WALLS ARG=nr_dist AT={rr_l} KAPPA={kappa}
 
 
 # # other distances
@@ -527,15 +527,13 @@ LOWER_WALLS ARG=n1_o2 AT=0.29  KAPPA={kappa}
 UPPER_WALLS ARG=n2_o2 AT=0.37  KAPPA={kappa}
 LOWER_WALLS ARG=n2_o2 AT=0.30  KAPPA={kappa}
 
-
-# 
-# # rise restraint
-# base1: GROUP ATOMS={nr1},{o6},{n1},{n2}
-# base2: GROUP ATOMS={nr2},{o4},{n3},{o2}
-# com1: COM ATOMS=base1
-# com2: COM ATOMS=base2
-# dist: DISTANCE ATOMS=com1,com2 COMPONENTS
-# RESTRAINT ARG=dist.z AT=0.0 KAPPA={kappa}
+# rise restraint
+base1: GROUP ATOMS={nr1},{o6},{n1},{n2}
+base2: GROUP ATOMS={nr2},{o4},{n3},{o2}
+com1: COM ATOMS=base1
+com2: COM ATOMS=base2
+dist: DISTANCE ATOMS=com1,com2 COMPONENTS
+RESTRAINT ARG=dist.z AT=0.0 KAPPA={kappa}
 
 # Constraints to prevent excessive opening of the base pair
 nr_ang: ANGLE ATOMS={nr1},{o6},{nr2}

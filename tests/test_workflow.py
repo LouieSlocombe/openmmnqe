@@ -931,7 +931,7 @@ def test_gc_pt_quantum_solvated():
 def test_g_enol_t_pt_solvated():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 100_000
 
     input_pdb = 'tests/data/pdb/G_enol_T.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -958,6 +958,7 @@ def test_g_enol_t_pt_solvated():
                                      forcefield,
                                      potential=potential,
                                      ml_idx=ml_atoms)
+
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
@@ -969,8 +970,9 @@ def test_g_enol_t_pt_solvated():
                                                             idx2,
                                                             temperature,
                                                             wall=1.0,
-                                                            height=10.0,
-                                                            bias=10.0)
+                                                            height=100.0,
+                                                            bias=10.0,
+                                                            f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -994,8 +996,10 @@ def test_g_enol_t_pt_solvated():
     plt.show()
 
     nqe.remove_file_pattern('minimized*')
-    nqe.remove_file_pattern('prod*')
+    #nqe.remove_file_pattern('prod*')
 
+    nqe.remove_file('STATE')
+    nqe.remove_file('KERNELS')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
     nqe.remove_file('fes.dat')
