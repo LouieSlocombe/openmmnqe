@@ -1052,7 +1052,7 @@ def test_gt_wob_pt_solvated():
                                                            idx,
                                                            temperature,
                                                            wall=1.0,
-                                                           height=300.0,
+                                                           height=200.0,
                                                            bias=10.0,
                                                            f_opes=True)
 

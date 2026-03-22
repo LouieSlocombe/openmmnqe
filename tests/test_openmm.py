@@ -6,12 +6,13 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pandas as pd
+from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
 from ase.visualize import view
+from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 from scipy.stats import linregress
-from mace.calculators.foundations_models import mace_off
-from ase.calculators.orca import ORCA, OrcaProfile
+
 import openmmnqe as nqe
 
 
@@ -751,3 +752,56 @@ def test_temperature_to_kbt():
     kbt = nqe.temperature_to_kbt(temperature)
     print(kbt, flush=True)
     assert np.allclose(kbt, 2.494338785445972, atol=1e-6)
+
+
+def to_fraction(d):
+    return (d - d[0]) / d[0] + 1
+
+
+def test_check_neb_distances():
+    print(flush=True)
+    name = 'tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj'
+    atoms = read(name, index=':')
+
+    o6 = 5
+    o4 = 21
+    n3 = 19
+    n1 = 6
+    o2 = 18
+    n2 = 8
+
+    # view(atoms)
+    d_o6_o4 = np.array(ase_distance_between_atoms(atoms, o6, o4))
+    d_o6_n3 = np.array(ase_distance_between_atoms(atoms, o6, n3))
+    # d_o6_o2 = np.array(ase_distance_between_atoms(atoms, o6, n3))
+
+    d_n1_n3 = np.array(ase_distance_between_atoms(atoms, n1, n3))
+    d_n1_o2 = np.array(ase_distance_between_atoms(atoms, n1, o2))
+    d_n2_o2 = np.array(ase_distance_between_atoms(atoms, n2, o2))
+
+    o6_o4 = to_fraction(d_o6_o4)
+    o6_n3 = to_fraction(d_o6_n3)
+    n1_n3 = to_fraction(d_n1_n3)
+    n1_o2 = to_fraction(d_n1_o2)
+    n2_o2 = to_fraction(d_n2_o2)
+    labels = ['o6_o4', 'o6_n3', 'n1_n3', 'n1_o2', 'n2_o2']
+    dist = [d_o6_o4, d_o6_n3, d_n1_n3, d_n1_o2, d_n2_o2]
+    items = [o6_o4, o6_n3, n1_n3, n1_o2, n2_o2]
+    for i, item in enumerate(items):
+        # print the minimum and maximum of the item
+        print(f"{labels[i]}: Start: {dist[i][0]:.2f} Min: {np.min(item):.2f}, Max: {np.max(item):.2f}", flush=True)
+        tmp = labels[i].split('_')
+        line = f'{labels[i]}: DISTANCE ATOMS=' + '{' + tmp[0] + '},' + '{' + tmp[1] + '}'
+        print(line, flush=True)
+
+        line = f'UPPER_WALLS ARG={labels[i]} AT={0.1 * dist[i][0] * np.max(item):.2f} ' + ' KAPPA={kappa}'
+        print(line, flush=True)
+        line = f'LOWER_WALLS ARG={labels[i]} AT={0.1 * dist[i][0] * np.min(item):.2f} ' + ' KAPPA={kappa}'
+        print(line, flush=True)
+        print(flush=True)
+
+    #     plt.plot(item, label=labels[i])
+    # plt.xlabel('Frame')
+    # plt.ylabel('Distance (Angstrom)')
+    # plt.legend(loc='best')
+    # plt.show()
