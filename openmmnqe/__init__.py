@@ -31,6 +31,7 @@ from .io import (remove_directory,
                  convert_xyz_to_plumed_ref,
                  save_only_index_atoms,
                  pdb_remove_ter_index,
+                 strip_hydrogens_keep_indices,
                  )
 from .openmm import (run_openmm_relaxation,
                      run_openmm_relaxation_simple,

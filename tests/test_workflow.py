@@ -1311,32 +1311,6 @@ def test_estimate_path_lambda():
     assert nqe.estimate_path_lambda("neb_path.pdb") > 0.0, "Estimated lambda should be positive"
 
 
-def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
-    if keep is None:
-        keep = set()
-    else:
-        keep = set([i +1 for i in keep])
-    with open(input_pdb, 'r') as fin, open(output_pdb, 'w') as fout:
-        for line in fin:
-            if line.startswith("MODEL"):
-                fout.write(line)
-            elif line.startswith("ATOM") or line.startswith("HETATM"):
-                element = line[76:78].strip().upper()
-                atom_idx = int(line[6:11].strip())
-                if not element:
-                    atom_name = line[12:16].strip()
-                    if atom_name.startswith('H') or (atom_name[0].isdigit() and 'H' in atom_name[:2]):
-                        element = 'H'
-                is_hydrogen = (element == 'H')
-                if not is_hydrogen:
-                    fout.write(line)
-                else:
-                    if atom_idx in keep:
-                        fout.write(line)
-            else:
-                fout.write(line)
-
-
 def test_strip_hydrogens_keep_indices():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
@@ -1379,5 +1353,5 @@ def test_strip_hydrogens_keep_indices():
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
-    strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
-    strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")
+    nqe.strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
+    nqe.strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")

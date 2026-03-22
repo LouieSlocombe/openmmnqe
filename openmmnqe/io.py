@@ -1769,3 +1769,28 @@ def pdb_remove_ter_index(input_path, output_path):
 
     with open(output_path, 'w') as f:
         f.writelines(clean_lines)
+
+def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
+    if keep is None:
+        keep = set()
+    else:
+        keep = set([i +1 for i in keep])
+    with open(input_pdb, 'r') as fin, open(output_pdb, 'w') as fout:
+        for line in fin:
+            if line.startswith("MODEL"):
+                fout.write(line)
+            elif line.startswith("ATOM") or line.startswith("HETATM"):
+                element = line[76:78].strip().upper()
+                atom_idx = int(line[6:11].strip())
+                if not element:
+                    atom_name = line[12:16].strip()
+                    if atom_name.startswith('H') or (atom_name[0].isdigit() and 'H' in atom_name[:2]):
+                        element = 'H'
+                is_hydrogen = (element == 'H')
+                if not is_hydrogen:
+                    fout.write(line)
+                else:
+                    if atom_idx in keep:
+                        fout.write(line)
+            else:
+                fout.write(line)
