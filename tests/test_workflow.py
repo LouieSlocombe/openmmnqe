@@ -1094,7 +1094,8 @@ def test_gt_wob_pt_solvated():
 def test_malonaldehyde_pathmsd():
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 10_000
+    steps_prod = 100_000
+    n_images = 10
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
@@ -1131,11 +1132,11 @@ def test_malonaldehyde_pathmsd():
     # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
+    neb_path = nqe.quick_guess_path(reactant, product, n_images=n_images)
     # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-    lambda_val = nqe.estimate_path_lambda("neb_path.pdb")
+    lambda_val = nqe.estimate_path_lambda("neb_path.pdb") * 0.5
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
     nqe.strip_hydrogens_keep_indices("neb_path.pdb", "neb_path_tmp.pdb", keep=idx)
@@ -1151,7 +1152,7 @@ def test_malonaldehyde_pathmsd():
                                                               grid_min=0.0,
                                                               grid_max=6.0,
                                                               lambda_val=lambda_val,
-                                                              neigh_size=5,
+                                                              neigh_size=n_images,
                                                               f_opes=True)
 
     plumed_script_path = "plumed.dat"
