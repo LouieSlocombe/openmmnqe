@@ -1,60 +1,115 @@
-# cd to the build tools directory
-cd $HOME/skunkworks/openmmnqe/build_tools
+#!/bin/bash
+# Exit immediately on error, treat unset variables as errors, fail pipelines cleanly
+#set -eo pipefail
 #bash custom_install.sh
 #conda remove -n openmmnqe_custom --all -y
 
-conda init bash
-source $(conda info --base)/etc/profile.d/conda.sh
-conda env create -f environment_custom.yml
+OPENMM_VERSION="master" # 8.5.0 master
+OPENMM_ML_VERSION="master" # 1.6
+PLUMED_VERSION="v2.10.0"
+OPENMM_PLUMED_VERSION="master"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORK_DIR="${SCRIPT_DIR}/../../openmmnqe_sources"
+
+echo "=== Initializing Conda Environment ==="
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+conda env create -f "${SCRIPT_DIR}/environment_custom.yml"
 conda activate openmmnqe_custom
-cd ../..
 
-# if the sources directory exists remove it to ensure a clean build
-if [ -d "sources" ]; then
-    rm -rf sources
+echo "=== Preparing Build Directory ==="
+if [ -d "${WORK_DIR}" ]; then
+    echo "Removing existing sources directory for a clean build..."
+    rm -rf "${WORK_DIR}"
 fi
+mkdir -p "${WORK_DIR}"
+cd "${WORK_DIR}"
 
-mkdir -p sources && cd sources
-
-# OpenMM
-git clone --depth 1 --filter=blob:none https://github.com/openmm/openmm.git && cd openmm
+echo "=== Compiling OpenMM ${OPENMM_VERSION} ==="
+git clone --branch "${OPENMM_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm.git
+cd openmm
 mkdir -p build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-         -DPYTHON_EXECUTABLE=$(which python)
-make -j$(nproc)
+
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPYTHON_EXECUTABLE="$(which python)" \
+    -DCUDA_TOOLKIT_ROOT_DIR="${CONDA_PREFIX}" \
+    -DCUDAToolkit_ROOT="${CONDA_PREFIX}"
+make -j"$(nproc)"
 make install
 make PythonInstall
-cd ../..
 
-# OpenMM-ML
-git clone --depth 1 --filter=blob:none https://github.com/openmm/openmm-ml.git && cd openmm-ml
-pip install .
-cd ..
+cd "${WORK_DIR}"
 
-# PLUMED
-git clone \
-  --branch v2.10.0 \
-  --depth 1 \
-  --filter=blob:none \
-  https://github.com/plumed/plumed2.git && cd plumed2
-./configure --prefix=$CONDA_PREFIX --enable-modules=opes
-make -j$(nproc)
-make install
-export PLUMED_INCLUDE_DIR=$CONDA_PREFIX/include/plumed
-export PLUMED_LIBRARY_DIR=$CONDA_PREFIX/lib
-cd ..
-
-# openmm-plumed
-git clone https://github.com/openmm/openmm-plumed.git && cd openmm-plumed
+echo "=== Compiling openmm-torch ==="
+git clone --depth 1 --filter=blob:none https://github.com/openmm/openmm-torch.git
+cd openmm-torch
 mkdir -p build && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=$CONDA_PREFIX \
-         -DOPENMM_DIR=$CONDA_PREFIX \
-         -DPLUMED_INCLUDE_DIR=$PLUMED_INCLUDE_DIR \
-         -DPLUMED_LIBRARY_DIR=$PLUMED_LIBRARY_DIR \
-         -DPYTHON_EXECUTABLE=$(which python)
-make -j$(nproc)
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DOPENMM_DIR="${CONDA_PREFIX}" \
+    -DCMAKE_PREFIX_PATH="$(python -c 'import torch.utils; print(torch.utils.cmake_prefix_path)')"
+make -j"$(nproc)"
+make install
+make PythonInstall
+
+cd "${WORK_DIR}"
+
+
+echo "=== Compiling NNPOps ==="
+git clone --depth 1 --filter=blob:none https://github.com/openmm/NNPOps.git
+cd NNPOps
+mkdir -p build && cd build
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="$(python -c 'import torch.utils; print(torch.utils.cmake_prefix_path)')"
+make -j"$(nproc)"
+make install
+
+cd "${WORK_DIR}"
+
+echo "=== Compiling OpenMM-ML ${OPENMM_ML_VERSION} ==="
+git clone --branch "${OPENMM_ML_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm-ml.git
+cd openmm-ml
+pip install .
+
+cd "${WORK_DIR}"
+
+echo "=== Compiling PLUMED ${PLUMED_VERSION} ==="
+git clone --branch "${PLUMED_VERSION}" --depth 1 --filter=blob:none https://github.com/plumed/plumed2.git
+cd plumed2
+./configure --prefix="${CONDA_PREFIX}" --enable-modules=opes
+make -j"$(nproc)"
+make install
+
+export PLUMED_INCLUDE_DIR="${CONDA_PREFIX}/include/plumed"
+export PLUMED_LIBRARY_DIR="${CONDA_PREFIX}/lib"
+
+cd "${WORK_DIR}"
+
+echo "=== Compiling openmm plumed ==="
+git clone --branch "${OPENMM_PLUMED_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm-plumed.git
+cd openmm-plumed
+mkdir -p build && cd build
+cmake .. \
+    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DOPENMM_DIR="${CONDA_PREFIX}" \
+    -DPLUMED_INCLUDE_DIR="${PLUMED_INCLUDE_DIR}" \
+    -DPLUMED_LIBRARY_DIR="${PLUMED_LIBRARY_DIR}" \
+    -DPYTHON_EXECUTABLE="$(which python)"
+make -j"$(nproc)"
 make install
 make PythonInstall
 cd python
 pip install . --no-build-isolation
-cd ../../..
+
+cd "${WORK_DIR}"
+
+pip install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
+
+echo "=== Build Complete! ==="
