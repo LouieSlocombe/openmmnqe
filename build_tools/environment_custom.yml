@@ -1,7 +1,7 @@
 name: openmmnqe_custom
 channels:
-  - pytorch
-  - nvidia
+#  - pytorch
+#  - nvidia
   - conda-forge
   - nodefaults
 
@@ -42,9 +42,9 @@ dependencies:
   - liblapack
 
   # ML / GPU Stack
-  - cuda-toolkit
+#  - cuda-toolkit
   - pytorch
-  - pytorch-gpu
+#  - pytorch-gpu
 
   # downstream
   - openmmforcefields

@@ -5,7 +5,7 @@
 #conda remove -n openmmnqe_custom --all -y
 
 OPENMM_VERSION="master" # 8.5.0 master
-OPENMM_ML_VERSION="master" # 1.6
+OPENMM_ML_VERSION="main" # 1.6
 PLUMED_VERSION="v2.10.0"
 OPENMM_PLUMED_VERSION="master"
 
