@@ -4,11 +4,15 @@ import os
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
+import torch
 from ase.calculators.orca import ORCA, OrcaProfile
 from mace.calculators.foundations_models import mace_off
 from openmm import openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
+
+device = 'CUDA' if torch.cuda.is_available() else 'CPU'
+print(f"Using device: {device}", flush=True)
 
 
 def test_ase_mace():
@@ -17,7 +21,7 @@ def test_ase_mace():
     potential = MLPotential('ase')
     calculator = mace_off('small', default_dtype='float32')
     system = potential.createSystem(pdb.topology, calculator=calculator)
-    platform = openmm.Platform.getPlatform('CUDA')
+    platform = openmm.Platform.getPlatform(device)
     context = openmm.Context(system, openmm.VerletIntegrator(0.001), platform)
     context.setPositions(pdb.getPositions(asNumpy=True))
     energy = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
@@ -30,7 +34,7 @@ def test_openmm_mlp():
     pdb = app.PDBFile('tests/data/pdb/toluene.pdb')
     potential = MLPotential('mace-off23-small')
     system = potential.createSystem(pdb.topology, returnEnergyType='energy')
-    platform = openmm.Platform.getPlatform('CUDA')
+    platform = openmm.Platform.getPlatform(device)
     context = openmm.Context(system, openmm.VerletIntegrator(0.001), platform)
     context.setPositions(pdb.getPositions(asNumpy=True))
     energy = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
@@ -47,7 +51,7 @@ def test_ase_orca():
     calculator = ORCA(profile=profile, orcasimpleinput='PBE def2-SVP RI D3BJ ENGRAD')  # PBE def2-SVP RI D3BJ or B97-3c
 
     system = potential.createSystem(pdb.topology, calculator=calculator)
-    platform = openmm.Platform.getPlatform('CUDA')
+    platform = openmm.Platform.getPlatform(device)
     context = openmm.Context(system, openmm.VerletIntegrator(0.001), platform)
     context.setPositions(pdb.getPositions(asNumpy=True))
     energy = context.getState(energy=True).getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)
@@ -85,7 +89,7 @@ def test_opes():
     integrator = openmm.LangevinMiddleIntegrator(300 * unit.kelvin,
                                                  1.0 / unit.picosecond,
                                                  1.0 * unit.femtosecond)
-    platform = openmm.Platform.getPlatform('CUDA')
+    platform = openmm.Platform.getPlatform(device)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
 
