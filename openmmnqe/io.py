@@ -1770,11 +1770,12 @@ def pdb_remove_ter_index(input_path, output_path):
     with open(output_path, 'w') as f:
         f.writelines(clean_lines)
 
+
 def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
     if keep is None:
         keep = set()
     else:
-        keep = set([i +1 for i in keep])
+        keep = set([i + 1 for i in keep])
     with open(input_pdb, 'r') as fin, open(output_pdb, 'w') as fout:
         for line in fin:
             if line.startswith("MODEL"):

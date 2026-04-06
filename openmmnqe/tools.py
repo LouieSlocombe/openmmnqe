@@ -4,9 +4,9 @@ from typing import Dict, Sequence, Any, List, Union, Literal, Optional
 
 import numpy as np
 import openmm.unit as unit
+import torch
 from openmm import openmm, app
 from scipy import constants
-import torch
 
 
 def zero_velocities(n_atoms):

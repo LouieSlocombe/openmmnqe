@@ -74,7 +74,6 @@ if __name__ == "__main__":
     # pdb = app.PDBFile("npt_equilibrate.pdb")
     # modeller = app.Modeller(pdb.topology, pdb.positions)
 
-
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['GGG1:O1', 'CCC1:H2', 'CCC1:N1'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['CCC1:N2', 'GGG1:H3', 'GGG1:N3'])
 
@@ -86,7 +85,6 @@ if __name__ == "__main__":
                                                             height=40.0,
                                                             bias=10.0,
                                                             f_opes=True)
-
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:

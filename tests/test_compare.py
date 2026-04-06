@@ -1,7 +1,7 @@
 import os
 from sys import stdout
 
-import matplotlib.pyplot as plot
+
 import matplotlib.pyplot as plt
 import numpy as np
 import openmm.app as app
@@ -97,18 +97,18 @@ def test_parahydrogen():
 
     for i in range(5):
         integrator.step(10_000)
-        plot.plot(integrator.getAdaptedFriction(0), label=f'{i}')
-    plot.xlim([0, 200])
-    plot.legend()
-    plot.show()
+        plt.plot(integrator.getAdaptedFriction(0), label=f'{i}')
+    plt.xlim([0, 200])
+    plt.legend()
+    plt.show()
 
     qtb_rdf = compute_rdf(context, particles, box_size)
 
-    plot.plot(classical_rdf, label="Classical")
-    plot.plot(rpmd_rdf, label="RPMD")
-    plot.plot(qtb_rdf, label="adQTB")
-    plot.legend()
-    plot.show()
+    plt.plot(classical_rdf, label="Classical")
+    plt.plot(rpmd_rdf, label="RPMD")
+    plt.plot(qtb_rdf, label="adQTB")
+    plt.legend()
+    plt.show()
 
 
 def test_smd():
