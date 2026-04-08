@@ -1,7 +1,5 @@
 name: openmmnqe
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
   - nodefaults
 
@@ -24,3 +22,6 @@ dependencies:
   - openmm-ml=1.6
   - openmm-plumed=2.1
   - openmmforcefields
+  - pip:
+      - torch --index-url https://download.pytorch.org/whl/cu126
+      - torchvision --index-url https://download.pytorch.org/whl/cu126
