@@ -5,7 +5,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.*
-  - pytorch-gpu
+  - pytorch-cuda=12.6
   - pytest
   - pandas
   - numpy

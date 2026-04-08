@@ -42,9 +42,9 @@ dependencies:
   - liblapack
 
   # ML / GPU Stack
-  - cuda-toolkit
+#  - cuda-toolkit
   - pytorch
-  - pytorch-gpu
+  - pytorch-cuda=12.6
 
   # downstream
   - openmmforcefields
