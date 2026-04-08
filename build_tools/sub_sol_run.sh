@@ -6,6 +6,7 @@
 #SBATCH -q public
 #SBATCH --time=0-04:00:00
 #SBATCH --mem=0
+#SBATCH -G 1
 #SBATCH -o run.out
 #SBATCH -e run.out
 #SBATCH --export=NONE
