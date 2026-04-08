@@ -12,7 +12,6 @@ import openmm.unit as unit
 from ase.io import read
 from ase.neighborlist import natural_cutoffs, neighbor_list
 from openff.toolkit import Molecule, Topology
-from openmm import app, Vec3
 from openmm.app import PDBFile, Topology, Element, Modeller
 from openmmforcefields.generators import GAFFTemplateGenerator
 from pdbfixer import PDBFixer
@@ -21,6 +20,8 @@ from rdkit.Chem import rdDetermineBonds
 from scipy.constants import physical_constants as const
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
+
+from openmm import app, Vec3
 
 # Conversion factor from Bohr to Angstrom
 bohr_to_angstrom = const["Bohr radius"][0] * 1e10

@@ -2,9 +2,9 @@ import os
 import sys
 
 import openmm.unit as unit
-from openmm import openmm, app
 from openmmplumed import PlumedForce
 
+from openmm import openmm, app
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,

@@ -7,9 +7,10 @@ import openmm.unit as unit
 import torch
 from ase.calculators.orca import ORCA, OrcaProfile
 from mace.calculators.foundations_models import mace_off
-from openmm import openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
+
+from openmm import openmm
 
 device = 'CUDA' if torch.cuda.is_available() else 'CPU'
 print(f"Using device: {device}", flush=True)

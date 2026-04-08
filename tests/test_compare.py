@@ -1,14 +1,13 @@
 import os
 from sys import stdout
 
-
 import matplotlib.pyplot as plt
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
-from openmm import openmm
 
 import openmmnqe as nqe
+from openmm import openmm
 
 
 def compute_rdf(context, particles, box_size):

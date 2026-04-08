@@ -1,5 +1,6 @@
-from ase.io import read
 import numpy as np
+from ase.io import read
+
 import openmmnqe as nqe
 
 

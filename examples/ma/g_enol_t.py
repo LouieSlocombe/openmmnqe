@@ -1,11 +1,12 @@
 import os
+
 import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
 from ase.io import read, write
 from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
-from ase.visualize import view
+
 import openmmnqe as nqe
 
 if __name__ == "__main__":
