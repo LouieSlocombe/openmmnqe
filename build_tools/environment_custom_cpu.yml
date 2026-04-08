@@ -39,9 +39,10 @@ dependencies:
   - libblas
   - liblapack
 
-  # ML / GPU Stack
-  - pytorch
-
   # downstream
   - openmmforcefields
   - pdbfixer
+
+  - pip:
+      - torch --index-url https://download.pytorch.org/whl/cpu
+      - torchvision --index-url https://download.pytorch.org/whl/cpu
