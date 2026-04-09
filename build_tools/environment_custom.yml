@@ -1,16 +1,27 @@
 name: openmmnqe_custom
+
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
   - nodefaults
 
 dependencies:
+  # --- Core Environment ---
   - python=3.13.*
-  - pytest
   - pip
+  - pytest
   - setuptools
   - wheel
 
-  # Scientific Python Stack
+  # --- ML / GPU Stack ---
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
+  - cuda-toolkit
+
+  # --- Scientific Python Stack ---
   - numpy
   - pandas
   - scipy
@@ -21,7 +32,7 @@ dependencies:
   - pymace
   - ase
 
-  # Build tools & compilers (Crucial for OpenMM/PLUMED)
+  # --- Build Tools & Compilers (Crucial for OpenMM/PLUMED) ---
   - compilers
   - cmake
   - make
@@ -32,17 +43,13 @@ dependencies:
   - pkg-config
   - sysroot_linux-64
 
-  # Math & Core Libraries
+  # --- Math & Core Libraries ---
   - zlib
   - mkl
   - mkl-include
   - libblas
   - liblapack
 
-  # downstream
+  # --- Downstream Dependencies ---
   - openmmforcefields
   - pdbfixer
-
-  - pip:
-      - torch --index-url https://download.pytorch.org/whl/cu126
-      - torchvision --index-url https://download.pytorch.org/whl/cu126
