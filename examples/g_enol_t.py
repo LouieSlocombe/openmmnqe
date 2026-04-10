@@ -15,8 +15,15 @@ if __name__ == "__main__":
     steps_prod = 30_000
     input_pdb = os.path.join(os.path.dirname(nqe.openmm_nqe_dir), 'tests/data/pdb/G_enol_T.pdb')
     ml_model = 'mace-off23-small'
+
+    calc = mace_mp(model=os.path.join(os.environ['MACE_MODELS'], 'mace-mh-1.model'),
+                   default_dtype="float32",
+                   device="cuda",
+                   head="omol",
+                   dispersion=True,
+                   dispersion_xc="pbe")
+
     forcefield_names = ("amber14-all.xml", "amber14/tip3pfb.xml")
-    potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
@@ -36,7 +43,7 @@ if __name__ == "__main__":
 
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
-                                     potential=potential,
+                                     calculator=calc,
                                      ml_idx=ml_atoms)
 
     pdb = app.PDBFile("minimized.pdb")
@@ -48,7 +55,6 @@ if __name__ == "__main__":
     product = nqe.swap_bonding_configuration(reactant, 15, 9, 30)
     product = nqe.swap_bonding_configuration(product, 28, 21, 12)
     # view(product)
-    calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.01)
     neb_path = nqe.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
@@ -64,7 +70,7 @@ if __name__ == "__main__":
     modeller = app.Modeller(pdb.topology, pdb.positions)
     # nqe.run_openmm_heating(modeller,
     #                        forcefield,
-    #                        potential=potential,
+    #                        calculator=calc,
     #                        ml_idx=ml_atoms,
     #                        target_temp=temperature)
     #
@@ -72,7 +78,7 @@ if __name__ == "__main__":
     # modeller = app.Modeller(pdb.topology, pdb.positions)
     # nqe.run_openmm_npt(modeller,
     #                    forcefield,
-    #                    potential=potential,
+    #                    calculator=calc,
     #                    ml_idx=ml_atoms,
     #                    temperature=temperature)
     #
@@ -88,7 +94,7 @@ if __name__ == "__main__":
                         temperature=temperature,
                         barostat_freq=None,
                         steps=steps_prod,
-                        potential=potential,
+                        calculator=calc,
                         ml_idx=ml_atoms)
 
     # Run PLUMED sum_hills to get FES
