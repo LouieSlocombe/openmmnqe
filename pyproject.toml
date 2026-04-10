@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmmnqe"
-version = "0.0.1"
+version = "0.1.0"
 description = "Template"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
@@ -48,7 +48,6 @@ Repository = "https://github.com/LouieSlocombe/openmmnqe"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = ["."]
 include = ["openmmnqe", "openmmnqe.*"]
 
 [tool.setuptools.package-data]

@@ -1,4 +1,4 @@
-__version__ = "0.0.0"
+__version__ = "0.1.0"
 
 from .io import (remove_directory,
                  copy_and_rename_file,
