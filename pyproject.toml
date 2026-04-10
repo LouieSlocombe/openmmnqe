@@ -48,7 +48,8 @@ Repository = "https://github.com/LouieSlocombe/openmmnqe"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["openmmnqe*"]
+where = ["."]
+include = ["openmmnqe", "openmmnqe.*"]
 
 [tool.setuptools.package-data]
 "openmmnqe" = ["data/*"]
