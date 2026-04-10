@@ -13,7 +13,7 @@
 
 ENV_NAME="openmmnqe_custom"
 
-module load cuda-12.6.1-gcc-12.1.0
+module load cuda-13.0.1-gcc-13.2.0
 module load mamba/latest
 source activate $ENV_NAME
 

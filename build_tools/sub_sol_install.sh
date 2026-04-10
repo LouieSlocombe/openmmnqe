@@ -11,7 +11,7 @@
 #SBATCH -e run.out
 #SBATCH --export=NONE
 
-module load cuda-12.6.1-gcc-12.1.0
+module load cuda-13.0.1-gcc-13.2.0
 module load mamba/latest
 
 ./custom_install_sol.sh >> bash.out 2>&1
