@@ -2,35 +2,43 @@
 #bash custom_install.sh
 #interactive -t 60 -p htc -c 32 --mem=64G -G 1
 
+# === Configuration ===
+ENV_NAME="openmmnqe"
 OPENMM_VERSION="master"
 PLUMED_VERSION="v2.10.0"
 OPENMM_PLUMED_VERSION="master"
 
-rm -rf $SCRATCH/openmmnqe_sources
-rm -rf $HOME/.conda/envs/openmmnqe_custom
+WORK_DIR="${SCRATCH}/${ENV_NAME}_sources"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_DIR=${SCRATCH}
-WORK_DIR="${SCRATCH}/openmmnqe_sources"
-
+# === Environment Setup ===
 module purge
 module load cuda-12.6.1-gcc-12.1.0
 module load mamba/latest
 
-echo "=== Initializing Conda Environment ==="
-mamba create -n openmmnqe -c conda-forge python=3.12 -y
-source activate openmmnqe
+echo "=== Cleaning previous installations ==="
+rm -rf "${WORK_DIR}"
+rm -rf "${HOME}/.conda/envs/${ENV_NAME}"
 
+echo "=== Initializing Conda Environment ==="
+mamba create -n "${ENV_NAME}" -c conda-forge python=3.12 -y
+source activate "${ENV_NAME}"
+
+echo "=== Installing Dependencies ==="
 pip3 install torch --index-url https://download.pytorch.org/whl/cu126
-mamba install -c conda-forge pymace=0.3.15 ase=3.28.0 openmm=8.5 openmm-ml=1.6 openmmforcefields==0.15.1
-mamba install -c conda-forge doxygen swig cython -y
+
+mamba install -c conda-forge -y \
+    pymace=0.3.15 \
+    ase=3.28.0 \
+    openmm=8.5 \
+    openmm-ml=1.6 \
+    openmmforcefields==0.15.1 \
+    doxygen \
+    swig \
+    cython
+
 pip3 install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
 
 echo "=== Preparing Build Directory ==="
-if [ -d "${WORK_DIR}" ]; then
-    echo "Removing existing sources directory for a clean build..."
-    rm -rf "${WORK_DIR}"
-fi
 mkdir -p "${WORK_DIR}"
 cd "${WORK_DIR}"
 
@@ -59,7 +67,7 @@ export PLUMED_INCLUDE_DIR="${CONDA_PREFIX}/include/plumed"
 export PLUMED_LIBRARY_DIR="${CONDA_PREFIX}/lib"
 cd "${WORK_DIR}"
 
-echo "=== Compiling openmm plumed ==="
+echo "=== Compiling OpenMM-PLUMED ${OPENMM_PLUMED_VERSION} ==="
 git clone --branch "${OPENMM_PLUMED_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm-plumed.git
 cd openmm-plumed
 mkdir -p build && cd build
