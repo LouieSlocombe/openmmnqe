@@ -100,10 +100,16 @@ if __name__ == "__main__":
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat")
+    plt.savefig("fes.png")
+    plt.savefig("fes.pdf")
     plt.show()
+    plt.close()
 
     nqe.plot_plumed_colvar("COLVAR")
+    plt.savefig("colvar.png")
+    plt.savefig("colvar.pdf")
     plt.show()
+    plt.close()
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
