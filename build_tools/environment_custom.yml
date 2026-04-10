@@ -7,49 +7,26 @@ channels:
   - nodefaults
 
 dependencies:
-  # --- Core Environment ---
-  - python=3.13.*
+  - python=3.13
   - pip
   - pytest
-  - setuptools
-  - wheel
 
-  # --- ML / GPU Stack ---
+  # --- ML Stack ---
   - pytorch
   - torchvision
   - torchaudio
   - pytorch-cuda=12.1
-  - cuda-toolkit
 
-  # --- Scientific Python Stack ---
+  # --- Scientific Stack ---
   - numpy
   - pandas
   - scipy
   - matplotlib
   - mdanalysis
-  - sympy
   - rdkit
-  - pymace
   - ase
+  - pymace
 
-  # --- Build Tools & Compilers (Crucial for OpenMM/PLUMED) ---
-  - compilers
+  # --- Build Tools ---
   - cmake
-  - make
-  - ninja
   - cython
-  - swig
-  - doxygen
-  - pkg-config
-  - sysroot_linux-64
-
-  # --- Math & Core Libraries ---
-  - zlib
-  - mkl
-  - mkl-include
-  - libblas
-  - liblapack
-
-  # --- Downstream Dependencies ---
-  - openmmforcefields
-  - pdbfixer
