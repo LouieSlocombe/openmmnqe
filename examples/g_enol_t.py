@@ -4,8 +4,7 @@ import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
 from ase.io import read, write
-from mace.calculators.foundations_models import mace_off
-from openmmml import MLPotential
+from mace.calculators.foundations_models import mace_mp
 
 import openmmnqe as nqe
 
@@ -13,8 +12,8 @@ if __name__ == "__main__":
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 30_000
-    input_pdb = os.path.join(os.path.dirname(nqe.openmm_nqe_dir), 'tests/data/pdb/G_enol_T.pdb')
-    ml_model = 'mace-off23-small'
+    # input_pdb = os.path.join(os.path.dirname(nqe.openmm_nqe_dir), 'tests/data/pdb/G_enol_T.pdb')
+    input_pdb ='G_enol_T.pdb'
 
     calc = mace_mp(model=os.path.join(os.environ['MACE_MODELS'], 'mace-mh-1.model'),
                    default_dtype="float32",
@@ -68,22 +67,22 @@ if __name__ == "__main__":
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_heating(modeller,
-    #                        forcefield,
-    #                        calculator=calc,
-    #                        ml_idx=ml_atoms,
-    #                        target_temp=temperature)
-    #
-    # pdb = app.PDBFile("equilibrate.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_npt(modeller,
-    #                    forcefield,
-    #                    calculator=calc,
-    #                    ml_idx=ml_atoms,
-    #                    temperature=temperature)
-    #
-    # pdb = app.PDBFile("npt_equilibrate.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_heating(modeller,
+                           forcefield,
+                           calculator=calc,
+                           ml_idx=ml_atoms,
+                           target_temp=temperature)
+
+    pdb = app.PDBFile("equilibrate.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_npt(modeller,
+                       forcefield,
+                       calculator=calc,
+                       ml_idx=ml_atoms,
+                       temperature=temperature)
+
+    pdb = app.PDBFile("npt_equilibrate.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -99,6 +98,7 @@ if __name__ == "__main__":
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
+
     nqe.plot_plumed_fes("fes.dat")
     plt.savefig("fes.png")
     plt.savefig("fes.pdf")
