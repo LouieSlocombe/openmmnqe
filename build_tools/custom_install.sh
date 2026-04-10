@@ -110,6 +110,4 @@ pip install . --no-build-isolation
 
 cd "${WORK_DIR}"
 
-pip install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
-
 echo "=== Build Complete! ==="

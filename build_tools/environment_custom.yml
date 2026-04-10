@@ -1,8 +1,6 @@
 name: openmmnqe_custom
 
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
   - nodefaults
 
@@ -10,23 +8,20 @@ dependencies:
   - python=3.13
   - pip
   - pytest
-
-  # --- ML Stack ---
-  - pytorch
-  - torchvision
-  - torchaudio
-  - pytorch-cuda=12.1
-
-  # --- Scientific Stack ---
-  - numpy
-  - pandas
-  - scipy
-  - matplotlib
+  - "pytorch=*=cuda*"
+  - pymace=0.3.15
+  - ase=3.28.0
+  - openmm=8.5
+  - openmm-ml=1.6
+  - openmmforcefields==0.15.1
+  - pdbfixer
   - mdanalysis
-  - rdkit
-  - ase
-  - pymace
 
   # --- Build Tools ---
-  - cmake
+  - doxygen
+  - swig
   - cython
+
+  - pip:
+      - torch-dftd
+      - git+https://github.com/LouieSlocombe/geodesic_interpolate.git

@@ -24,7 +24,7 @@ mamba create -n "${ENV_NAME}" -c conda-forge python=3.12 -y
 source activate "${ENV_NAME}"
 
 echo "=== Installing Dependencies ==="
-   mamba install -c conda-forge -y \
+mamba install -c conda-forge -y \
     "pytorch=*=cuda*" \
     pymace=0.3.15 \
     ase=3.28.0 \

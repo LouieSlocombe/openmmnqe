@@ -1,4 +1,5 @@
 name: openmmnqe
+
 channels:
   - conda-forge
   - nodefaults
@@ -7,13 +8,10 @@ dependencies:
   - python=3.13.*
   - pytest
   - pandas
-  - numpy
-  - scipy
   - matplotlib
   - mdanalysis
-  - sympy
   - pdbfixer
-  - rdkit
+  - "pytorch=*=cuda*"
   - pymace=0.3.15
   - ase=3.28.0
   - openmm=8.5.0
@@ -22,5 +20,5 @@ dependencies:
   - openmmforcefields
 
   - pip:
-      - torch --index-url https://download.pytorch.org/whl/cu126
-      - torchvision --index-url https://download.pytorch.org/whl/cu126
+      - torch-dftd
+      - git+https://github.com/LouieSlocombe/geodesic_interpolate.git
