@@ -1,22 +1,30 @@
 #!/bin/bash
-# Exit immediately on error, treat unset variables as errors, fail pipelines cleanly
-#set -eo pipefail
 #bash custom_install.sh
-#conda remove -n openmmnqe_custom --all -y
+#interactive -t 60 -p htc -c 32 --mem=64G -G 1
 
-OPENMM_VERSION="master" # 8.5.0 master
-OPENMM_ML_VERSION="main" # 1.6
+OPENMM_VERSION="master"
 PLUMED_VERSION="v2.10.0"
 OPENMM_PLUMED_VERSION="master"
 
+rm -rf $SCRATCH/openmmnqe_sources
+rm -rf $HOME/.conda/envs/openmmnqe_custom
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="${SCRIPT_DIR}/../../openmmnqe_sources"
+SCRIPT_DIR=${SCRATCH}
+WORK_DIR="${SCRATCH}/openmmnqe_sources"
+
+module purge
+module load cuda-12.6.1-gcc-12.1.0
+module load mamba/latest
 
 echo "=== Initializing Conda Environment ==="
-source "$(mamba info --base)/etc/profile.d/conda.sh"
+mamba create -n openmmnqe -c conda-forge python=3.12 -y
+source activate openmmnqe
 
-mamba env create -f "${SCRIPT_DIR}/environment_custom.yml"
-source activate openmmnqe_custom
+pip3 install torch --index-url https://download.pytorch.org/whl/cu126
+mamba install -c conda-forge pymace=0.3.15 ase=3.28.0 openmm=8.5 openmm-ml=1.6 openmmforcefields==0.15.1
+mamba install -c conda-forge doxygen swig cython -y
+pip3 install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
 
 echo "=== Preparing Build Directory ==="
 if [ -d "${WORK_DIR}" ]; then
@@ -30,7 +38,6 @@ echo "=== Compiling OpenMM ${OPENMM_VERSION} ==="
 git clone --branch "${OPENMM_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm.git
 cd openmm
 mkdir -p build && cd build
-
 cmake .. \
     -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -40,43 +47,6 @@ cmake .. \
 make -j"$(nproc)"
 make install
 make PythonInstall
-
-cd "${WORK_DIR}"
-
-echo "=== Compiling openmm-torch ==="
-git clone --depth 1 --filter=blob:none https://github.com/openmm/openmm-torch.git
-cd openmm-torch
-mkdir -p build && cd build
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DOPENMM_DIR="${CONDA_PREFIX}" \
-    -DCMAKE_PREFIX_PATH="$(python -c 'import torch.utils; print(torch.utils.cmake_prefix_path)')"
-make -j"$(nproc)"
-make install
-make PythonInstall
-
-cd "${WORK_DIR}"
-
-
-echo "=== Compiling NNPOps ==="
-git clone --depth 1 --filter=blob:none https://github.com/openmm/NNPOps.git
-cd NNPOps
-mkdir -p build && cd build
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH="$(python -c 'import torch.utils; print(torch.utils.cmake_prefix_path)')"
-make -j"$(nproc)"
-make install
-
-cd "${WORK_DIR}"
-
-echo "=== Compiling OpenMM-ML ${OPENMM_ML_VERSION} ==="
-git clone --branch "${OPENMM_ML_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm-ml.git
-cd openmm-ml
-pip install .
-
 cd "${WORK_DIR}"
 
 echo "=== Compiling PLUMED ${PLUMED_VERSION} ==="
@@ -85,10 +55,8 @@ cd plumed2
 ./configure --prefix="${CONDA_PREFIX}" --enable-modules=opes
 make -j"$(nproc)"
 make install
-
 export PLUMED_INCLUDE_DIR="${CONDA_PREFIX}/include/plumed"
 export PLUMED_LIBRARY_DIR="${CONDA_PREFIX}/lib"
-
 cd "${WORK_DIR}"
 
 echo "=== Compiling openmm plumed ==="
@@ -107,9 +75,7 @@ make install
 make PythonInstall
 cd python
 pip install . --no-build-isolation
-
 cd "${WORK_DIR}"
 
-pip install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
-
+source deactivate
 echo "=== Build Complete! ==="
