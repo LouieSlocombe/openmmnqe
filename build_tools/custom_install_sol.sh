@@ -12,7 +12,7 @@ WORK_DIR="${SCRATCH}/${ENV_NAME}_sources"
 
 # === Environment Setup ===
 module purge
-module load cuda-12.6.1-gcc-12.1.0
+module load cuda-13.0.1-gcc-13.2.0
 module load mamba/latest
 
 echo "=== Cleaning previous installations ==="
@@ -24,18 +24,19 @@ mamba create -n "${ENV_NAME}" -c conda-forge python=3.12 -y
 source activate "${ENV_NAME}"
 
 echo "=== Installing Dependencies ==="
-pip3 install torch --index-url https://download.pytorch.org/whl/cu126
-
-mamba install -c conda-forge -y \
+   mamba install -c conda-forge -y \
+    "pytorch=*=cuda*" \
     pymace=0.3.15 \
     ase=3.28.0 \
     openmm=8.5 \
     openmm-ml=1.6 \
     openmmforcefields==0.15.1 \
+    pdbfixer \
+    mdanalysis \
     doxygen \
     swig \
     cython
-
+pip3 install torch-dftd
 pip3 install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
 
 echo "=== Preparing Build Directory ==="
