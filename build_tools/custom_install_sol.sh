@@ -4,9 +4,9 @@
 
 # === Configuration ===
 ENV_NAME="openmmnqe"
-OPENMM_VERSION="master"
 PLUMED_VERSION="v2.10.0"
 OPENMM_PLUMED_VERSION="master"
+CUDA_VERSION="13.0"
 
 WORK_DIR="${SCRATCH}/${ENV_NAME}_sources"
 
@@ -25,10 +25,11 @@ source activate "${ENV_NAME}"
 
 echo "=== Installing Dependencies ==="
 mamba install -c conda-forge -y \
+    "cuda-version<=${CUDA_VERSION}" \
     "pytorch=*=cuda*" \
     pymace=0.3.15 \
     ase=3.28.0 \
-    openmm=8.5 \
+    openmm=8.5.1 \
     openmm-ml=1.6 \
     openmmforcefields==0.15.1 \
     pdbfixer \
@@ -41,21 +42,6 @@ pip3 install git+https://github.com/LouieSlocombe/geodesic_interpolate.git
 
 echo "=== Preparing Build Directory ==="
 mkdir -p "${WORK_DIR}"
-cd "${WORK_DIR}"
-
-echo "=== Compiling OpenMM ${OPENMM_VERSION} ==="
-git clone --branch "${OPENMM_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm.git
-cd openmm
-mkdir -p build && cd build
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DPYTHON_EXECUTABLE="$(which python)" \
-    -DCUDA_TOOLKIT_ROOT_DIR="${CONDA_PREFIX}" \
-    -DCUDAToolkit_ROOT="${CONDA_PREFIX}"
-make -j"$(nproc)"
-make install
-make PythonInstall
 cd "${WORK_DIR}"
 
 echo "=== Compiling PLUMED ${PLUMED_VERSION} ==="
