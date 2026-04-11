@@ -1,0 +1,62 @@
+ATOM      1  C1  AAA A   1      -4.953   2.240   0.749  1.00  0.00           C
+ATOM      2  C2  AAA A   1      -2.928   1.614   0.543  1.00  0.00           C
+ATOM      3  C3  AAA A   1      -1.548   1.429   0.406  1.00  0.00           C
+ATOM      4  C4  AAA A   1      -1.898  -0.871   0.401  1.00  0.00           C
+ATOM      5  C5  AAA A   1      -3.687   0.439   0.603  1.00  0.00           C
+ATOM      6  H1  AAA A   1      -5.809   0.283   0.792  1.00  0.00           H
+ATOM      7  H2  AAA A   1      -5.861   2.815   0.840  1.00  0.00           H
+ATOM      8  H3  AAA A   1      -1.884  -2.896   0.548  1.00  0.00           H
+ATOM      9  H4  AAA A   1      -0.321  -2.184   0.386  1.00  0.00           H
+ATOM     10  H5  AAA A   1       0.224   2.241   0.256  1.00  0.00           H
+ATOM     11  N1  AAA A   1      -4.982   0.864   0.738  1.00  0.00           N
+ATOM     12  N2  AAA A   1      -3.745   2.735   0.637  1.00  0.00           N
+ATOM     13  N3  AAA A   1      -1.051   0.195   0.337  1.00  0.00           N
+ATOM     14  N4  AAA A   1      -1.327  -2.102   0.272  1.00  0.00           N
+ATOM     15  N5  AAA A   1      -3.231  -0.815   0.541  1.00  0.00           N
+ATOM     16  O1  AAA A   1      -0.738   2.489   0.346  1.00  0.00           O
+ATOM     17  C1  AAB B   1       2.404  -1.372   0.363  1.00  0.00           C
+ATOM     18  C2  AAB B   1       2.545   1.074   0.179  1.00  0.00           C
+ATOM     19  C3  AAB B   1       3.987   0.985   0.140  1.00  0.00           C
+ATOM     20  C4  AAB B   1       4.797   2.239   0.020  1.00  0.00           C
+ATOM     21  C5  AAB B   1       4.535  -0.252   0.215  1.00  0.00           C
+ATOM     22  H1  AAB B   1       0.816  -0.056   0.308  1.00  0.00           H
+ATOM     23  H2  AAB B   1       4.220  -2.297   0.368  1.00  0.00           H
+ATOM     24  H3  AAB B   1       5.604  -0.417   0.193  1.00  0.00           H
+ATOM     25  H4  AAB B   1       4.519   2.797  -0.878  1.00  0.00           H
+ATOM     26  H5  AAB B   1       5.861   2.004  -0.034  1.00  0.00           H
+ATOM     27  H6  AAB B   1       4.630   2.896   0.878  1.00  0.00           H
+ATOM     28  N1  AAB B   1       3.774  -1.389   0.328  1.00  0.00           N
+ATOM     29  N2  AAB B   1       1.853  -0.117   0.288  1.00  0.00           N
+ATOM     30  O1  AAB B   1       1.721  -2.396   0.455  1.00  0.00           O
+ATOM     31  O2  AAB B   1       1.909   2.146   0.121  1.00  0.00           O
+CONECT    1    7   11   12
+CONECT    2    3    5   12
+CONECT    3    2   13   16
+CONECT    4   13   14   15
+CONECT    5    2   11   15
+CONECT    6   11
+CONECT    7    1
+CONECT    8   14
+CONECT    9   14
+CONECT   10   16
+CONECT   11    1    5    6
+CONECT   12    1    2
+CONECT   13    3    4
+CONECT   14    4    8    9
+CONECT   15    4    5
+CONECT   16    3   10
+CONECT   17   28   29   30
+CONECT   18   19   29   31
+CONECT   19   18   20   21
+CONECT   20   19   25   26   27
+CONECT   21   19   24   28
+CONECT   22   29
+CONECT   23   28
+CONECT   24   21
+CONECT   25   20
+CONECT   26   20
+CONECT   27   20
+CONECT   28   17   21   23
+CONECT   29   17   18   22
+CONECT   30   17
+CONECT   31   18
