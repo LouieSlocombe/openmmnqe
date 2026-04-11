@@ -2,6 +2,7 @@ import os
 import sys
 
 import openmm.unit as unit
+from openmmml import MLPotential
 from openmmplumed import PlumedForce
 
 from openmm import openmm, app
