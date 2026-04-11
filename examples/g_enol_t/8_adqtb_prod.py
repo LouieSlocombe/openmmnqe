@@ -10,7 +10,6 @@ import openmmnqe as nqe
 
 if __name__ == "__main__":
     print(flush=True)
-    n_beads = 4
     temperature = 300.0 * unit.kelvin
     steps_prod = 30_000
     input_pdb = 'G_enol_T.pdb'
