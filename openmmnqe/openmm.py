@@ -238,6 +238,9 @@ def run_openmm_relaxation_simple(modeller,
     else:
         run_mixed = False
 
+    if calculator is not None:
+        potential = MLPotential('ase')
+
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
