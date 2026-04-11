@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import matplotlib.pyplot as plt
 import openmm.app as app
@@ -50,19 +51,20 @@ if __name__ == "__main__":
         f.write(plumed_input)
 
     nqe.run_openmm_adqtb_prod(modeller,
-                             forcefield,
-                             plumed_script_path=plumed_script_path,
-                             temperature=temperature,
-                             barostat_freq=None,
-                             steps=steps_prod,
-                             calculator=calc,
-                             ml_idx=ml_atoms,
-                             )
+                              forcefield,
+                              plumed_script_path=plumed_script_path,
+                              temperature=temperature,
+                              barostat_freq=None,
+                              steps=steps_prod,
+                              calculator=calc,
+                              ml_idx=ml_atoms,
+                              )
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
+    shutil.copy('fes.dat', 'adqtb_fes.dat')
 
-    nqe.plot_plumed_fes("fes.dat")
+    nqe.plot_plumed_fes("adqtb_fes.dat")
     plt.savefig("adqtb_fes.png")
     plt.savefig("adqtb_fes.pdf")
     plt.close()

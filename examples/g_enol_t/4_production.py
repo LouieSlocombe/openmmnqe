@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import matplotlib.pyplot as plt
 import openmm.app as app
@@ -59,10 +60,11 @@ if __name__ == "__main__":
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
+    shutil.copy('fes.dat', 'md_fes.dat')
 
-    nqe.plot_plumed_fes("fes.dat")
-    plt.savefig("fes.png")
-    plt.savefig("fes.pdf")
+    nqe.plot_plumed_fes("md_fes.dat")
+    plt.savefig("md_fes.png")
+    plt.savefig("md_fes.pdf")
     plt.close()
 
     nqe.plot_plumed_colvar("COLVAR")
