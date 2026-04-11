@@ -10,7 +10,7 @@ from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
                         )
-from .tools import deuterate_system, check_platform
+from .tools import deuterate_system, check_platform, init_beads
 
 
 def run_openmm_relaxation(modeller,
@@ -1073,6 +1073,8 @@ def run_openmm_rpmd_equilibration(modeller,
                                                       totalEnergy=True,
                                                       temperature=True,
                                                       volume=True))
+
+    init_beads(modeller, simulation, n_beads)
 
     print("\n--- Stage 1: Bead Expansion  ---", flush=True)
     integrator.setStepSize(timestep * 0.5)
