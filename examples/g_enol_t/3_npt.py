@@ -10,15 +10,12 @@ import openmmnqe as nqe
 if __name__ == "__main__":
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 30_000
     input_pdb = 'G_enol_T.pdb'
 
     calc = mace_mp(model=os.path.join(os.environ['MACE_MODELS'], 'mace-mh-1.model'),
                    default_dtype="float32",
                    device="cuda",
-                   head="omol",
-                   dispersion=True,
-                   dispersion_xc="pbe")
+                   head="omol")
 
     forcefield_names = ("amber19-all.xml", "amber19/tip3pfb.xml")
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
