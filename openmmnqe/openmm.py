@@ -80,7 +80,7 @@ def run_openmm_relaxation(modeller,
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
         platform_name = 'CUDA'
@@ -231,10 +231,10 @@ def run_openmm_relaxation_simple(modeller,
     -------
     None
     """
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -385,10 +385,10 @@ def run_openmm_heating(modeller,
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -582,10 +582,10 @@ def run_openmm_npt(modeller,
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -771,10 +771,10 @@ def run_openmm_prod(modeller,
     -------
     None
     """
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -947,10 +947,10 @@ def run_openmm_rpmd_equilibration(modeller,
     -------
     None
     """
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -1150,10 +1150,10 @@ def run_openmm_rpmd_contracted(modeller,
     -------
     None
     """
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -1401,10 +1401,10 @@ def run_openmm_rpmd_prod(modeller,
     -------
     None
     """
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -1598,10 +1598,10 @@ def run_openmm_adqtb_eq(modeller,
     -------
     None
     """
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
@@ -1775,10 +1775,10 @@ def run_openmm_adqtb_prod(modeller,
     -------
     None
     """
-    if potential is not None and ml_idx is not None:
+    if (potential is not None or calculator is not None) and ml_idx is not None:
         print("Adding ML potential to the system...", flush=True)
         run_mixed = True
-        platform_name = 'CUDA'  # Force CUDA for mixed potential
+        platform_name = 'CUDA'
     else:
         run_mixed = False
 
