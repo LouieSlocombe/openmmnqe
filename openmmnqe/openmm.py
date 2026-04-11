@@ -88,6 +88,9 @@ def run_openmm_relaxation(modeller,
     else:
         run_mixed = False
 
+    if calculator is not None:
+        potential = MLPotential('ase')
+
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
@@ -396,6 +399,9 @@ def run_openmm_heating(modeller,
     else:
         run_mixed = False
 
+    if calculator is not None:
+        potential = MLPotential('ase')
+
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
     if run_mixed:
@@ -593,6 +599,9 @@ def run_openmm_npt(modeller,
     else:
         run_mixed = False
 
+    if calculator is not None:
+        potential = MLPotential('ase')
+
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
@@ -782,6 +791,9 @@ def run_openmm_prod(modeller,
     else:
         run_mixed = False
 
+    if calculator is not None:
+        potential = MLPotential('ase')
+
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
@@ -957,6 +969,9 @@ def run_openmm_rpmd_equilibration(modeller,
         platform_name = 'CUDA'
     else:
         run_mixed = False
+
+    if calculator is not None:
+        potential = MLPotential('ase')
 
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
@@ -1160,6 +1175,9 @@ def run_openmm_rpmd_contracted(modeller,
         platform_name = 'CUDA'
     else:
         run_mixed = False
+
+    if calculator is not None:
+        potential = MLPotential('ase')
 
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
@@ -1412,6 +1430,9 @@ def run_openmm_rpmd_prod(modeller,
     else:
         run_mixed = False
 
+    if calculator is not None:
+        potential = MLPotential('ase')
+
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
@@ -1609,6 +1630,9 @@ def run_openmm_adqtb_eq(modeller,
     else:
         run_mixed = False
 
+    if calculator is not None:
+        potential = MLPotential('ase')
+
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
@@ -1785,6 +1809,9 @@ def run_openmm_adqtb_prod(modeller,
         platform_name = 'CUDA'
     else:
         run_mixed = False
+
+    if calculator is not None:
+        potential = MLPotential('ase')
 
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
