@@ -12,7 +12,7 @@ import openmmnqe as nqe
 if __name__ == "__main__":
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 100_000
+    steps_prod = 200_000
     input_pdb = 'G_enol_T.pdb'
 
     potential = MLPotential('mace-off23-small')
@@ -50,7 +50,7 @@ if __name__ == "__main__":
                               plumed_script_path=plumed_script_path,
                               temperature=temperature,
                               barostat_freq=None,
-                              gamma=10.0 / unit.picosecond,
+                              gamma=2.0 / unit.picosecond,
                               steps=steps_prod,
                               potential=potential,
                               ml_idx=ml_atoms,

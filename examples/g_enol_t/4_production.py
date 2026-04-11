@@ -12,7 +12,7 @@ import openmmnqe as nqe
 if __name__ == "__main__":
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 100_000
+    steps_prod = 200_000
     input_pdb = 'G_enol_T.pdb'
 
     potential = MLPotential('mace-off23-small')
