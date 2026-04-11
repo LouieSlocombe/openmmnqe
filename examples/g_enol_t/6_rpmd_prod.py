@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
 from ase.io import read, write
-from mace.calculators.foundations_models import mace_mp
+from openmmml import MLPotential
 
 import openmmnqe as nqe
 
@@ -16,10 +16,7 @@ if __name__ == "__main__":
     steps_prod = 100_000
     input_pdb = 'G_enol_T.pdb'
 
-    calc = mace_mp(model=os.path.join(os.environ['MACE_MODELS'], 'mace-mh-1.model'),
-                   default_dtype="float32",
-                   device="cuda",
-                   head="omol")
+    potential = MLPotential('mace-off23-small')
 
     forcefield_names = ("amber19-all.xml", "amber19/tip3pfb.xml")
     pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
@@ -55,7 +52,7 @@ if __name__ == "__main__":
                              temperature=temperature,
                              barostat_freq=None,
                              steps=steps_prod,
-                             calculator=calc,
+                             potential=potential,
                              ml_idx=ml_atoms,
                              n_beads=n_beads,
                              checkpoint_file='rpmd_ready.chk'
