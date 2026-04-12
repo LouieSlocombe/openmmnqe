@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=g_enol_t
+#SBATCH --job-name=gt_wob
 #SBATCH -N 1
 #SBATCH -p htc
 #SBATCH -c 12
@@ -14,7 +14,7 @@
 # interactive -t 60 -p htc -c 12 --mem=128G -G a100:1
 #set -e
 
-#cd /scratch/lslocomb/gt_enol_1/
+#cd /scratch/lslocomb/gt_wob/
 module load cuda-13.0.1-gcc-13.2.0
 module load mamba/latest
 source activate openmmnqe
