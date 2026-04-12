@@ -1,12 +1,12 @@
 #!/bin/bash
 #bash custom_install.sh
-#interactive -t 60 -p htc -c 32 --mem=64G -G 1
+# interactive -t 60 -p htc -c 12 --mem=128G -G a100:1
 
 # === Configuration ===
-ENV_NAME="openmmnqe"
+ENV_NAME="openmmnqe_2"
 PLUMED_VERSION="v2.10.0"
 OPENMM_PLUMED_VERSION="master"
-CUDA_VERSION="13.0"
+CUDA_VERSION="12.6"
 
 WORK_DIR="${SCRATCH}/${ENV_NAME}_sources"
 
@@ -72,5 +72,6 @@ cd python
 pip install . --no-build-isolation
 cd "${WORK_DIR}"
 
+pip3 install git+ssh://git@github.com/LouieSlocombe/openmmnqe.git
 source deactivate
 echo "=== Build Complete! ==="
