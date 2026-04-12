@@ -14,7 +14,7 @@ if __name__ == "__main__":
     n_beads = 4
     temperature = 300.0 * unit.kelvin
     steps_prod = 100_000
-    input_pdb = 'G_enol_T.pdb'
+    input_pdb = 'G_T_wob.pdb'
 
     potential = MLPotential('mace-off23-small')
 
@@ -31,16 +31,26 @@ if __name__ == "__main__":
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()] + [atom.index for atom in chains[1].atoms()]
 
-    idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:O2', 'AAA1:H5', 'AAA1:O1'])
-    idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N3', 'AAB1:H1', 'AAB1:N2'])
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
-                                                            idx1,
-                                                            idx2,
-                                                            temperature,
-                                                            wall=1.0,
-                                                            height=100.0,
-                                                            bias=10.0,
-                                                            f_opes=True)
+    # n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2
+    idx = ['AAB1:N2',
+           'AAB1:H6',
+           'AAA1:O1',
+           'AAB1:O2',
+           'AAA1:N3',
+           'AAA1:H3',
+           'AAB1:O1',
+           'AAA1:N4',
+           'AAA1:N1',
+           'AAB1:N1']
+    idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
+
+    plumed_input, sum_hills_input = nqe.plumed_input_wob_4(modeller,
+                                                           idx,
+                                                           temperature,
+                                                           wall=1.0,
+                                                           height=200.0,
+                                                           bias=10.0,
+                                                           f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:

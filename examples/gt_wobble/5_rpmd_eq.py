@@ -9,7 +9,7 @@ if __name__ == "__main__":
     print(flush=True)
     n_beads = 4
     temperature = 300.0 * unit.kelvin
-    input_pdb = 'G_enol_T.pdb'
+    input_pdb = 'G_T_wob.pdb'
 
     potential = MLPotential('mace-off23-small')
 

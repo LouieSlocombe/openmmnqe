@@ -9,7 +9,7 @@ if __name__ == "__main__":
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps = 10_000
-    input_pdb = 'G_enol_T.pdb'
+    input_pdb = 'G_T_wob.pdb'
 
     potential = MLPotential('mace-off23-small')
 
