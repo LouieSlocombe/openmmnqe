@@ -1,6 +1,5 @@
 import openmm.app as app
 import openmm.unit as unit
-from ase.io import read, write
 from openmmml import MLPotential
 
 import openmmnqe as nqe

@@ -230,7 +230,7 @@ def test_smd():
         outfile.close()
 
     # Save the simulation
-    simulation.saveCheckpoint(f'eq.chk')
+    simulation.saveCheckpoint('eq.chk')
 
     smd_cv_values = np.array(smd_cv_values)
     plt.plot(smd_cv_values[:, 0] * increment_steps, smd_cv_values[:, 1])

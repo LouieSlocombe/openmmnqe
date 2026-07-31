@@ -728,8 +728,8 @@ def test_center_in_box():
     topology = app.Topology()
     chain = topology.addChain()
     residue = topology.addResidue("RES", chain)
-    atom1 = topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
-    atom2 = topology.addAtom("A2", app.Element.getByAtomicNumber(6), residue)
+    topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
+    topology.addAtom("A2", app.Element.getByAtomicNumber(6), residue)
     # Set box dimensions (e.g., 10x10x10 nm)
     topology.setUnitCellDimensions(unit.Quantity((10.0, 10.0, 10.0), unit.nanometer))
     # Place atoms at arbitrary positions

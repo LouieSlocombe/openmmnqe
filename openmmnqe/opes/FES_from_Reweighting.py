@@ -205,7 +205,7 @@ all_cols = [col_x] + col_bias
 if dim2:
     all_cols = [col_x, col_y] + col_bias
 all_cols.sort()  # pandas iloc reads them ordered
-data = pd.read_table(filename, dtype=float, sep='\s+', comment='#', header=None, usecols=all_cols, skiprows=skipme)
+data = pd.read_table(filename, dtype=float, sep=r'\s+', comment='#', header=None, usecols=all_cols, skiprows=skipme)
 if data.isnull().values.any():
     sys.exit(error % ('your COLVAR file contains NaNs. Check if last line is truncated'))
 if reverse:

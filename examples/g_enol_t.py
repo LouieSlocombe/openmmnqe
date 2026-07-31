@@ -3,7 +3,6 @@ import os
 import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
-from ase.io import read, write
 from mace.calculators.foundations_models import mace_mp
 
 import openmmnqe as nqe

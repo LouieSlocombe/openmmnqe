@@ -200,7 +200,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         steps=50_000)
 
     # Run PLUMED sum_hills to get FES
-    os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
+    os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
     # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()
@@ -228,7 +228,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                              checkpoint_file='rpmd_ready.chk')
 
     # Run PLUMED sum_hills to get FES
-    os.system(f'plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
+    os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
     # Plot FES
     nqe.plot_plumed_fes("fes.dat")
     plt.show()

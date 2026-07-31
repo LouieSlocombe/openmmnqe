@@ -55,7 +55,7 @@ def estimate_path_lambda(pdb_path: str) -> float:
     max_msd = np.max(msds)
     ideal_lambda = 2.3 / avg_msd
 
-    print(f"--- Path Analysis ---", flush=True)
+    print("--- Path Analysis ---", flush=True)
     print(f"Number of frames: {len(traj)} (aim for 15 to 30)", flush=True)
     print(f"Average MSD between frames: {avg_msd:.6f} nm^2", flush=True)
     print(f"Maximum MSD between frames: {max_msd:.6f} nm^2", flush=True)
