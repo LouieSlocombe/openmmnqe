@@ -1,22 +1,31 @@
 #!/bin/bash
-# Exit immediately on error, treat unset variables as errors, fail pipelines cleanly
-#set -eo pipefail
-#bash custom_install.sh
-#conda remove -n openmmnqe_custom --all -y
+# Builds OpenMM and its plugins from source into a dedicated conda environment.
+#
+#   bash custom_install.sh
+#
+# The environment is recreated from scratch on every run, and sources are cloned
+# into ../../openmmnqe_sources (a sibling of the repo).
 
-OPENMM_VERSION="master" # 8.5.0 master
+# Exit immediately on error and fail pipelines cleanly, so a broken build does not
+# fall through to the later steps and report success.
+set -eo pipefail
+
+ENV_NAME="openmmnqe_custom"
+OPENMM_VERSION="master"  # 8.5.0 master
 OPENMM_ML_VERSION="main" # 1.6
-PLUMED_VERSION="v2.10.0"
-OPENMM_PLUMED_VERSION="master"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORK_DIR="${SCRIPT_DIR}/../../openmmnqe_sources"
+
+# Pulls in build_plumed(), along with the PLUMED versions it pins.
+source "${SCRIPT_DIR}/build_plumed.sh"
 
 echo "=== Initializing Conda Environment ==="
 source "$(conda info --base)/etc/profile.d/conda.sh"
-
+conda env remove -n "${ENV_NAME}" -y 2>/dev/null || true
 conda env create -f "${SCRIPT_DIR}/environment_custom.yml"
-conda activate openmmnqe_custom
+conda activate "${ENV_NAME}"
 
 echo "=== Preparing Build Directory ==="
 if [ -d "${WORK_DIR}" ]; then
@@ -30,7 +39,6 @@ echo "=== Compiling OpenMM ${OPENMM_VERSION} ==="
 git clone --branch "${OPENMM_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm.git
 cd openmm
 mkdir -p build && cd build
-
 cmake .. \
     -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -58,7 +66,6 @@ make PythonInstall
 
 cd "${WORK_DIR}"
 
-
 echo "=== Compiling NNPOps ==="
 git clone --depth 1 --filter=blob:none https://github.com/openmm/NNPOps.git
 cd NNPOps
@@ -77,37 +84,9 @@ git clone --branch "${OPENMM_ML_VERSION}" --depth 1 --filter=blob:none https://g
 cd openmm-ml
 pip install .
 
-cd "${WORK_DIR}"
+build_plumed "${WORK_DIR}"
 
-echo "=== Compiling PLUMED ${PLUMED_VERSION} ==="
-git clone --branch "${PLUMED_VERSION}" --depth 1 --filter=blob:none https://github.com/plumed/plumed2.git
-cd plumed2
-./configure --prefix="${CONDA_PREFIX}" --enable-modules=opes
-make -j"$(nproc)"
-make install
-
-export PLUMED_INCLUDE_DIR="${CONDA_PREFIX}/include/plumed"
-export PLUMED_LIBRARY_DIR="${CONDA_PREFIX}/lib"
-
-cd "${WORK_DIR}"
-
-echo "=== Compiling openmm plumed ==="
-git clone --branch "${OPENMM_PLUMED_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm-plumed.git
-cd openmm-plumed
-mkdir -p build && cd build
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DOPENMM_DIR="${CONDA_PREFIX}" \
-    -DPLUMED_INCLUDE_DIR="${PLUMED_INCLUDE_DIR}" \
-    -DPLUMED_LIBRARY_DIR="${PLUMED_LIBRARY_DIR}" \
-    -DPYTHON_EXECUTABLE="$(which python)"
-make -j"$(nproc)"
-make install
-make PythonInstall
-cd python
-pip install . --no-build-isolation
-
-cd "${WORK_DIR}"
+echo "=== Installing openmmnqe (editable) ==="
+pip install -e "${REPO_DIR}"
 
 echo "=== Build Complete! ==="

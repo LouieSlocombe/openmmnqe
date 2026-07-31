@@ -11,7 +11,9 @@
 #SBATCH -e run.out
 #SBATCH --export=NONE
 
-module load cuda-13.0.1-gcc-13.2.0
-module load mamba/latest
+# Submit from build_tools/:
+#   sbatch sub_sol_install.sh
+#
+# custom_install_sol.sh purges and loads its own modules, so none are loaded here.
 
-./custom_install_sol.sh >> bash.out 2>&1
+"${SLURM_SUBMIT_DIR:-.}/custom_install_sol.sh" >> bash.out 2>&1

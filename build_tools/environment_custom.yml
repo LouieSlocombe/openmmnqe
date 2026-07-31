@@ -13,7 +13,7 @@ dependencies:
   - ase=3.28.0
   - openmm=8.5.1
   - openmm-ml=1.6
-  - openmmforcefields==0.15.1
+  - openmmforcefields=0.15.1
   - pdbfixer
   - mdanalysis
 

@@ -1,14 +1,26 @@
 #!/bin/bash
-#bash custom_install.sh
-# interactive -t 60 -p htc -c 12 --mem=128G -G a100:1
+# Builds the openmmnqe environment on the Sol cluster, using conda-forge packages
+# for everything except PLUMED, which has to be compiled with the opes module.
+#
+#   sbatch sub_sol_install.sh          # batch
+#   ./custom_install_sol.sh            # from an interactive session, e.g.
+#                                      # interactive -t 60 -p htc -c 12 --mem=128G -G a100:1
+#
+# The environment is recreated from scratch on every run.
+
+set -eo pipefail
 
 # === Configuration ===
-ENV_NAME="openmmnqe_2"
-PLUMED_VERSION="v2.10.0"
-OPENMM_PLUMED_VERSION="master"
+ENV_NAME="openmmnqe"
 CUDA_VERSION="12.6"
 
-WORK_DIR="${SCRATCH}/${ENV_NAME}_sources"
+# Sources are built under $SCRATCH; refuse to run rather than risk rm -rf'ing / below.
+WORK_DIR="${SCRATCH:?SCRATCH is not set - run this on a Sol node, or set it manually}/${ENV_NAME}_sources"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Pulls in build_plumed(), along with the PLUMED versions it pins.
+source "${SCRIPT_DIR}/build_plumed.sh"
 
 # === Environment Setup ===
 module purge
@@ -17,7 +29,7 @@ module load mamba/latest
 
 echo "=== Cleaning previous installations ==="
 rm -rf "${WORK_DIR}"
-rm -rf "${HOME}/.conda/envs/${ENV_NAME}"
+mamba env remove -n "${ENV_NAME}" -y 2>/dev/null || true
 
 echo "=== Initializing Conda Environment ==="
 mamba create -n "${ENV_NAME}" -c conda-forge python=3.12 -y
@@ -31,7 +43,7 @@ mamba install -c conda-forge -y \
     ase=3.28.0 \
     openmm=8.5.1 \
     openmm-ml=1.6 \
-    openmmforcefields==0.15.1 \
+    openmmforcefields=0.15.1 \
     pdbfixer \
     mdanalysis \
     doxygen \
@@ -44,34 +56,10 @@ echo "=== Preparing Build Directory ==="
 mkdir -p "${WORK_DIR}"
 cd "${WORK_DIR}"
 
-echo "=== Compiling PLUMED ${PLUMED_VERSION} ==="
-git clone --branch "${PLUMED_VERSION}" --depth 1 --filter=blob:none https://github.com/plumed/plumed2.git
-cd plumed2
-./configure --prefix="${CONDA_PREFIX}" --enable-modules=opes
-make -j"$(nproc)"
-make install
-export PLUMED_INCLUDE_DIR="${CONDA_PREFIX}/include/plumed"
-export PLUMED_LIBRARY_DIR="${CONDA_PREFIX}/lib"
-cd "${WORK_DIR}"
+build_plumed "${WORK_DIR}"
 
-echo "=== Compiling OpenMM-PLUMED ${OPENMM_PLUMED_VERSION} ==="
-git clone --branch "${OPENMM_PLUMED_VERSION}" --depth 1 --filter=blob:none https://github.com/openmm/openmm-plumed.git
-cd openmm-plumed
-mkdir -p build && cd build
-cmake .. \
-    -DCMAKE_INSTALL_PREFIX="${CONDA_PREFIX}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DOPENMM_DIR="${CONDA_PREFIX}" \
-    -DPLUMED_INCLUDE_DIR="${PLUMED_INCLUDE_DIR}" \
-    -DPLUMED_LIBRARY_DIR="${PLUMED_LIBRARY_DIR}" \
-    -DPYTHON_EXECUTABLE="$(which python)"
-make -j"$(nproc)"
-make install
-make PythonInstall
-cd python
-pip install . --no-build-isolation
-cd "${WORK_DIR}"
-
+echo "=== Installing openmmnqe ==="
 pip3 install git+ssh://git@github.com/LouieSlocombe/openmmnqe.git
-source deactivate
+
+conda deactivate
 echo "=== Build Complete! ==="

@@ -11,10 +11,16 @@
 #SBATCH -e run.out
 #SBATCH --export=NONE
 
+# Runs a single simulation script in the openmmnqe environment:
+#   sbatch sub_sol_run.sh [script.py]
+
+set -eo pipefail
+
 ENV_NAME="openmmnqe"
+PY_SCRIPT="${1:-g_enol_t.py}"
 
 module load cuda-13.0.1-gcc-13.2.0
 module load mamba/latest
-source activate $ENV_NAME
+source activate "${ENV_NAME}"
 
-$HOME/.conda/envs/$ENV_NAME/bin/python3 g_enol_t.py >> py.out 2>&1
+python3 "${PY_SCRIPT}" >> py.out 2>&1
