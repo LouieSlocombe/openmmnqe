@@ -2,8 +2,8 @@
 Tests for the FES / PLUMED plotting helpers.
 
 These only need numpy, pandas and matplotlib, so they run without a GPU or an
-MD engine.  The Agg backend is selected up front so nothing tries to open a
-window on a headless machine.
+MD engine.  conftest selects the Agg backend, so nothing tries to open a window
+on a headless machine.
 """
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,16 +23,7 @@ from openmmnqe.plotting import (FES,
                                 unit_label,
                                 )
 
-plt.switch_backend("Agg")
-
 EV_IN_KJ_PER_MOL = 96.48533212331
-
-
-@pytest.fixture(autouse=True)
-def close_figures():
-    """Close every figure a test leaves behind."""
-    yield
-    plt.close("all")
 
 
 def write_fes_1d(path, n_bins=50, derivatives=True, infinities=False):
@@ -46,7 +37,7 @@ def write_fes_1d(path, n_bins=50, derivatives=True, infinities=False):
         handle.write("#! FIELDS pt_cv file.free" + (" der_pt_cv\n" if derivatives else "\n"))
         handle.write(f"#! SET min_pt_cv -3.141593\n#! SET nbins_pt_cv {n_bins}\n")
         handle.write("#! SET periodic_pt_cv false\n")
-        for cv, value in zip(x, free):
+        for cv, value in zip(x, free, strict=True):
             handle.write(f"{cv:.9f}  {value:.9f}" + (" 0.0\n" if derivatives else "\n"))
     return x, free
 

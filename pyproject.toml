@@ -38,7 +38,11 @@ classifiers = [
 dev = [
     "pytest",
     "pytest-cov",
+    "scikit-learn",  # tests/test_openmm.py PCA reaction-coordinate analysis
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [project.urls]
 Homepage = "https://github.com/LouieSlocombe/openmmnqe"

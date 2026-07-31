@@ -8,7 +8,6 @@ import openmm.unit as unit
 import pandas as pd
 from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
-from ase.visualize import view
 from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 from scipy.stats import linregress
@@ -167,19 +166,8 @@ def test_prepare_ligand_ff_multiple():
     modeller.addHydrogens()
 
     # write the pdb_data to a file for inspection
-    app.PDBFile.writeFile(modeller.topology, modeller.positions, open('prepared_system.pdb', 'w'))
-
-    # from openff.toolkit import Molecule
-    # from openmmforcefields.generators import GAFFTemplateGenerator
-    # from openmm.app import ForceField
-    # from openmm.app import PDBFile
-    # smis = ['[H][O][C]([H])([H])[C@@]1([H])[O][C@@]([H])([N]2[C]([H])=[N][C]3=[C]2[N]=[C]([N]([H])[H])[N]([H])[C]3=[O])[C]([H])([H])[C@]1([H])[O][H]',
-    #         '[H][O][C]([H])([H])[C@@]1([H])[O][C@@]([H])([N]2[C](=[O])[N]([H])[C](=[O])[C]([C]([H])([H])[H])=[C]2[H])[C]([H])([H])[C@]1([H])[O][H]']
-    # molecule = [Molecule.from_smiles(smi) for smi in smis]
-    # molecule = [Molecule.from_file(f) for f in ["DGN.sdf", "DTN.sdf"]]
-    # gaff = GAFFTemplateGenerator(molecules=molecule)
-    # forcefield = ForceField("amber14-all.xml", "amber14/tip3pfb.xml")
-    # forcefield.registerTemplateGenerator(gaff.generator)
+    with open('prepared_system.pdb', 'w') as f:
+        app.PDBFile.writeFile(modeller.topology, modeller.positions, f)
 
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
                                        molecule,
@@ -187,17 +175,6 @@ def test_prepare_ligand_ff_multiple():
                                        use_cache=False,
                                        cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
-    # Check that the cache files were created
-    # assert os.path.exists(cache_name)
-    #
-    # forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-    #                                    molecule,
-    #                                    gen_cache=False,
-    #                                    use_cache=False,
-    #                                    cache_name=cache_name)
-    # forcefield.createSystem(modeller.topology)
-    #
-    # nqe.remove_file(cache_name)
 
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield)
@@ -226,40 +203,24 @@ def test_deuterate_system():
 
     mass_before = _get_total_mass(system)
 
-    h_count = 0
-    for atom in modeller.topology.atoms():
-        if atom.element.symbol == 'H':
-            h_count += 1
+    # Count the same way deuterate_system does, so the two cannot drift apart
+    h_count = sum(1 for atom in modeller.topology.atoms()
+                  if atom.element and atom.element.symbol == 'H')
 
-    print(f"--- Applying Deuteration to {h_count} Hydrogens (Option='water') ---")
+    print(f"--- Applying deuteration to {h_count} hydrogens (option='all') ---")
     nqe.deuterate_system(modeller, system, option='all')
 
     mass_after = _get_total_mass(system)
-    print(f"{'Mass Before':<20} | {mass_before.value_in_unit(unit.dalton):.4f} Da")
-    print(f"{'Mass After':<20} | {mass_after.value_in_unit(unit.dalton):.4f} Da")
-    print(f"{'Number of Hydrogens':<20} | {h_count}")
+    expected_increase = (app.element.deuterium.mass - app.element.hydrogen.mass) * h_count
+    actual_increase = mass_after - mass_before
 
-    mass_H = app.element.hydrogen.mass
-    mass_D = app.element.deuterium.mass
-    mass_delta_per_atom = mass_D - mass_H
-    expected_increase = mass_delta_per_atom * h_count
+    print(f"{'Mass before':<20} | {mass_before.value_in_unit(unit.dalton):.4f} Da")
+    print(f"{'Mass after':<20} | {mass_after.value_in_unit(unit.dalton):.4f} Da")
+    print(f"{'Actual increase':<20} | {actual_increase.value_in_unit(unit.dalton):.4f} Da")
+    print(f"{'Expected increase':<20} | {expected_increase.value_in_unit(unit.dalton):.4f} Da")
 
-    print(f"\n{'METRIC':<20} | {'VALUE':<15}")
-    print("-" * 40)
-    print(f"{'Mass Before':<20} | {mass_before.value_in_unit(unit.dalton):.4f} Da")
-    print(f"{'Mass After':<20} | {mass_after.value_in_unit(unit.dalton):.4f} Da")
-    print("-" * 40)
-    print(f"{'Actual Increase':<20} | {(mass_after - mass_before).value_in_unit(unit.dalton):.4f} Da")
-    print(f"{'Expected Increase':<20} | {expected_increase.value_in_unit(unit.dalton):.4f} Da")
-
-    # Assertion Check
-    tolerance = 1e-3
-    diff = abs((mass_after - mass_before) - expected_increase).value_in_unit(unit.dalton)
-
-    if diff < tolerance:
-        print("\n[SUCCESS] The system mass increased exactly as expected.")
-    else:
-        print("\n[FAILURE] The mass change did not match theoretical expectations.")
+    # Every hydrogen, and only the hydrogens, should have gained the H -> D mass difference
+    assert abs(actual_increase - expected_increase).value_in_unit(unit.dalton) < 1e-3
 
 
 def test_get_atoms_in_residue():
@@ -501,51 +462,22 @@ def check_linear_relationship(y, x=None, f_print=True):
 
 def test_ase_rc1():
     atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
-    # view(atoms)
 
-    # plot the distance between two atoms over the trajectory
-
-    # atom1_index = 21
-    # atom2_index = 30
-    #
-    # distances = np.array(ase_distance_between_atoms(atoms, atom1_index, atom2_index))
-    #
-    # # distances -= distances[0]  # Normalize to the first frame
-    # # # turn it into percent change
-    # # distances = (distances / distances[0]) * 100
-    #
-    # # plt.plot(distances)
-    # # plt.xlabel('Frame')
-    # # plt.ylabel('Distance (Angstrom)')
-    # # plt.title(f'Distance between Atom {atom1_index} and Atom {atom2_index}')
-    # # plt.show()
-    #
+    # How linear is the proton-transfer distance difference along the path?
     a1_d = 21
     a2_d = 30
     a3_d = 18
     d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
     d2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
     r1 = d1 - d2
-    rr = check_linear_relationship(r1)
-    # plt.plot(r1)
-    # plt.xlabel('Frame')
-    # plt.ylabel('Distance (Angstrom)')
-    # plt.title(f'r1, Distance Difference between {a1_d}-{a2_d} and {a3_d}-{a2_d}, R2={rr:.4f}')
-    # plt.show()
+    check_linear_relationship(r1)
 
+    # ... and the angle that opens up as it transfers?
     a1_a = 8
     a2_a = 5
     a3_a = 21
-
     angles = ase_angle_between_atoms(atoms, a1_a, a2_a, a3_a)
-    rr = check_linear_relationship(angles)
-
-    # plt.plot(angles)
-    # plt.xlabel('Frame')
-    # plt.ylabel('Angle (degrees)')
-    # plt.title(f'Angle between Atoms {a1_a}-{a2_a}-{a3_a}, R2={rr:.4f}')
-    # plt.show()
-    #
+    check_linear_relationship(angles)
 
     rr = check_linear_relationship(r1, x=angles)
     plt.plot(angles, r1)
@@ -557,59 +489,8 @@ def test_ase_rc1():
 
 def test_ase_rc2():
     atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
-    view(atoms)
 
-    # a1_d = 21
-    # a2_d = 30
-    # a3_d = 18
-    # dd1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
-    # dd2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
-    # # r1 = d1 + d2
-    # # rr = check_linear_relationship(r1)
-    # # plt.plot(r1)
-    # # plt.xlabel('Frame')
-    # # plt.ylabel('Distance (Angstrom)')
-    # # plt.title(f'r1, Distance Difference between {a1_d}-{a2_d} and {a3_d}-{a2_d}, R2={rr:.4f}')
-    # # plt.show()
-    #
-    # d1 = np.array(ase_distance_between_atoms(atoms, 5, 21))
-    # d2 = np.array(ase_distance_between_atoms(atoms, 5, 19))
-    # d3 = np.array(ase_distance_between_atoms(atoms, 6, 19))
-    # d4 = np.array(ase_distance_between_atoms(atoms, 6, 18))
-    # d5 = np.array(ase_distance_between_atoms(atoms, 8, 18))
-    # r1 = (d1 - d2) + d3 - d4 + d5  # + dd1 - dd2
-    #
-    # n3 = 19
-    # h3 = 30
-    # o6 = 5
-    # o4 = 21
-    # n1 = 6
-    # h1 = 13
-    # o2 = 18
-    # n2 = 8
-    # n3_h3 = np.array(ase_distance_between_atoms(atoms, n3, h3))
-    # o6_h3 = np.array(ase_distance_between_atoms(atoms, o6, h3))
-    # o4_h3 = np.array(ase_distance_between_atoms(atoms, o4, h3))
-    # n1_h1 = np.array(ase_distance_between_atoms(atoms, n1, h1))
-    # n3_h1 = np.array(ase_distance_between_atoms(atoms, n3, h1))
-    # n1_o2 = np.array(ase_distance_between_atoms(atoms, n1, o2))
-    # n2_o2 = np.array(ase_distance_between_atoms(atoms, n2, o2))
-    # n1_n3 = np.array(ase_distance_between_atoms(atoms, n1, n3))
-    #
-    # z1 = n3_h3 - o6_h3
-    # z2 = o6_h3 - o4_h3
-    # z3 = 0  # n1_h1 - n3_h1
-    # z4 = n1_o2 - n2_o2
-    # z5 = n2_o2 - n1_n3
-    #
-    # r1 = z1 + z2 + z3 + z4 + z5
-    # rr = check_linear_relationship(r1)
-    # plt.plot(r1)
-    # plt.xlabel('Frame')
-    # plt.ylabel('Distance (Angstrom)')
-    # plt.title(f'R2={rr:.4f}')
-    # plt.show()
-
+    # The N1-O2 distance on its own, as a candidate coordinate
     a1_d = 6
     a2_d = 18
     d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
@@ -620,45 +501,13 @@ def test_ase_rc2():
     plt.title(f'r1, Distance Difference between {a1_d}-{a2_d}, R2={rr:.4f}')
     plt.show()
 
-    # a1_a = 0
-    # a2_a = 5
-    # a3_a = 16
-    #
-    # angles = ase_angle_between_atoms(atoms, a1_a, a2_a, a3_a)
-    # rr = check_linear_relationship(angles)
-    #
-    # plt.plot(angles)
-    # plt.xlabel('Frame')
-    # plt.ylabel('Angle (degrees)')
-    # plt.title(f'Angle between Atoms {a1_a}-{a2_a}-{a3_a}, R2={rr:.4f}')
-    # plt.show()
-
-    # rr = check_linear_relationship(r1, x=angles)
-    # plt.plot(angles, r1)
-    # plt.xlabel(f'Angle {a1_a}-{a2_a}-{a3_a}')
-    # plt.ylabel(f'Distance {a1_d}-{a2_d} and {a3_d}-{a2_d}')
-    # plt.title(f'Angle vs Distance Difference, R2={rr:.4f}')
-    # plt.show()
-
 
 def test_ase_load():
     print(flush=True)
     name = 'tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj'
     atoms = read(name, index=':')
-    # write(name.replace('.traj', '.xyz'), atoms[0])
     print(atoms)
-    view(atoms)
-    # input_file = 'tests/data/G_enol_T.traj'
-    # output_file = 'tests/data/pdb/G_enol_T.pdb'
-    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
-    #
-    # input_file = 'tests/data/G_T_enol.traj'
-    # output_file = 'tests/data/pdb/G_T_enol.pdb'
-    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
-    #
-    # input_file = 'tests/data/G_T_wob.traj'
-    # output_file = 'tests/data/pdb/G_T_wob.pdb'
-    # nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.2)
+    assert len(atoms) > 0
 
 
 def test_fix_pdb_chains():
@@ -668,7 +517,7 @@ def test_fix_pdb_chains():
     # Assert that the pdb file was created
     assert os.path.isfile('fixed.pdb')
     # Assert that there are two chains in the fixed pdb
-    with open('fixed.pdb', 'r') as f:
+    with open('fixed.pdb') as f:
         chains = set()
         for line in f:
             if line.startswith(("ATOM  ", "HETATM")):
@@ -685,7 +534,7 @@ def test_fix_pdb_atom_labels():
     # Assert that the pdb file was created
     assert os.path.isfile('fixed_atoms.pdb')
     # Assert that there are no atom labels starting with a digit
-    with open('fixed_atoms.pdb', 'r') as f:
+    with open('fixed_atoms.pdb') as f:
         for line in f:
             if line.startswith(("ATOM  ", "HETATM")):
                 atom_label = line[12:16].strip()
@@ -737,7 +586,8 @@ def test_convert_xyz_to_pdb_round_trip():
 
     # PDB coordinates carry three decimal places, so compare at that precision
     def key_set(atoms):
-        return {(s, tuple(np.round(p, 3))) for s, p in zip(atoms.get_chemical_symbols(), atoms.positions)}
+        return {(s, tuple(np.round(p, 3)))
+                for s, p in zip(atoms.get_chemical_symbols(), atoms.positions, strict=True)}
 
     assert key_set(recovered) == key_set(original)
     os.remove(pdb_file)

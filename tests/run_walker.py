@@ -75,7 +75,7 @@ def main():
         # For toy dimer, use in plumed.dat: DISTANCE ATOMS=1,2
 
     # Read & parameterize PLUMED script
-    with open(args.plumed, "r") as f:
+    with open(args.plumed) as f:
         script = f.read()
     script = (script
               .replace("__WALKER_ID__", str(args.walker_id))

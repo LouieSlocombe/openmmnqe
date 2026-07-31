@@ -9,6 +9,9 @@ import openmm.unit as unit
 import openmmnqe as nqe
 from openmm import openmm
 
+# WHAM is built separately, see http://membrane.urmc.rochester.edu/sites/default/files/wham/
+WHAM = os.environ.get("WHAM_PATH", "/home/louie/skunkworks/wham/wham/wham/wham")
+
 
 def compute_rdf(context, particles, box_size):
     bins = 100
@@ -53,7 +56,7 @@ def test_parahydrogen():
     force.setNonbondedMethod(openmm.CustomNonbondedForce.CutoffPeriodic)
     force.setCutoffDistance(box_size / 2)
     system.addForce(force)
-    for i in range(particles):
+    for _ in range(particles):
         system.addParticle(2.0 * unit.amu)
         force.addParticle()
     positions = np.random.rand(particles, 3) * box_size
@@ -225,9 +228,8 @@ def test_smd():
 
     # save the window structures
     for i, coords in enumerate(window_coords):
-        outfile = open(f'window_{i}.pdb', 'w')
-        app.PDBFile.writeFile(simulation.topology, coords, outfile)
-        outfile.close()
+        with open(f'window_{i}.pdb', 'w') as outfile:
+            app.PDBFile.writeFile(simulation.topology, coords, outfile)
 
     # Save the simulation
     simulation.saveCheckpoint('eq.chk')
@@ -299,8 +301,7 @@ def test_smd():
     # tar xf wham-release-2.0.11.tgz
     # cd wham/wham && make
 
-    os.system(
-        f'/home/louie/skunkworks/wham/wham/wham/wham {r_start} {r_end} 50 1e-6 300 0 metafile.txt pmf.txt > wham_log.txt')
+    os.system(f'{WHAM} {r_start} {r_end} 50 1e-6 300 0 metafile.txt pmf.txt > wham_log.txt')
 
     # plot the PMF
     pmf = np.loadtxt("pmf.txt")
