@@ -1,3 +1,4 @@
+import json
 import os
 from itertools import combinations
 
@@ -154,30 +155,52 @@ def test_nonstandard_ligand():
 
 def test_prepare_ligand_ff_multiple():
     print(flush=True)
-    input_pdb = "tests/data/pdb/gt_wob_solv_clean.pdb"
-    cache_name = "gaff-molecules.json"
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
+    # A guanine/cytosine pair: two different residues, neither of which any
+    # standard force field knows, so both have to be parameterised by GAFF.
+    # The G-T wobble PDBs cannot be used here -- their DGN/DTN deoxynucleosides
+    # are standard amber14 residues, so amber14-all.xml matches them on graph
+    # (residue names are not consulted) and the ligand path is never reached.
+    input_pdb = "tests/data/pdb/gc.pdb"
+    # Deliberately not the cache test_prepare_ligand_ff leaves behind, so
+    # neither test can seed the other's parameters.
+    cache_name = "gaff-molecules-multiple.json"
+    nqe.remove_file(cache_name)
 
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, rm_files=False, rm_lig_sdf=False)
+    pdb_data, molecules = nqe.prepare_lig_system(input_pdb)
+    assert len(molecules) == 2, "both residues should be picked up as ligands"
+    assert {mol.name for mol in molecules} == {'GGG', 'CCC'}
+
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    # write the pdb_data to a file for inspection
-    with open('prepared_system.pdb', 'w') as f:
-        app.PDBFile.writeFile(modeller.topology, modeller.positions, f)
-
     forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule,
+                                       molecules,
                                        gen_cache=True,
                                        use_cache=False,
                                        cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
 
+    # The cache file appears as soon as it is opened, so its existence proves
+    # nothing -- what matters is that both ligands are in it.
+    with open(cache_name) as f:
+        cache = json.load(f)
+    cached_smiles = {record['smiles']
+                     for table in cache.values()
+                     for record in table.values()}
+    assert cached_smiles == {mol.to_smiles() for mol in molecules}
+
+    # The cache alone must be enough to rebuild the same system
+    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                                       molecules,
+                                       gen_cache=False,
+                                       use_cache=True,
+                                       cache_name=cache_name)
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield)
+
+    nqe.remove_file(cache_name)
+    nqe.remove_file_pattern('minimized*')
 
 
 def _get_total_mass(system):
