@@ -703,6 +703,47 @@ def test_convert_xyz_to_pdb():
     os.remove(output_file)
 
 
+def test_convert_pdb_to_xyz():
+    print(flush=True)
+    input_file = 'tests/data/pdb/malonaldehyde.pdb'
+    output_file = 'output.xyz'
+    n_frames = nqe.convert_pdb_to_xyz(input_file, output_file)
+    assert os.path.isfile(output_file)
+    assert n_frames == 1
+
+    # The atom count and elements must survive the conversion
+    with open(input_file) as f:
+        n_pdb_atoms = sum(1 for line in f if line.startswith(("ATOM  ", "HETATM")))
+    atoms = read(output_file)
+    assert len(atoms) == n_pdb_atoms
+    assert 'X' not in atoms.get_chemical_symbols()
+    os.remove(output_file)
+
+
+def test_convert_xyz_to_pdb_round_trip():
+    print(flush=True)
+    input_file = 'tests/data/GC.xyz'
+    pdb_file = 'round_trip.pdb'
+    xyz_file = 'round_trip.xyz'
+
+    # A GC base pair is two separate molecules
+    n_clusters = nqe.convert_xyz_to_pdb(input_file, pdb_file, cutoff_multiplier=1.1)
+    assert n_clusters == 2
+    nqe.convert_pdb_to_xyz(pdb_file, xyz_file)
+
+    original = read(input_file)
+    recovered = read(xyz_file)
+    assert sorted(recovered.get_chemical_symbols()) == sorted(original.get_chemical_symbols())
+
+    # PDB coordinates carry three decimal places, so compare at that precision
+    def key_set(atoms):
+        return {(s, tuple(np.round(p, 3))) for s, p in zip(atoms.get_chemical_symbols(), atoms.positions)}
+
+    assert key_set(recovered) == key_set(original)
+    os.remove(pdb_file)
+    os.remove(xyz_file)
+
+
 def test_move_pdb_to_origin():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'

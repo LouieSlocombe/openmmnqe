@@ -9,6 +9,7 @@ from typing import List
 import MDAnalysis as mda
 import numpy as np
 import openmm.unit as unit
+from ase.data import chemical_symbols
 from ase.io import read
 from ase.neighborlist import natural_cutoffs, neighbor_list
 from openff.toolkit import Molecule
@@ -38,6 +39,110 @@ avo_num = const["Avogadro constant"][0]  # mol^-1
 eV_to_kJpermol = eV_to_J * J_to_kJ * avo_num
 # Conversion factor from eV/Å² to 1 kJ/(mol·nm²)
 eVperA2_to_kJpermolpernm2 = eV_to_kJpermol / A_to_nm ** 2
+
+# Two-letter element symbols that are also common prefixes of hydrogen atom
+# names, e.g. "HG21" is a gamma hydrogen rather than mercury. These are only
+# consulted when a PDB line has no element column to fall back on.
+_HYDROGEN_LOOKALIKES = {'He', 'Hf', 'Hg', 'Ho', 'Hs'}
+
+
+def _element_from_pdb_line(line):
+    """
+    Determine the element symbol for a PDB ``ATOM``/``HETATM`` line.
+
+    The element column (77-78) is used when present. Otherwise the symbol is
+    inferred from the atom name in columns 13-16, which by convention starts in
+    column 13 for two-character symbols and column 14 for one-character ones.
+
+    Parameters
+    ----------
+    line : str
+        A single ``ATOM`` or ``HETATM`` record.
+
+    Returns
+    -------
+    str
+        The element symbol, or ``'X'`` if none could be determined.
+
+    Notes
+    -----
+    The atom-name fallback relies on the name being correctly aligned, which
+    is what distinguishes calcium (``CA  ``) from an alpha carbon (`` CA ``).
+    Hydrogen names that collide with two-letter symbols (see
+    `_HYDROGEN_LOOKALIKES`) are resolved as hydrogen.
+    """
+    symbol = line[76:78].strip()
+    if symbol:
+        return symbol.capitalize()
+
+    # No element column, so fall back to the atom name
+    name = line[12:16]
+    letters = ''.join(c for c in name if c.isalpha())
+    if not letters:
+        return 'X'
+
+    # A name indented or prefixed by a digit carries a one-character symbol
+    if not name[:1].isalpha():
+        return letters[0] if letters[0] in chemical_symbols else 'X'
+
+    symbol = letters[:2].capitalize()
+    if symbol in _HYDROGEN_LOOKALIKES:
+        return 'H'
+    if symbol in chemical_symbols:
+        return symbol
+    # Two-letter guess is not an element, so treat it as a single-letter symbol
+    return symbol[0] if symbol[0] in chemical_symbols else 'X'
+
+
+def _write_xyz_frame(fh, symbols, positions, comment=''):
+    """
+    Write a single frame to an open XYZ file handle.
+
+    Parameters
+    ----------
+    fh : file-like object
+        An open, writable text handle.
+    symbols : sequence of str
+        Element symbol for each atom.
+    positions : sequence of sequence of float
+        Cartesian coordinates in Angstrom, one ``(x, y, z)`` triple per atom.
+    comment : str, optional
+        Text for the frame's comment line. Default is an empty string.
+
+    Returns
+    -------
+    None
+    """
+    fh.write(f"{len(symbols)}\n")
+    fh.write(f"{comment}\n")
+    for symbol, (x, y, z) in zip(symbols, positions):
+        fh.write(f"{symbol:<2}   {x:>12.6f} {y:>12.6f} {z:>12.6f}\n")
+
+
+def _format_pdb_atom_name(symbol, count):
+    """
+    Format a unique atom name for the PDB atom-name field (columns 13-16).
+
+    Single-character elements are indented by one column, following the PDB
+    convention, and names longer than four characters are truncated so that
+    column alignment is preserved.
+
+    Parameters
+    ----------
+    symbol : str
+        The element symbol.
+    count : int
+        Occurrence index of this element within its residue.
+
+    Returns
+    -------
+    str
+        A four-character atom name.
+    """
+    name = f"{symbol}{count}"
+    if len(symbol) == 1 and len(name) < 4:
+        return f" {name:<3}"
+    return f"{name:<4}"[:4]
 
 
 def remove_directory(directory):
@@ -466,21 +571,13 @@ def extract_nonstandard_res(pdb_file_path: str,
             # Log the found non-standard residue
             print(f"Found non-standard residue: {res_name} (Chain {chain_id}, ResID {res_id})", flush=True)
 
-            # Prepare XYZ file content
-            xyz_content = [str(num_atoms)]
-            comment = f"Residue: {res_name}, Chain: {chain_id}, ResID: {res_id}, Source: {os.path.basename(pdb_file_path)}"
-            xyz_content.append(comment)
-
-            for atom in atoms_in_residue:
-                element = atom.element.symbol
-                pos = positions_angstrom[atom.index]
-                xyz_line = f"{element:<2}   {pos[0]:>12.6f} {pos[1]:>12.6f} {pos[2]:>12.6f}"
-                xyz_content.append(xyz_line)
-
             # Write the XYZ file
+            comment = f"Residue: {res_name}, Chain: {chain_id}, ResID: {res_id}, Source: {os.path.basename(pdb_file_path)}"
             with open(output_path, 'w') as f:
-                f.write("\n".join(xyz_content))
-                f.write("\n")
+                _write_xyz_frame(f,
+                                 [atom.element.symbol for atom in atoms_in_residue],
+                                 [positions_angstrom[atom.index] for atom in atoms_in_residue],
+                                 comment)
 
             generated_files.append(output_path)
             print(f"Successfully wrote {num_atoms} atoms to {os.path.splitext(output_path)[0]}", flush=True)
@@ -1430,12 +1527,7 @@ def fix_pdb_atom_labels(input_file, output_file):
                     if not element:
                         element = "X"
                 element_counts[element] = element_counts.get(element, 0) + 1
-                count = element_counts[element]
-                raw_new_name = f"{element}{count}"
-                if len(element) == 1:
-                    new_atom_name = f" {raw_new_name:<3}"[:4]
-                else:
-                    new_atom_name = f"{raw_new_name:<4}"[:4]
+                new_atom_name = _format_pdb_atom_name(element, element_counts[element])
                 new_serial = f"{global_atom_serial:>5}"[:5]
                 global_atom_serial += 1
                 new_line = line[:6] + new_serial + line[11:12] + new_atom_name + line[16:]
@@ -1444,7 +1536,8 @@ def fix_pdb_atom_labels(input_file, output_file):
                 outfile.write(line)
 
 
-def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: float = 1.1) -> int:
+def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: float = 1.1,
+                       index: int = -1) -> int:
     """
     Convert an XYZ file to a PDB file with connectivity and residue assignment.
 
@@ -1457,148 +1550,168 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
     Parameters
     ----------
     input_file : str
-        Path to the input XYZ file.
+        Path to the input XYZ file, or any other structure file ASE can read.
     output_file : str
         Path to the output PDB file.
     cutoff_multiplier : float, optional
         Multiplier applied to natural covalent-radius cutoffs when
         determining bonded neighbours. Default is 1.1.
+    index : int, optional
+        Which frame to convert when the input holds a trajectory. Default is
+        -1 (the last frame). Only a single frame is written.
 
     Returns
     -------
     int
         The number of molecular clusters (connected components) found.
+
+    See Also
+    --------
+    convert_pdb_to_xyz : The inverse conversion.
     """
     # 1. Load the original structure
-    original_atoms = read(input_file)
+    original_atoms = read(input_file, index=index)
     n_atoms = len(original_atoms)
 
-    # 2. Initial connectivity pass to identify molecules (clusters)
-    base_cutoffs = natural_cutoffs(original_atoms)
-    cutoffs = [c * cutoff_multiplier for c in base_cutoffs]
+    # 2. Connectivity pass to identify molecules (clusters)
+    cutoffs = [c * cutoff_multiplier for c in natural_cutoffs(original_atoms)]
     i, j = neighbor_list('ij', original_atoms, cutoffs)
 
     adjacency_matrix = csr_matrix((np.ones_like(i), (i, j)), shape=(n_atoms, n_atoms))
-    n_clusters, original_labels = connected_components(csgraph=adjacency_matrix, directed=False)
+    n_clusters, labels = connected_components(csgraph=adjacency_matrix, directed=False)
 
-    # 3. Canonicalise Atom Ordering: Group by cluster, then Hill system (C, H, others)
-    def get_sort_key(cluster_id, symbol):
-        """
-        Return a sort key for ordering atoms by cluster then Hill system.
+    # 3. Canonicalise atom ordering: group by cluster, then Hill system (C, H, others)
+    hill_priority = {'C': 0, 'H': 1}
+    symbols = original_atoms.get_chemical_symbols()
+    order = sorted(range(n_atoms),
+                   key=lambda idx: (labels[idx], hill_priority.get(symbols[idx], 2), symbols[idx]))
 
-        Parameters
-        ----------
-        cluster_id : int
-            The cluster (molecule) index.
-        symbol : str
-            The atomic element symbol.
+    atoms = original_atoms[order]
+    sorted_labels = [labels[idx] for idx in order]
 
-        Returns
-        -------
-        tuple
-            A 3-tuple ``(cluster_id, priority, symbol)`` where *priority*
-            is 0 for C, 1 for H, and 2 for all other elements.
-        """
-        if symbol == 'C':
-            return (cluster_id, 0, symbol)
-        elif symbol == 'H':
-            return (cluster_id, 1, symbol)
-        else:
-            return (cluster_id, 2, symbol)
+    # 4. Re-index the connectivity from step 2 onto the new ordering, rather
+    # than paying for a second neighbour-list pass over the sorted atoms
+    old_to_new = np.empty(n_atoms, dtype=int)
+    old_to_new[order] = np.arange(n_atoms)
+    i, j = old_to_new[i], old_to_new[j]
 
-    sort_data = [(get_sort_key(original_labels[idx], atom.symbol), idx) for idx, atom in enumerate(original_atoms)]
-    sort_data.sort(key=lambda x: x[0])
-    sorted_indices = [x[1] for x in sort_data]
-
-    # 4. Create the cleanly reordered Atoms object
-    atoms = original_atoms[sorted_indices]
-    sorted_labels = [original_labels[idx] for idx in sorted_indices]
-
-    # 5. Map sorted labels to Chain and Residue IDs
-    unique_labels = []
-    for lbl in sorted_labels:
-        if not unique_labels or unique_labels[-1] != lbl:
-            unique_labels.append(lbl)
-
+    # 5. Map each cluster onto a chain ID, residue ID and residue name
+    unique_labels = list(dict.fromkeys(sorted_labels))
     available_chains = string.ascii_uppercase + string.ascii_lowercase + string.digits
     num_chains = len(available_chains)
-
-    label_to_chain = {}
-    label_to_resid = {}
-    label_to_resname = {}
+    cluster_ids = {}
 
     for cluster_idx, lbl in enumerate(unique_labels):
-        # Chain ID wraps around every 62 clusters
-        label_to_chain[lbl] = available_chains[cluster_idx % num_chains]
-
-        # Residue ID increments only when the chain ID wraps around
-        label_to_resid[lbl] = (cluster_idx // num_chains) + 1
+        # Chain ID wraps around every 62 clusters, and the residue ID
+        # increments only when the chain ID wraps
+        chain = available_chains[cluster_idx % num_chains]
+        resid = (cluster_idx // num_chains) + 1
 
         # Unique three-letter residue name (AAA, AAB, ..., AAZ, ABA, ..., ZZZ)
-        a = cluster_idx // (26 * 26) % 26
-        b = (cluster_idx // 26) % 26
-        c = cluster_idx % 26
-        label_to_resname[lbl] = chr(65 + a) + chr(65 + b) + chr(65 + c)
+        resname = ''.join(chr(65 + (cluster_idx // 26 ** p) % 26) for p in (2, 1, 0))
 
-    chain_ids = [label_to_chain[lbl] for lbl in sorted_labels]
-    res_ids = [label_to_resid[lbl] for lbl in sorted_labels]
-    res_names = [label_to_resname[lbl] for lbl in sorted_labels]
+        cluster_ids[lbl] = (chain, resid, resname)
 
-    # 6. Re-calculate connectivity on the newly sorted atoms
-    base_cutoffs = natural_cutoffs(atoms)
-    cutoffs = [c * cutoff_multiplier for c in base_cutoffs]
-    i, j = neighbor_list('ij', atoms, cutoffs)
-
-    # 7. Generate unique atom names
-    atom_names = []
+    # 6. Write the properly grouped and ordered PDB file
     element_counts_per_cluster = defaultdict(int)
 
-    for idx, atom in enumerate(atoms):
-        chain = chain_ids[idx]
-        resid = res_ids[idx]
-        sym = atom.symbol
-
-        # Track the element count specifically within this unique chain/residue combo
-        tracking_key = f"{chain}_{resid}_{sym}"
-        element_counts_per_cluster[tracking_key] += 1
-        count = element_counts_per_cluster[tracking_key]
-
-        unique_name = f"{sym}{count}"
-
-        if len(sym) == 1 and len(unique_name) < 4:
-            formatted_name = f" {unique_name:<3}"
-        else:
-            formatted_name = f"{unique_name[:4]:<4}"
-
-        atom_names.append(formatted_name)
-
-    # 8. Write the properly grouped and ordered PDB file
     with open(output_file, 'w') as f:
         for idx, atom in enumerate(atoms):
-            serial = idx + 1
+            chain, resid, resname = cluster_ids[sorted_labels[idx]]
             sym = atom.symbol
             x, y, z = atom.position
 
-            line = (f"ATOM  {serial:>5} {atom_names[idx]} {res_names[idx]:>3} {chain_ids[idx]}{res_ids[idx]:>4}    "
+            # Atom names are made unique within each chain/residue combination
+            element_counts_per_cluster[(chain, resid, sym)] += 1
+            name = _format_pdb_atom_name(sym, element_counts_per_cluster[(chain, resid, sym)])
+
+            f.write(f"ATOM  {idx + 1:>5} {name} {resname:>3} {chain}{resid:>4}    "
                     f"{x:>8.3f}{y:>8.3f}{z:>8.3f}  1.00  0.00          {sym:>2}\n")
-            f.write(line)
 
         conect_dict = defaultdict(list)
         for a1, a2 in zip(i, j):
             conect_dict[a1].append(a2)
 
-        for atom_idx in sorted(conect_dict.keys()):
-            a1_pdb = atom_idx + 1
-            bonded_atoms = sorted([x + 1 for x in conect_dict[atom_idx]])
+        for atom_idx in sorted(conect_dict):
+            bonded_atoms = sorted(b + 1 for b in conect_dict[atom_idx])
 
+            # CONECT records hold at most four bonded partners each
             for chunk_start in range(0, len(bonded_atoms), 4):
-                chunk = bonded_atoms[chunk_start:chunk_start + 4]
-                line = f"CONECT{a1_pdb:>5}"
-                for b in chunk:
-                    line += f"{b:>5}"
-                f.write(line + "\n")
+                chunk = ''.join(f"{b:>5}" for b in bonded_atoms[chunk_start:chunk_start + 4])
+                f.write(f"CONECT{atom_idx + 1:>5}{chunk}\n")
+
+        f.write("END\n")
 
     return n_clusters
+
+
+def convert_pdb_to_xyz(input_file: str, output_file: str, comment: str | None = None) -> int:
+    """
+    Convert a PDB file to an XYZ file.
+
+    Every ``ATOM`` and ``HETATM`` record contributes one atom, in file order.
+    Multi-model PDB files (``MODEL``/``ENDMDL``) produce one XYZ frame per
+    model; files without model records produce a single frame. Coordinates are
+    passed through unchanged, both formats using Angstrom.
+
+    Parameters
+    ----------
+    input_file : str
+        Path to the input PDB file.
+    output_file : str
+        Path to the output XYZ file.
+    comment : str, optional
+        Text for the comment line of every frame. If None, a comment naming
+        the source file (and frame number, when there is more than one) is
+        generated. Default is None.
+
+    Returns
+    -------
+    int
+        The number of frames written.
+
+    Raises
+    ------
+    ValueError
+        If the input file contains no ``ATOM`` or ``HETATM`` records.
+
+    See Also
+    --------
+    convert_xyz_to_pdb : The inverse conversion.
+    """
+    frames = []
+    symbols = []
+    positions = []
+
+    with open(input_file, 'r') as f:
+        for line in f:
+            if line.startswith(("ATOM  ", "HETATM")):
+                symbols.append(_element_from_pdb_line(line))
+                positions.append((float(line[30:38]), float(line[38:46]), float(line[46:54])))
+            elif line.startswith("ENDMDL") and symbols:
+                frames.append((symbols, positions))
+                symbols, positions = [], []
+
+    # Catch the trailing model, and the single-frame case with no model records
+    if symbols:
+        frames.append((symbols, positions))
+
+    if not frames:
+        raise ValueError(f"No ATOM or HETATM records found in {input_file!r}.")
+
+    source = os.path.basename(input_file)
+    with open(output_file, 'w') as f:
+        for frame_idx, (frame_symbols, frame_positions) in enumerate(frames, start=1):
+            if comment is not None:
+                text = comment
+            elif len(frames) > 1:
+                text = f"Frame: {frame_idx} of {len(frames)}, Source: {source}"
+            else:
+                text = f"Source: {source}"
+            _write_xyz_frame(f, frame_symbols, frame_positions, text)
+
+    print(f"Wrote {len(frames)} frame(s) to {output_file}", flush=True)
+    return len(frames)
 
 
 def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HETATM'):
