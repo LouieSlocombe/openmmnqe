@@ -71,6 +71,246 @@ def estimate_path_lambda(pdb_path: str) -> float:
     return ideal_lambda
 
 
+def _switching_value(r, r_0, nn=6, mm=None):
+    """
+    Evaluate PLUMED's default rational switching function.
+
+    This is the same function ``COORDINATION`` applies to every pair distance,
+    ``s(r) = (1 - (r/r_0)^nn) / (1 - (r/r_0)^mm)``, so it can be used to work
+    out what a coordination-based CV is worth for a given geometry without
+    running PLUMED.
+
+    Parameters
+    ----------
+    r : float
+        Distance between the two atoms, in the same units as *r_0*.
+    r_0 : float
+        The ``R_0`` parameter of the switching function.
+    nn : int, optional
+        Numerator exponent. Default is 6, as in PLUMED.
+    mm : int or None, optional
+        Denominator exponent. If None, ``2 * nn`` is used, again as in PLUMED.
+
+    Returns
+    -------
+    float
+        The value of the switching function, between 0 and 1.
+    """
+    mm = 2 * nn if mm is None else mm
+    x = (r / r_0) ** nn
+    y = (r / r_0) ** mm
+    if np.isclose(y, 1.0):
+        # r == r_0 makes both halves vanish; the limit there is nn / mm
+        return nn / mm
+    return (1.0 - x) / (1.0 - y)
+
+
+def plumed_input_steered(cv_block,
+                         cv_start,
+                         cv_stop,
+                         steps,
+                         cv_name='cv',
+                         kappa=2000.0,
+                         stride=100,
+                         steps_equil=0,
+                         steps_relax=0,
+                         colvar_file='COLVAR_SMD',
+                         extra_lines=None):
+    """
+    Build a PLUMED input that drags a collective variable from one value to
+    another with a moving harmonic restraint (steered MD).
+
+    The restraint centre is moved linearly from *cv_start* to *cv_stop* over
+    *steps* MD steps, optionally after holding at the starting value for
+    *steps_equil* steps and before holding at the final value for
+    *steps_relax* steps. The trajectory this produces is a first guess at the
+    reaction path, which :func:`openmmnqe.path.path_from_steered_md` turns
+    into a reference for ``PATHMSD``.
+
+    Parameters
+    ----------
+    cv_block : str
+        PLUMED lines defining the CV to steer, ending with an action labelled
+        *cv_name*.
+    cv_start : float
+        Value of the CV the restraint starts at, normally the value of the
+        reactant.
+    cv_stop : float
+        Value of the CV the restraint finishes at, normally the value of the
+        product.
+    steps : int
+        Number of MD steps spent pulling from *cv_start* to *cv_stop*. Pulling
+        slowly costs more time but leaves a path that is closer to the free
+        energy valley.
+    cv_name : str, optional
+        Label of the CV defined in *cv_block*. Must be a plain label rather
+        than a component such as ``path.sss``, because it is used to name the
+        restraint's output components. Default is ``'cv'``.
+    kappa : float, optional
+        Spring constant of the moving restraint in kJ/mol per CV unit squared.
+        Default is 2000.0. Too soft and the system lags behind the restraint,
+        too stiff and the pulling heats it.
+    stride : int, optional
+        How often the CV is written to *colvar_file*, in steps. Default is 100.
+        Match this to the reporter interval of the MD run so that every
+        trajectory frame has a CV value.
+    steps_equil : int, optional
+        Steps held at *cv_start* before pulling starts. Default is 0.
+    steps_relax : int, optional
+        Steps held at *cv_stop* after pulling finishes. Default is 0.
+    colvar_file : str, optional
+        File the CV, the restraint centre and the work are written to.
+        Default is ``'COLVAR_SMD'``.
+    extra_lines : str or None, optional
+        Further PLUMED lines (walls, restraints, extra prints) inserted after
+        the CV definition. Default is None.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    n_steps : int
+        Total number of MD steps the pulling schedule covers, i.e.
+        ``steps_equil + steps + steps_relax``. Pass this to the MD run so the
+        simulation does not stop mid-pull.
+    """
+    # Each milestone is a (step, restraint centre) pair; PLUMED interpolates
+    # the centre linearly in between them.
+    milestones = [(0, cv_start)]
+    step = 0
+    if steps_equil > 0:
+        step += steps_equil
+        milestones.append((step, cv_start))
+    step += steps
+    milestones.append((step, cv_stop))
+    if steps_relax > 0:
+        step += steps_relax
+        milestones.append((step, cv_stop))
+
+    schedule = " ".join(f"STEP{i}={at_step} AT{i}={at:.4f} KAPPA{i}={kappa}"
+                        for i, (at_step, at) in enumerate(milestones))
+
+    plumed_input = f"""
+# Collective variable
+{cv_block.strip()}
+{extra_lines.strip() if extra_lines else ''}
+# Steered MD: pull the CV from {cv_start:.4f} to {cv_stop:.4f}
+smd:        MOVINGRESTRAINT ARG={cv_name} {schedule}
+PRINT       ARG={cv_name},smd.{cv_name}_cntr,smd.work STRIDE={stride} FILE={colvar_file}
+        """
+    return plumed_input, step
+
+
+def plumed_input_steered_pt(modeller,
+                            idx,
+                            steps,
+                            r_0=1.1,
+                            wall=1.5,
+                            angle_lim=130.0,
+                            kappa=2000.0,
+                            stride=100,
+                            cv_start=None,
+                            cv_stop=None,
+                            steps_equil=0,
+                            steps_relax=0,
+                            colvar_file='COLVAR_SMD',
+                            wall_kappa=500.0):
+    """
+    Build a steered MD input that pulls a proton across a hydrogen bond.
+
+    The collective variable is the one :func:`plumed_input_1pt` biases, the
+    difference between the donor-hydrogen and acceptor-hydrogen coordination
+    numbers, and the same walls keep the donor and acceptor from drifting
+    apart while the proton is dragged over. Unless they are given, the start
+    and end values of the CV are read off the geometry in *modeller*: the
+    current value for the start, and its mirror image for the end, which is
+    where the proton sits once transferred.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller holding the reactant geometry, used to size the switching
+        function and to work out where the pull should start.
+    idx : list of int
+        Three 0-based atom indices, ordered donor, hydrogen, acceptor.
+    steps : int
+        Number of MD steps spent pulling the proton across.
+    r_0 : float, optional
+        Multiplier on the shorter of the two donor/acceptor-hydrogen distances
+        that sets ``R_0`` of the switching function. Default is 1.1.
+    wall : float, optional
+        Multiplier on the donor-acceptor distance that sets the upper wall
+        keeping the hydrogen bond intact. Default is 1.5.
+    angle_lim : float, optional
+        Lower wall on the donor-hydrogen-acceptor angle, in degrees.
+        Default is 130.0.
+    kappa : float, optional
+        Spring constant of the moving restraint. Default is 2000.0.
+    stride : int, optional
+        How often the CV is written, in steps. Default is 100.
+    cv_start, cv_stop : float or None, optional
+        Explicit start and end values for the CV. If None, the start is
+        computed from *modeller* and the end is its negative. Default is None.
+    steps_equil, steps_relax : int, optional
+        Steps held at the start and end values. Default is 0.
+    colvar_file : str, optional
+        File the CV is written to. Default is ``'COLVAR_SMD'``.
+    wall_kappa : float, optional
+        Spring constant of the distance and angle walls. Default is 500.0.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    n_steps : int
+        Total number of MD steps the pulling schedule covers.
+    """
+    # Distances, in nm, of the donor-hydrogen, acceptor-hydrogen and
+    # donor-acceptor pairs
+    r_01 = distance_between_atoms(modeller, idx[0], idx[1]).value_in_unit(unit.nanometer)
+    r_21 = distance_between_atoms(modeller, idx[2], idx[1]).value_in_unit(unit.nanometer)
+    r_02 = distance_between_atoms(modeller, idx[0], idx[2]).value_in_unit(unit.nanometer)
+    r_0 = np.round(min(r_01, r_21) * r_0, decimals=2)
+
+    if cv_start is None:
+        # What the CV is worth right now: bonded to the donor gives +1,
+        # bonded to the acceptor gives -1
+        cv_start = np.round(_switching_value(r_01, r_0) - _switching_value(r_21, r_0), decimals=2)
+    if cv_stop is None:
+        cv_stop = -cv_start
+
+    # Limits
+    wall = np.round(r_02 * wall, decimals=2)
+    angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
+
+    # Convert atom indices to PLUMED format
+    idx = atom_indices_to_plumed(idx)
+
+    cv_block = f"""c_d:        COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}
+c_a:        COORDINATION GROUPA={idx[2]} GROUPB={idx[1]} R_0={r_0}
+pt_cv:      COMBINE ARG=c_d,c_a COEFFICIENTS=1,-1 PERIODIC=NO"""
+
+    extra_lines = f"""
+# Limits
+dist_da:    DISTANCE ATOMS={idx[2]},{idx[0]}
+dist_wall:  UPPER_WALLS ARG=dist_da AT={wall} KAPPA={wall_kappa}
+ang_1:      ANGLE ATOMS={idx[2]},{idx[1]},{idx[0]}
+ang_wall:   LOWER_WALLS ARG=ang_1 AT={angle_lim} KAPPA={wall_kappa}
+"""
+
+    return plumed_input_steered(cv_block,
+                                cv_start,
+                                cv_stop,
+                                steps,
+                                cv_name='pt_cv',
+                                kappa=kappa,
+                                stride=stride,
+                                steps_equil=steps_equil,
+                                steps_relax=steps_relax,
+                                colvar_file=colvar_file,
+                                extra_lines=extra_lines)
+
+
 def plumed_input_1pt(modeller,
                      idx,
                      temperature,

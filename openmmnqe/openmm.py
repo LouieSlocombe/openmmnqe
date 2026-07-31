@@ -900,6 +900,115 @@ def run_openmm_prod(modeller,
         app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
 
 
+def run_openmm_steered(modeller,
+                       forcefield,
+                       plumed_input,
+                       steps,
+                       output_prefix='smd',
+                       temperature=300.0 * unit.kelvin,
+                       gamma=1.0 / unit.picosecond,
+                       time_step=0.5 * unit.femtoseconds,
+                       n_report=100,
+                       pressure=1.0 * unit.bar,
+                       barostat_freq=None,
+                       platform_name=None,
+                       deuterate=False,
+                       deuterate_option='water',
+                       potential=None,
+                       ml_idx=None,
+                       calculator=None,
+                       ):
+    """
+    Run a steered MD simulation, dragging a collective variable with PLUMED.
+
+    This is :func:`run_openmm_prod` with the settings a pulling run wants: no
+    barostat, a short time step, and frequent reporting so the trajectory has
+    enough frames to pick a path out of. The PLUMED script comes from
+    :func:`openmmnqe.plumed.plumed_input_steered` or one of its wrappers, and
+    the trajectory feeds :func:`openmmnqe.path.path_from_steered_md`.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions, equilibrated at
+        the reactant.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    plumed_input : str
+        The PLUMED script itself, or the path to a file holding one. Anything
+        containing a newline is taken to be a script and written to
+        ``'{output_prefix}_plumed.dat'``.
+    steps : int
+        Number of MD steps to run. Use the step count returned alongside the
+        script by the ``plumed_input_steered*`` builders, so the run covers the
+        whole pulling schedule.
+    output_prefix : str, optional
+        Prefix for output files. Default is ``'smd'``.
+    temperature : openmm.unit.Quantity, optional
+        Simulation temperature. Default is 300.0 K.
+    gamma : openmm.unit.Quantity, optional
+        Friction coefficient. Default is 1.0 / ps.
+    time_step : openmm.unit.Quantity, optional
+        Integration time step. Default is 0.5 fs, since pulling a proton
+        across a hydrogen bond is not gentle.
+    n_report : int, optional
+        Reporter interval in steps. Default is 100. Match this to the PLUMED
+        ``PRINT`` stride so that every frame has a CV value.
+    pressure : openmm.unit.Quantity, optional
+        Target pressure, only used if a barostat is asked for. Default is
+        1.0 bar.
+    barostat_freq : int or None, optional
+        Barostat attempt frequency in steps. Default is None, i.e. pull at
+        constant volume.
+    platform_name : str, optional
+        OpenMM platform name. Default is None, which auto-detects.
+    deuterate : bool, optional
+        If True, deuterate the system before simulation. Default is False.
+    deuterate_option : str, optional
+        Subset of the system to deuterate. Default is ``'water'``.
+    potential : object or None, optional
+        ML potential object with a ``createMixedSystem`` method. Default is None.
+    ml_idx : list of int or None, optional
+        Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
+
+    Returns
+    -------
+    str
+        Path to the trajectory written by the run.
+    """
+    if '\n' in plumed_input:
+        plumed_script_path = f'{output_prefix}_plumed.dat'
+        with open(plumed_script_path, 'w') as f:
+            f.write(plumed_input)
+    else:
+        plumed_script_path = plumed_input
+
+    print(f"Starting steered MD for {steps} steps...", flush=True)
+    run_openmm_prod(modeller,
+                    forcefield,
+                    plumed_script_path=plumed_script_path,
+                    pressure=pressure,
+                    temperature=temperature,
+                    gamma=gamma,
+                    time_step=time_step,
+                    barostat_freq=barostat_freq,
+                    n_report=n_report,
+                    steps=steps,
+                    output_prefix=output_prefix,
+                    platform_name=platform_name,
+                    deuterate=deuterate,
+                    deuterate_option=deuterate_option,
+                    potential=potential,
+                    ml_idx=ml_idx,
+                    calculator=calculator)
+
+    traj_file = f'{output_prefix}_steps.pdb'
+    print(f"Steered trajectory written to {traj_file}", flush=True)
+    return traj_file
+
+
 def run_openmm_rpmd_equilibration(modeller,
                                   forcefield,
                                   output_prefix='rpmd_ready',
