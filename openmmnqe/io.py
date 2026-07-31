@@ -1087,14 +1087,15 @@ def prepare_lig_system(input_pdb,
                        residue_map=None,
                        rm_files=True,
                        rm_lig_sdf=True,
-                       lig_names=None):
+                       lig_names=None,
+                       fix_receptor=False):
     """
     Prepare a protein–ligand system from a raw PDB file.
 
     Removes water and (optionally) ions, relabels residues, identifies
-    non-standard (ligand) residues, generates SDF files, fixes the PDB,
-    and combines ligand and receptor topologies into one PDB ready for
-    force-field parameterisation.
+    non-standard (ligand) residues, generates SDF files, optionally
+    repairs the receptor, and combines ligand and receptor topologies
+    into one PDB ready for force-field parameterisation.
 
     Parameters
     ----------
@@ -1120,6 +1121,18 @@ def prepare_lig_system(input_pdb,
     lig_names : str, list of str, or None, optional
         Ligand residue name(s). If None, non-standard residues are
         auto-detected. Default is None.
+    fix_receptor : bool, optional
+        If True, run :func:`fix_pdb` on the receptor before the ligand is
+        re-attached, rebuilding any missing residues and atoms and adding
+        hydrogens at pH 7. This is worth enabling for raw crystal
+        structures, but PDBFixer also rewrites any residue in its
+        substitution table to the standard equivalent, discarding that
+        residue's hydrogens and re-adding them at pH 7. Those are silent
+        structural edits, and they are pure overhead for an input that is
+        already equilibrated, so it is off by default. The ligand is
+        unaffected either way -- it is re-attached from its SDF after the
+        fixer runs. Has no effect on ligand-only systems, which have no
+        receptor to repair. Default is False.
 
     Returns
     -------
@@ -1171,8 +1184,11 @@ def prepare_lig_system(input_pdb,
         for lig_name in lig_names_list:
             pdb_patcher(combined_pdb, lig_name=lig_name)
     else:
-        fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
-        remove_residues_in_pdb(combined_pdb, combined_pdb, names=lig_names_list)
+        if fix_receptor:
+            fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
+            remove_residues_in_pdb(combined_pdb, combined_pdb, names=lig_names_list)
+        else:
+            remove_residues_in_pdb(clean_pdb, combined_pdb, names=lig_names_list)
         for lig_name in lig_names_list:
             print('Patching PDB for ligand:', lig_name, flush=True)
             combine_sdf_pdb(combined_pdb, lig_name=lig_name, patch=True)
