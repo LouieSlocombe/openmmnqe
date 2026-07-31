@@ -24,6 +24,8 @@ from scipy.sparse.csgraph import connected_components
 
 from openmm import app, Vec3
 
+from .plotting import as_fes
+
 # Conversion factor from Bohr to Angstrom
 bohr_to_angstrom = const["Bohr radius"][0] * 1e10
 # Conversion factor between Angstrom and nm
@@ -216,84 +218,85 @@ def list_files_with_pattern(directory, pattern):
     return glob.glob(os.path.join(directory, pattern))
 
 
-def search_fes_files(target_directory: str) -> list[str]:
+def search_fes_files(target_directory: str, pattern: str = r'^fes_?(\d+)\.dat$') -> list[str]:
     r"""
-    Searches for files in the target directory with names matching the pattern 'FES*', where '*' is an integer.
+    Searches for numbered FES files in the target directory.
 
-    This function scans the specified directory for files whose names match the pattern 'FES\d+\.dat',
-    where '\d+' represents one or more digits. It returns a list of all matching file names.
+    By default this matches the names written by ``plumed sum_hills --stride``
+    and by the bundled OPES ``FES_from_*`` scripts, i.e. ``FES1.dat`` and
+    ``fes_1.dat``, case-insensitively.  Results are ordered by the number they
+    carry rather than alphabetically, so ``fes_2.dat`` precedes ``fes_10.dat``.
 
     Parameters
     ----------
     target_directory : str
         The directory to search in.
+    pattern : str, optional
+        Regular expression matched against each file name.  Its first capture
+        group, if present, is used as the sort key.
 
     Returns
     -------
     list[str]
-        A list of matching file names.
+        Matching file names, sorted by their index.
     """
-    # Compile a regular expression pattern to match file names like 'FES<number>.dat'
-    pattern = re.compile(r'^FES\d+\.dat$')
-    matching_files = []
+    regex = re.compile(pattern, re.IGNORECASE)
+    matches = []
 
-    # Iterate through all files in the target directory
     for filename in os.listdir(target_directory):
-        # Check if the file name matches the pattern
-        if pattern.match(filename):
-            matching_files.append(filename)
+        found = regex.match(filename)
+        if found:
+            # Sort on the captured index when the pattern provides one.
+            key = int(found.group(1)) if found.groups() else filename
+            matches.append((key, filename))
 
-    # Return the list of matching file names
-    return matching_files
+    return [filename for _, filename in sorted(matches)]
 
 
-def load_fes_data(directory: str, bins: int) -> list[np.ndarray]:
+def load_fes_data(directory: str,
+                  bins: int | None = None,
+                  energy_unit: str = "eV",
+                  source_unit: str = "kJ/mol",
+                  pattern: str = r'^fes_?(\d+)\.dat$',
+                  verbose: bool = True) -> list:
     """
-    Find FES files in the directory and load their data into numpy arrays.
+    Find the numbered FES files in a directory and load them in order.
 
-    This function searches for FES files in the specified directory, reads their data,
-    and transforms it into numpy arrays. The transformation involves scaling the data
-    based on predefined conversion factors. The number of bins is incremented by 1
-    before processing.
+    Each file is parsed with :func:`openmmnqe.plotting.as_fes`, so 1-D and 2-D
+    surfaces are both handled and the result can be handed straight to
+    :func:`openmmnqe.plotting.plot_fes_1d` or
+    :func:`openmmnqe.plotting.plot_fes_2d` to show how a surface converges.
 
     Parameters
     ----------
     directory : str
         Directory containing the FES files.
-    bins : int
-        Number of bins for reshaping the data.
+    bins : int, optional
+        Unused; kept so existing positional calls keep working.
+    energy_unit : str, optional
+        Unit to convert the free energies to (default is ``"eV"``).
+    source_unit : str, optional
+        Unit the files are written in (default is ``"kJ/mol"``, which is what
+        PLUMED writes when driven from OpenMM).
+    pattern : str, optional
+        Regular expression selecting the files; see :func:`search_fes_files`.
+    verbose : bool, optional
+        Whether to report each file as it is loaded (default is True).
 
     Returns
     -------
-    list[np.ndarray]
-        A list of numpy arrays, each containing the transformed FES data.
+    list
+        One :class:`openmmnqe.plotting.FES` per file, ordered by file index.
     """
-    # Search for FES files in the specified directory
-    fes_files = search_fes_files(directory)
+    fes_files = search_fes_files(directory, pattern=pattern)
     fes_arrays = []
-    bins += 1  # Increment the number of bins
 
-    # Process each FES file
-    for file in sorted(fes_files):
-        file_path = os.path.join(directory, file)
-
-        # Read the first line to detect the number of collective variables (CVs)
-        with open(file_path, 'r') as f:
-            first_line = f.readline().strip()
-            n_cv = len(first_line.split()[2:])  # Skip #! FIELDS and time
-        print(f"Loading {file_path} with {n_cv} FIELDS")
-
-        # Load the data from the file, ignoring lines starting with '#'
-        data = np.loadtxt(file_path, comments="#")
-
-        # Transform the data based on the number of CVs
-        if n_cv == 2:
-            transformed_data = np.array([1.0, 1.0 / eV_to_kJpermol])[:, np.newaxis] * data[:, :2].T
-        else:
-            transformed_data = np.array([1.0, 1.0 / eV_to_kJpermol])[:, np.newaxis] * data[:, :2].T
-
-        # Append the transformed data to the result list
-        fes_arrays.append(transformed_data)
+    for filename in fes_files:
+        file_path = os.path.join(directory, filename)
+        fes = as_fes(file_path, energy_unit=energy_unit, source_unit=source_unit)
+        if verbose:
+            print(f"Loading {file_path} with {fes.ndim} CV(s)")
+        fes_arrays.append(fes)
 
     return fes_arrays
 

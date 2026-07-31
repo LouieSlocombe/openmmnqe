@@ -1,21 +1,100 @@
-from dataclasses import dataclass
-from typing import Optional, Tuple, List
+"""
+Plotting helpers for free-energy surfaces (FES) and other PLUMED output.
+
+The module is organised in three layers so that anything that can be turned
+into a free-energy surface can be plotted by the same handful of functions:
+
+1. **Readers** -- :func:`read_plumed_file` parses any PLUMED-style file
+   (``COLVAR``, ``fes.dat``, ``HILLS``, ``FES_from_State.py`` output) into a
+   :class:`PlumedData` container of numeric columns, field names and
+   ``#! SET`` metadata.
+2. **Container** -- :class:`FES` normalises 1-D and 2-D free-energy data into
+   a common form (collective-variable grids, energies, labels).  Anything a
+   user is likely to have -- a file path, a ``(2, N)``/``(N, 2)`` array, a
+   stacked ``(3, ny, nx)`` array, a ``(x, y, Z)`` tuple or scattered
+   ``(N, 3)`` columns -- is accepted by :func:`as_fes`.
+3. **Plotters** -- :func:`plot_fes_1d`, :func:`plot_fes_2d`,
+   :func:`plot_fes_2d_overlay` and :func:`plot_fes_slices` each take *one or
+   many* FES sources, so a single surface, a convergence series and a
+   MD/PIMD comparison are all the same call.  :func:`plot_fes` dispatches on
+   dimensionality when the caller does not care.
+
+Every plotting function shares the same conventions:
+
+* sources may be mixed and matched (paths, arrays, :class:`FES` objects),
+* ``energy_unit`` converts the file/array energies on the way in,
+* ``max_energy`` masks poorly sampled regions instead of letting them
+  dominate the colour scale,
+* ``filename=None`` means *do not write anything*; passing a name without an
+  extension writes every format in ``formats``,
+* the return value is always ``(fig, ax)``.
+"""
+
+import os
+from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+__all__ = [
+    "DEFAULT_ENERGY_UNIT",
+    "ENERGY_UNITS",
+    "FES",
+    "PlumedData",
+    "as_fes",
+    "ax_plot",
+    "convert_energy",
+    "n_plot",
+    "plot_fes",
+    "plot_fes_1d",
+    "plot_fes_2d",
+    "plot_fes_2d_overlay",
+    "plot_fes_slices",
+    "plot_plumed_colvar",
+    "plot_plumed_fes",
+    "read_plumed_file",
+    "unit_label",
+]
 
+#: Size of one energy unit expressed in kJ/mol.  PLUMED writes kJ/mol by
+#: default when driven from OpenMM, which is why it is the reference.
+ENERGY_UNITS = {
+    "kj/mol": 1.0,
+    "kcal/mol": 4.184,
+    "ev": 96.48533212331,
+    "mev": 0.09648533212331,
+    "hartree": 2625.4996394799,
+    "kt300": 2.494339,
+}
+
+#: Unit the FES files are assumed to be written in when nothing else is said.
+DEFAULT_ENERGY_UNIT = "kJ/mol"
+
+#: Pretty names used in axis labels, keyed by the normalised unit name.
+_UNIT_LABELS = {
+    "kj/mol": "kJ mol$^{-1}$",
+    "kcal/mol": "kcal mol$^{-1}$",
+    "ev": "eV",
+    "mev": "meV",
+    "hartree": "$E_\\mathrm{h}$",
+    "kt300": "$k_\\mathrm{B}T$",
+}
+
+
+# ---------------------------------------------------------------------------
+# Axis styling
+# ---------------------------------------------------------------------------
 def n_plot(xlab,
            ylab,
            xs=14,
            ys=14):
     """
-    Configures the appearance of a matplotlib plot.
+    Configures the appearance of the current matplotlib plot.
 
-    This function sets up minor ticks, major ticks, and axis labels for a plot.
-    It adjusts the tick parameters and applies a tight layout to ensure proper
-    spacing.
+    This function sets up minor ticks, major ticks, and axis labels for the
+    active pyplot axes.  It adjusts the tick parameters and applies a tight
+    layout to ensure proper spacing.
 
     Parameters
     ----------
@@ -32,13 +111,7 @@ def n_plot(xlab,
     -------
     None
     """
-    plt.minorticks_on()
-    plt.tick_params(axis='both', which='major', labelsize=ys - 2, direction='in', length=6, width=2)
-    plt.tick_params(axis='both', which='minor', labelsize=ys - 2, direction='in', length=4, width=2)
-    plt.tick_params(axis='both', which='both', top=True, right=True)
-    plt.xlabel(xlab, fontsize=xs)
-    plt.ylabel(ylab, fontsize=ys)
-    plt.tight_layout()
+    ax_plot(plt.gcf(), plt.gca(), xlab, ylab, xs=xs, ys=ys)
     return None
 
 
@@ -53,7 +126,9 @@ def ax_plot(fig,
 
     This function sets up minor ticks, major ticks, and axis labels for the provided
     matplotlib axes. It adjusts the tick parameters and applies a tight layout to
-    ensure proper spacing.
+    ensure proper spacing.  The layout pass is skipped when the figure already
+    manages its own layout (for example ``constrained_layout=True``), which would
+    otherwise trigger a matplotlib warning.
 
     Parameters
     ----------
@@ -78,801 +153,1508 @@ def ax_plot(fig,
     ax.tick_params(axis='both', which='major', labelsize=ys - 2, direction='in', length=6, width=2)
     ax.tick_params(axis='both', which='minor', labelsize=ys - 2, direction='in', length=4, width=2)
     ax.tick_params(axis='both', which='both', top=True, right=True)
-    ax.set_xlabel(xlab, fontsize=xs)
-    ax.set_ylabel(ylab, fontsize=ys)
-    fig.tight_layout()
+    if xlab is not None:
+        ax.set_xlabel(xlab, fontsize=xs)
+    if ylab is not None:
+        ax.set_ylabel(ylab, fontsize=ys)
+    if fig.get_layout_engine() is None:
+        fig.tight_layout()
     return None
 
 
-def plot_fes_series_1d(fes_arrays: list[np.ndarray],
-                       fig=None,
-                       ax=None,
-                       slices: list[float] = None,
-                       labels: list[str] = None,
-                       max_slices: int = 5,
-                       save: bool = True,
-                       show: bool = True,
-                       filename: str = "fes_1d",
-                       x_lab: str = r"CV1",
-                       y_lab: str = r"$F$ (eV)",
-                       fig_size: tuple = (8, 3)):
+def _style_axes(fig, axes, x_lab=None, y_lab=None, xs=14, ys=14):
     """
-    Plots a series of 1D free energy surfaces (FES) over time.
+    Apply :func:`ax_plot` styling to one or more axes.
 
-    This function generates a plot of multiple 1D FES arrays, optionally labeling
-    each curve with a corresponding time slice. It allows customization of the
-    figure, axis, labels, and other plot parameters. The plot can be saved to
-    files and/or displayed.
+    Only the left-most axes keeps the y-label so that shared-axis panels do
+    not repeat it.
 
     Parameters
     ----------
-    fes_arrays : list[np.ndarray]
-        A list of 1D FES arrays, where each array contains x and y data for plotting.
-    fig : matplotlib.figure.Figure, optional
-        The matplotlib figure object to use for the plot. If None, a new figure is created.
-    ax : matplotlib.axes.Axes, optional
-        The matplotlib axes object to use for the plot. If None, new axes are created.
-    slices : list[float], optional
-        A list of time slices corresponding to each FES array. If None, indices are used.
-    labels : list[str], optional
-        A list of labels for each FES curve. If None, labels are generated based on slices.
-    max_slices : int, optional
-        The maximum number of slices to plot (default is 5).
-    save : bool, optional
-        Whether to save the plot as a file (default is True).
-    show : bool, optional
-        Whether to display the plot (default is True).
-    filename : str, optional
-        The base filename for saving the plot (default is "fes_1d").
-    x_lab : str, optional
-        The label for the x-axis (default is "CV1").
-    y_lab : str, optional
-        The label for the y-axis (default is "$F$ (eV)").
-    fig_size : tuple, optional
-        The size of the figure in inches (default is (8, 3)).
+    fig : matplotlib.figure.Figure
+        Figure owning *axes*.
+    axes : matplotlib.axes.Axes or sequence of matplotlib.axes.Axes
+        Axes to style.
+    x_lab, y_lab : str or None, optional
+        Axis labels.  ``None`` leaves the existing label untouched.
+    xs, ys : int, optional
+        Label font sizes.
 
     Returns
     -------
-    tuple
-        A tuple containing the matplotlib figure and axes objects.
+    None
     """
-    if slices is None:
-        slices = np.arange(len(fes_arrays))
-
-    # If there are more than max_times, select only the last max_times
-    if len(slices) > max_slices:
-        fes_arrays = fes_arrays[-max_slices:]
-        slices = slices[-max_slices:]
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-
-    for i, xy in enumerate(fes_arrays):
-        if labels is not None:
-            label = labels[i]
-        else:
-            label = fr"$t={slices[i]}$ ps"
-        ax.plot(xy[0], xy[1], label=label)
-
-    ax.legend()
-    ax_plot(fig, ax, x_lab, y_lab)
-    if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
-    return fig, ax
+    axes = np.atleast_1d(axes).ravel()
+    for i, ax in enumerate(axes):
+        ax_plot(fig, ax, x_lab, y_lab if i == 0 else None, xs=xs, ys=ys)
+    return None
 
 
-def plot_fes_series_1d_compare(fes_arrays_a: list[np.ndarray],
-                               fes_arrays_b: list[np.ndarray],
-                               fig=None,
-                               ax=None,
-                               labels: list[str] = None,
-                               save: bool = True,
-                               show: bool = True,
-                               filename: str = "fes_1d_compare",
-                               x_lab: str = r"CV1",
-                               y_lab: str = r"$F$ (eV)",
-                               fig_size: tuple = (8, 3)):
+def _finalise(fig, filename=None, show=False, dpi=600, formats=("png", "pdf")):
     """
-    Plots and compares two series of 1D free energy surfaces (FES).
-
-    This function generates a plot comparing two 1D FES arrays. It allows customization
-    of the figure, axis, labels, and other plot parameters. The plot can be saved to
-    files and/or displayed.
+    Optionally save and/or display a figure.
 
     Parameters
     ----------
-    fes_arrays_a : list[np.ndarray]
-        The first 1D FES array, containing x and y data for plotting.
-    fes_arrays_b : list[np.ndarray]
-        The second 1D FES array, containing x and y data for plotting.
-    fig : matplotlib.figure.Figure, optional
-        The matplotlib figure object to use for the plot. If None, a new figure is created.
-    ax : matplotlib.axes.Axes, optional
-        The matplotlib axes object to use for the plot. If None, new axes are created.
-    labels : list[str], optional
-        A list of labels for the two FES curves. If None, default labels ["MD", "PIMD"] are used.
-    save : bool, optional
-        Whether to save the plot as a file (default is True).
+    fig : matplotlib.figure.Figure
+        Figure to save.  Saving goes through the figure itself rather than
+        ``pyplot``, so the correct figure is written when several are open.
+    filename : str or None, optional
+        Output path.  ``None`` (default) writes nothing.  A name carrying an
+        extension is written in that format only; a bare stem is written once
+        per entry in *formats*.
     show : bool, optional
-        Whether to display the plot (default is True).
-    filename : str, optional
-        The base filename for saving the plot (default is "fes_1d_compare").
-    x_lab : str, optional
-        The label for the x-axis (default is "CV1").
-    y_lab : str, optional
-        The label for the y-axis (default is "$F$ (eV)").
-    fig_size : tuple, optional
-        The size of the figure in inches (default is (8, 3)).
+        Whether to call ``plt.show()`` afterwards (default is False).
+    dpi : int, optional
+        Resolution used for raster formats (default is 600).
+    formats : sequence of str, optional
+        Extensions used when *filename* has none (default ``("png", "pdf")``).
 
     Returns
     -------
-    tuple
-        A tuple containing the matplotlib figure and axes objects.
+    None
     """
-    if labels is None:
-        labels = ["MD", "PIMD"]
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-
-    ax.plot(*fes_arrays_a, '-', label=labels[0], lw=2)
-    ax.plot(*fes_arrays_b, '--', label=labels[1], lw=2)
-
-    ax.legend(loc="best")
-    ax_plot(fig, ax, x_lab, y_lab)
-    if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
+    if filename:
+        stem, ext = os.path.splitext(str(filename))
+        extensions = [ext.lstrip(".")] if ext else list(formats)
+        for extension in extensions:
+            fig.savefig(f"{stem}.{extension}", dpi=dpi)
     if show:
         plt.show()
-    return fig, ax
+    return None
 
 
-def plot_fes_contourf_series(fes_arrays: list[np.ndarray],
-                             fig=None,
-                             ax=None,
-                             times: list[float] = None,
-                             max_times=5,
-                             save=True,
-                             show=True,
-                             filename="fes_contourf",
-                             x_lab="CV1",
-                             y_lab="CV2",
-                             fig_size=(8, 3)):
+# ---------------------------------------------------------------------------
+# Energy units
+# ---------------------------------------------------------------------------
+def _normalise_unit(unit):
     """
-    Plots a series of 2D free energy surfaces (FES) as contour plots over time.
-
-    This function generates a series of contour plots for multiple 2D FES arrays.
-    It allows customization of the figure, axis, labels, and other plot parameters.
-    The plot can be saved to files and/or displayed.
+    Normalise an energy-unit name and validate it.
 
     Parameters
     ----------
-    fes_arrays : list[np.ndarray]
-        A list of 2D FES arrays, where each array contains x, y, and z data for plotting.
-    fig : matplotlib.figure.Figure, optional
-        The matplotlib figure object to use for the plot. If None, a new figure is created.
-    ax : matplotlib.axes.Axes, optional
-        The matplotlib axes object to use for the plot. If None, new axes are created.
-    times : list[float], optional
-        A list of time points corresponding to each FES array. If None, indices are used.
-    max_times : int, optional
-        The maximum number of time points to plot (default is 5).
-    save : bool, optional
-        Whether to save the plot as a file (default is True).
-    show : bool, optional
-        Whether to display the plot (default is True).
-    filename : str, optional
-        The base filename for saving the plot (default is "fes_contourf").
-    x_lab : str, optional
-        The label for the x-axis (default is "CV1").
-    y_lab : str, optional
-        The label for the y-axis (default is "CV2").
-    fig_size : tuple, optional
-        The size of the figure in inches (default is (8, 3)).
+    unit : str or None
+        Unit name, matched case- and whitespace-insensitively against
+        :data:`ENERGY_UNITS`.
 
     Returns
     -------
-    tuple
-        A tuple containing the matplotlib figure and axes objects.
+    str or None
+        The normalised key, or None if *unit* is None.
+
+    Raises
+    ------
+    KeyError
+        If the unit is not known.
     """
-    if times is None:
-        times = np.arange(len(fes_arrays))
-
-    # If there are more than max_times, select only the last max_times
-    if len(times) > max_times:
-        fes_arrays = fes_arrays[-max_times:]
-        times = times[-max_times:]
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(
-            nrows=1,
-            ncols=len(fes_arrays),
-            figsize=fig_size,
-            sharex=True,
-            sharey=True,
-            constrained_layout=True
-        )
-
-    contours = []
-    for i, xyz in enumerate(fes_arrays):
-        cf = ax[i].contourf(*xyz)
-        contours.append(cf)
-        ax[i].set_xlabel(x_lab)
-        ax[i].set_title(fr"$t={times[i]}$ ps")
-
-    ax[0].set_ylabel(y_lab)
-    fig.colorbar(contours[-1], ax=ax, orientation="vertical", label=r"$F$ (eV)")
-    if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
-    return fig, ax
+    if unit is None:
+        return None
+    key = str(unit).strip().lower().replace(" ", "")
+    if key not in ENERGY_UNITS:
+        raise KeyError(f"Unknown energy unit {unit!r}. Known units: {sorted(ENERGY_UNITS)}")
+    return key
 
 
-def plot_fes_contourf_compare(fes_a,
-                              fes_b,
-                              fig=None,
-                              ax=None,
-                              labels=None,
-                              save=True,
-                              show=True,
-                              filename="fes_contourf_compare",
-                              x_lab="CV1",
-                              y_lab="CV2",
-                              fig_size=(8, 3)):
+def unit_label(unit):
     """
-    Plots and compares two 2D free energy surfaces (FES) as contour plots.
-
-    This function generates side-by-side contour plots for two 2D FES arrays.
-    It allows customization of the figure, axis, labels, and other plot parameters.
-    The plot can be saved to files and/or displayed.
+    Return the axis label for an energy unit.
 
     Parameters
     ----------
-    fes_a : np.ndarray
-        The first 2D FES array, containing x, y, and z data for plotting.
-    fes_b : np.ndarray
-        The second 2D FES array, containing x, y, and z data for plotting.
-    fig : matplotlib.figure.Figure, optional
-        The matplotlib figure object to use for the plot. If None, a new figure is created.
-    ax : np.ndarray of matplotlib.axes.Axes, optional
-        The matplotlib axes objects to use for the plot. If None, new axes are created.
-    labels : list[str], optional
-        A list of labels for the two FES plots. If None, default labels ["MD", "PIMD"] are used.
-    save : bool, optional
-        Whether to save the plot as a file (default is True).
-    show : bool, optional
-        Whether to display the plot (default is True).
-    filename : str, optional
-        The base filename for saving the plot (default is "fes_contourf_compare").
-    x_lab : str, optional
-        The label for the x-axis (default is "CV1").
-    y_lab : str, optional
-        The label for the y-axis (default is "CV2").
-    fig_size : tuple, optional
-        The size of the figure in inches (default is (8, 3)).
+    unit : str or None
+        Energy unit name.
 
     Returns
     -------
-    tuple
-        A tuple containing the matplotlib figure and axes objects.
+    str
+        A LaTeX-ready label such as ``"$F$ (eV)"``, or ``"$F$"`` when the
+        unit is unknown.
     """
-    fes_arrays = [fes_a, fes_b]
-    if labels is None:
-        labels = ["MD", "PIMD"]
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(
-            nrows=1,
-            ncols=2,
-            figsize=fig_size,
-            sharex=True,
-            sharey=True,
-            constrained_layout=True
-        )
-
-    contours = []
-    for i, xyz in enumerate(fes_arrays):
-        cf = ax[i].contourf(*xyz)
-        contours.append(cf)
-        ax[i].set_xlabel(x_lab)
-        ax[i].set_title(fr"{labels[i]}")
-
-    ax[0].set_ylabel(y_lab)
-    fig.colorbar(contours[-1], ax=ax, orientation="vertical", label=r"$F$ (eV)")
-    if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
-    return fig, ax
+    key = _normalise_unit(unit)
+    if key is None:
+        return r"$F$"
+    return rf"$F$ ({_UNIT_LABELS[key]})"
 
 
-def plot_fes_contourf(fes,
-                      fig=None,
-                      ax=None,
-                      save=True,
-                      show=True,
-                      filename="fes_contourf",
-                      x_lab="CV1",
-                      y_lab="CV2",
-                      fig_size=(8, 3),
-                      ):
+def convert_energy(values, source=DEFAULT_ENERGY_UNIT, target=None):
     """
-    Plots a 2D free energy surface (FES) as a contour plot.
-
-    This function generates a contour plot for a given 2D FES array. It allows
-    customization of the figure, axis, labels, and other plot parameters. The
-    plot can be saved to files and/or displayed.
+    Convert energies between the units listed in :data:`ENERGY_UNITS`.
 
     Parameters
     ----------
-    fes : np.ndarray
-        A 2D FES array containing x, y, and z data for plotting.
-    fig : matplotlib.figure.Figure, optional
-        The matplotlib figure object to use for the plot. If None, a new figure is created.
-    ax : matplotlib.axes.Axes, optional
-        The matplotlib axes object to use for the plot. If None, new axes are created.
-    save : bool, optional
-        Whether to save the plot as a file (default is True).
-    show : bool, optional
-        Whether to display the plot (default is True).
-    filename : str, optional
-        The base filename for saving the plot (default is "fes_contourf").
-    x_lab : str, optional
-        The label for the x-axis (default is "CV1").
-    y_lab : str, optional
-        The label for the y-axis (default is "CV2").
-    fig_size : tuple, optional
-        The size of the figure in inches (default is (8, 3)).
+    values : array_like
+        Energies expressed in *source* units.
+    source : str, optional
+        Unit of *values* (default is ``"kJ/mol"``).
+    target : str or None, optional
+        Unit to convert to.  ``None`` (default) returns *values* unchanged.
 
     Returns
     -------
-    tuple
-        A tuple containing the matplotlib figure and axes objects.
+    numpy.ndarray
+        The converted energies.
     """
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-
-    cf = ax.contourf(*fes)
-    ax.set_xlabel(x_lab)
-    ax.set_ylabel(y_lab)
-    fig.colorbar(cf, ax=ax, orientation="vertical", label=r"$F$ (eV)")
-    if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
-    return fig, ax
+    values = np.asarray(values, dtype=float)
+    source_key = _normalise_unit(source)
+    target_key = _normalise_unit(target)
+    if target_key is None or target_key == source_key:
+        return values
+    return values * (ENERGY_UNITS[source_key] / ENERGY_UNITS[target_key])
 
 
-def plot_fes_contour_compare(fes_a,
-                             fes_b,
-                             fig=None,
-                             ax=None,
-                             labels=None,
-                             save=True,
-                             show=True,
-                             filename="fes_contour_compare",
-                             x_lab="CV1",
-                             y_lab="CV2",
-                             fig_size=(8, 3),
-                             ):
-    """
-    Plots and compares two 2D free energy surfaces (FES) as contour plots.
-
-    This function generates a contour plot for two 2D FES arrays, overlaying them
-    with different colors. It allows customization of the figure, axis, labels,
-    and other plot parameters. The plot can be saved to files and/or displayed.
-
-    Parameters
-    ----------
-    fes_a : np.ndarray
-        The first 2D FES array, containing x, y, and z data for plotting.
-    fes_b : np.ndarray
-        The second 2D FES array, containing x, y, and z data for plotting.
-    fig : matplotlib.figure.Figure, optional
-        The matplotlib figure object to use for the plot. If None, a new figure is created.
-    ax : matplotlib.axes.Axes, optional
-        The matplotlib axes object to use for the plot. If None, new axes are created.
-    labels : list[str], optional
-        A list of labels for the two FES plots. If None, default labels ["MD", "PIMD"] are used.
-    save : bool, optional
-        Whether to save the plot as a file (default is True).
-    show : bool, optional
-        Whether to display the plot (default is True).
-    filename : str, optional
-        The base filename for saving the plot (default is "fes_contour_compare").
-    x_lab : str, optional
-        The label for the x-axis (default is "CV1").
-    y_lab : str, optional
-        The label for the y-axis (default is "CV2").
-    fig_size : tuple, optional
-        The size of the figure in inches (default is (8, 3)).
-
-    Returns
-    -------
-    tuple
-        A tuple containing the matplotlib figure and axes objects.
-    """
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-    if labels is None:
-        labels = ["MD", "PIMD"]
-
-    levels = np.linspace(0, 0.5, 6)
-    ax.contour(*fes_a, colors="b", levels=levels)
-    ax.contour(*fes_b, colors="r", levels=levels)
-
-    ax.set_xlabel(x_lab)
-    ax.set_ylabel(y_lab)
-
-    ax.legend(
-        handles=[
-            plt.Line2D([0], [0], color="b", label=labels[0]),
-            plt.Line2D([0], [0], color="r", label=labels[1]),
-        ]
-    )
-    if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
-    return fig, ax
-
-
-def plot_fes_sep(fes_a,
-                 fes_b,
-                 fig=None,
-                 ax=None,
-                 save=True,
-                 show=True,
-                 filename="energy_sep",
-                 fig_size=(8, 3)):
-    """
-    Plots and compares two 2D free energy surfaces (FES) at specific slices.
-
-    This function generates a plot comparing two FES datasets at specific slices
-    along the third dimension. It allows customization of the figure, axis, and
-    other plot parameters. The plot can be saved to files and/or displayed.
-
-    Parameters
-    ----------
-    fes_a : np.ndarray
-        The first 3D FES array, where the third dimension represents slices.
-    fes_b : np.ndarray
-        The second 3D FES array, where the third dimension represents slices.
-    fig : matplotlib.figure.Figure, optional
-        The matplotlib figure object to use for the plot. If None, a new figure is created.
-    ax : matplotlib.axes.Axes, optional
-        The matplotlib axes object to use for the plot. If None, new axes are created.
-    save : bool, optional
-        Whether to save the plot as a file (default is True).
-    show : bool, optional
-        Whether to display the plot (default is True).
-    filename : str, optional
-        The base filename for saving the plot (default is "energy_sep").
-    fig_size : tuple, optional
-        The size of the figure in inches (default is (8, 3)).
-
-    Returns
-    -------
-    tuple
-        A tuple containing the matplotlib figure and axes objects.
-    """
-    if fig is None or ax is None:
-        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
-
-    ax.plot(
-        fes_a[1, :, 50],
-        fes_a[2, :, 50],
-        "b",
-        label=r"MD, $d_\mathrm{OO}=2.6 $Å"
-    )
-    ax.plot(
-        fes_b[1, :, 50],
-        fes_b[2, :, 50],
-        "r",
-        label=r"PIMD, $d_\mathrm{OO}=2.6 $Å",
-    )
-    ax.plot(
-        fes_a[1, :, 60],
-        fes_a[2, :, 60],
-        "b--",
-        label=r"MD, $d_\mathrm{OO}=2.7 $Å",
-    )
-    ax.plot(
-        fes_b[1, :, 60],
-        fes_b[2, :, 60],
-        "r--",
-        label=r"PIMD, $d_\mathrm{OO}=2.7 $Å",
-    )
-    ax.set_ylim(0.08, 0.6)
-    ax.legend(ncols=2, loc="upper right", fontsize=9)
-    ax.set_ylabel(r"$F$ (eV)")
-    ax.set_xlabel(r"$\Delta C_\mathrm{H}$")
-    if save:
-        plt.savefig(f"{filename}.png", dpi=600)
-        plt.savefig(f"{filename}.pdf")
-    if show:
-        plt.show()
-    return fig, ax
-
-
+# ---------------------------------------------------------------------------
+# PLUMED file reading
+# ---------------------------------------------------------------------------
 @dataclass
-class PlumedFES:
+class PlumedData:
     """
-    Container for a PLUMED free-energy surface loaded from a file.
+    Container for the contents of a PLUMED-style data file.
 
     Attributes
     ----------
     data : numpy.ndarray
-        Numeric columns after dropping derivative (``der_*``) fields, if
-        possible. Shape is ``(n_rows, n_fields)``.
+        Numeric columns with shape ``(n_rows, n_fields)``.
     fields : list of str
-        Column names corresponding to *data* (after dropping ``der_*``
-        columns). May be empty if no ``#! FIELDS`` header was found.
+        Column names taken from the ``#! FIELDS`` header.  Empty when the
+        file carries no header.
+    metadata : dict
+        Key/value pairs collected from ``#! SET key value`` lines.
     """
 
-    data: np.ndarray  # numeric columns (after dropping der_* if possible)
-    fields: List[str]  # matching names (after dropping der_*), may be []
+    data: np.ndarray
+    fields: list[str] = field(default_factory=list)
+    metadata: dict[str, str] = field(default_factory=dict)
 
-
-def load_plumed_fes_drop_der(path: str) -> PlumedFES:
-    """
-    Load a PLUMED FES file, dropping derivative columns.
-
-    Reads a PLUMED-formatted data file, extracts the ``#! FIELDS`` header
-    (if present), and removes any columns whose names start with ``der_``.
-    The remaining numeric data and field names are returned as a
-    :class:`PlumedFES` object.
-
-    Parameters
-    ----------
-    path : str
-        Path to the PLUMED FES data file.
-
-    Returns
-    -------
-    PlumedFES
-        A dataclass containing the numeric data array and the corresponding
-        field names.
-
-    Raises
-    ------
-    ValueError
-        If no numeric data lines are found in the file.
-    """
-    fields_raw: List[str] = []
-    numeric_lines: List[str] = []
-
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            s = line.strip()
-            if not s:
-                continue
-
-            if s.startswith("#!"):
-                parts = s.split()
-                if len(parts) >= 3 and parts[1] == "FIELDS":
-                    fields_raw = parts[2:]
-                continue
-
-            if s.startswith("#") or s.startswith("@"):
-                continue
-
-            numeric_lines.append(s)
-
-    if not numeric_lines:
-        raise ValueError(f"No numeric data found in {path}")
-
-    data = np.loadtxt(numeric_lines)
-    if data.ndim == 1:
-        data = data[None, :]
-
-    # Drop der_* only if fields align with data columns
-    if fields_raw and len(fields_raw) == data.shape[1]:
-        keep_idx = [i for i, name in enumerate(fields_raw) if not name.startswith("der_")]
-        data = data[:, keep_idx]
-        fields = [fields_raw[i] for i in keep_idx]
-        return PlumedFES(data=data, fields=fields)
-
-    return PlumedFES(data=data, fields=[])
-
-
-def plot_plumed_fes(
-        path: str,
-        ax: Optional[plt.Axes] = None,
-        shift_min_to_zero: bool = True,
-        levels: int = 30,
-) -> Tuple[plt.Figure, plt.Axes]:
-    """
-    Plot a PLUMED free-energy surface from a data file.
-
-    Automatically determines whether the FES is 1-D or 2-D from the number
-    of data columns. A 1-D FES is drawn as a line plot; a 2-D FES is drawn
-    as a filled contour plot with a colour bar.
-
-    Parameters
-    ----------
-    path : str
-        Path to the PLUMED FES data file.
-    ax : matplotlib.axes.Axes or None, optional
-        Axes on which to draw the plot. If None, a new figure and axes are
-        created. Default is None.
-    shift_min_to_zero : bool, optional
-        If True, shift the free-energy values so that the minimum is zero.
-        Default is True.
-    levels : int, optional
-        Number of contour levels for 2-D plots. Default is 30.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-        The matplotlib figure.
-    ax : matplotlib.axes.Axes
-        The matplotlib axes.
-
-    Raises
-    ------
-    ValueError
-        If the data has fewer than 2 columns.
-    """
-    fes = load_plumed_fes_drop_der(path)
-    data, fields = fes.data, fes.fields
-
-    if ax is None:
-        fig, ax = plt.subplots()
-    else:
-        fig = ax.figure
-
-    ncol = data.shape[1]
-    if ncol < 2:
-        raise ValueError(f"Need at least 2 columns to plot, got {ncol}")
-
-    # Labels: use FIELDS if available, else defaults
-    def lab(i: int, default: str) -> str:
+    def index(self, name):
         """
-        Return the field label at index *i*, or *default* if unavailable.
+        Return the column index of a field.
 
         Parameters
         ----------
-        i : int
+        name : str or int
+            Field name, or an integer index which is returned unchanged
+            after bounds checking.
+
+        Returns
+        -------
+        int
+            Index of the requested column.
+
+        Raises
+        ------
+        KeyError
+            If the named field is not present.
+        IndexError
+            If an integer index is out of range.
+        """
+        if isinstance(name, (int, np.integer)):
+            index = int(name)
+            if not -self.data.shape[1] <= index < self.data.shape[1]:
+                raise IndexError(f"Column {index} out of range for {self.data.shape[1]} columns")
+            return index % self.data.shape[1]
+        if name not in self.fields:
+            raise KeyError(f"Field {name!r} not found. Available fields: {self.fields}")
+        return self.fields.index(name)
+
+    def column(self, name):
+        """
+        Return a single column by field name or index.
+
+        Parameters
+        ----------
+        name : str or int
+            Field name or column index.
+
+        Returns
+        -------
+        numpy.ndarray
+            The requested column.
+        """
+        return self.data[:, self.index(name)]
+
+    def label(self, index, default=""):
+        """
+        Return the field name of a column, falling back to *default*.
+
+        Parameters
+        ----------
+        index : int
             Column index.
-        default : str
-            Fallback label.
+        default : str, optional
+            Label used when the file carried no ``#! FIELDS`` header.
 
         Returns
         -------
         str
             The field name or *default*.
         """
-        return fields[i] if fields and i < len(fields) else default
+        return self.fields[index] if index < len(self.fields) else default
 
-    if ncol == 2:
-        x = data[:, 0]
-        z = data[:, 1].copy()
-        if shift_min_to_zero and np.isfinite(z).any():
-            z -= np.nanmin(z)
-        order = np.argsort(x)
-        ax.plot(x[order], z[order])
-        ax.set_xlabel(lab(0, "CV"))
-        ax.set_ylabel(lab(1, "FES"))
+    def to_dataframe(self):
+        """
+        Return the data as a :class:`pandas.DataFrame`.
 
-    else:
-        # Use first 3 columns for 2D plot even if more columns exist
-        x = data[:, 0]
-        y = data[:, 1]
-        z = data[:, 2].copy()
-
-        if shift_min_to_zero and np.isfinite(z).any():
-            z -= np.nanmin(z)
-
-        xu = np.unique(x)
-        yu = np.unique(y)
-
-        if xu.size * yu.size == z.size:
-            # regular grid: sort then reshape
-            idx = np.lexsort((x, y))
-            xs, ys, zs = x[idx], y[idx], z[idx]
-            X = xs.reshape(yu.size, xu.size)
-            Y = ys.reshape(yu.size, xu.size)
-            Z = zs.reshape(yu.size, xu.size)
-            m = ax.contourf(X, Y, Z, levels=levels)
-        else:
-            # irregular grid
-            m = ax.tricontourf(x, y, z, levels=levels)
-
-        ax.set_xlabel(lab(0, "CV1"))
-        ax.set_ylabel(lab(1, "CV2"))
-        cbar = fig.colorbar(m, ax=ax)
-        cbar.set_label(lab(2, "FES"))
-
-    return fig, ax
+        Returns
+        -------
+        pandas.DataFrame
+            Columns are named after the fields, or ``col0``, ``col1``, ...
+            when no header was present.
+        """
+        names = list(self.fields) or [f"col{i}" for i in range(self.data.shape[1])]
+        return pd.DataFrame(self.data, columns=names)
 
 
-def plot_plumed_colvar(filename, x_axis='time', figsize=(10, 8)):
+def read_plumed_file(path, drop_der=True):
     """
-    Plot all collective variables from a PLUMED COLVAR file.
+    Read a PLUMED-style data file.
 
-    Reads a PLUMED COLVAR file, extracts the ``#! FIELDS`` header to
-    determine column names, and creates a vertically stacked subplot for
-    each variable (excluding the x-axis column).
+    Handles the files produced by ``plumed sum_hills``, ``PRINT``/``COLVAR``
+    output and the bundled OPES ``FES_from_*`` scripts: the ``#! FIELDS``
+    header gives the column names, ``#! SET`` lines are collected as
+    metadata, and blank block separators (used between rows of a 2-D grid)
+    are ignored.
 
     Parameters
     ----------
-    filename : str
-        Path to the PLUMED COLVAR file.
-    x_axis : str, optional
-        Column name to use as the x-axis. If the column is not found, the
-        row index is used instead. Default is ``'time'``.
-    figsize : tuple of float, optional
-        Figure size in inches ``(width, height)``. Default is ``(10, 8)``.
+    path : str
+        Path to the PLUMED data file.
+    drop_der : bool, optional
+        Whether to discard derivative columns whose field name starts with
+        ``der_`` (default is True).  Ignored when the header and the data do
+        not agree on the number of columns.
 
     Returns
     -------
-    data : pandas.DataFrame or None
-        The loaded COLVAR data as a DataFrame, or None if reading failed.
-    fig : matplotlib.figure.Figure or None
-        The matplotlib figure, or None if no variables were found or
-        reading failed.
+    PlumedData
+        The parsed file contents.
 
     Raises
     ------
     ValueError
-        If no ``#! FIELDS`` header is found in the file.
+        If the file contains no numeric rows.
     """
-    col_names = None
-    with open(filename, 'r') as f:
-        for line in f:
-            if line.startswith("#! FIELDS"):
-                # Split the line and remove "#!" and "FIELDS" to get column names
-                col_names = line.split()[2:]
-                break
+    fields: list[str] = []
+    metadata: dict[str, str] = {}
+    numeric_lines: list[str] = []
 
-    if col_names is None:
-        raise ValueError(f"Could not find '#! FIELDS' header in {filename}. Ensure it is a valid PLUMED file.")
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
 
-    try:
-        data = pd.read_csv(filename, sep=r'\s+', comment='#', names=col_names, engine='python')
-    except Exception as e:
-        print(f"Error reading file: {e}")
-        return None, None
+            if stripped.startswith("#!"):
+                parts = stripped.split()
+                if len(parts) >= 3 and parts[1] == "FIELDS":
+                    fields = parts[2:]
+                elif len(parts) >= 4 and parts[1] == "SET":
+                    metadata[parts[2]] = " ".join(parts[3:])
+                continue
 
-    # Check if x_axis exists
-    if x_axis not in data.columns:
-        print(f"Warning: '{x_axis}' column not found. Using index as X-axis.")
-        x_data = data.index
-        x_label = "Step (Index)"
+            if stripped.startswith(("#", "@")):
+                continue
+
+            numeric_lines.append(stripped)
+
+    if not numeric_lines:
+        raise ValueError(f"No numeric data found in {path}")
+
+    data = np.loadtxt(numeric_lines, ndmin=2)
+
+    # Only trust the header when it lines up with the data.
+    if fields and len(fields) == data.shape[1]:
+        if drop_der:
+            keep = [i for i, name in enumerate(fields) if not name.startswith("der_")]
+            data = data[:, keep]
+            fields = [fields[i] for i in keep]
     else:
+        fields = []
+
+    return PlumedData(data=data, fields=fields, metadata=metadata)
+
+
+# ---------------------------------------------------------------------------
+# Free-energy surface container
+# ---------------------------------------------------------------------------
+@dataclass
+class FES:
+    """
+    A free-energy surface in a form the plotting functions understand.
+
+    Attributes
+    ----------
+    cvs : list of numpy.ndarray
+        One entry per collective variable.  For a 1-D surface this is a
+        single 1-D array; for a 2-D surface on a regular grid the two arrays
+        have the same shape as *energy*; for scattered 2-D data they are
+        flat coordinate arrays.
+    energy : numpy.ndarray
+        Free energies, shaped like the entries of *cvs*.
+    cv_labels : list of str
+        Axis label for each collective variable.
+    energy_unit : str or None
+        Unit *energy* is expressed in, or None when unknown.
+    energy_label : str or None
+        Explicit colour-bar/y-axis label.  Derived from *energy_unit* when
+        left as None.
+    regular : bool
+        True when the data lies on a regular grid and can be drawn with
+        ``contourf``; False when it must be triangulated.
+    """
+
+    cvs: list[np.ndarray]
+    energy: np.ndarray
+    cv_labels: list[str] = field(default_factory=list)
+    energy_unit: str | None = None
+    energy_label: str | None = None
+    regular: bool = True
+
+    def __post_init__(self):
+        self.cvs = [np.asarray(cv, dtype=float) for cv in self.cvs]
+        self.energy = np.asarray(self.energy, dtype=float)
+        if not self.cv_labels:
+            self.cv_labels = [f"CV{i + 1}" for i in range(len(self.cvs))]
+
+    @property
+    def ndim(self):
+        """int: Number of collective variables (1 or 2)."""
+        return len(self.cvs)
+
+    @property
+    def label(self):
+        """str: Label to use for the free-energy axis or colour bar."""
+        return self.energy_label or unit_label(self.energy_unit)
+
+    def finite_range(self):
+        """
+        Return the range spanned by the finite energies.
+
+        Returns
+        -------
+        tuple of float
+            ``(minimum, maximum)``, or ``(nan, nan)`` when nothing is finite.
+        """
+        finite = np.isfinite(self.energy)
+        if not finite.any():
+            return float("nan"), float("nan")
+        return float(np.min(self.energy[finite])), float(np.max(self.energy[finite]))
+
+    def slice_at(self, value, axis=0):
+        """
+        Take a 1-D cut through a 2-D surface at a fixed value of one CV.
+
+        Parameters
+        ----------
+        value : float
+            Value of the collective variable held fixed.  The nearest grid
+            point is used.
+        axis : int, optional
+            Index of the collective variable held fixed (default is 0).
+
+        Returns
+        -------
+        tuple
+            ``(x, energy, held_value)`` where *x* runs along the free
+            collective variable and *held_value* is the grid value actually
+            used.
+
+        Raises
+        ------
+        ValueError
+            If the surface is not a 2-D surface on a regular grid.
+        """
+        if self.ndim != 2 or not self.regular:
+            raise ValueError("Slicing requires a 2-D free-energy surface on a regular grid")
+
+        # Grids are stored as (n_cv2, n_cv1); axis 0 varies along the columns.
+        axis_values = self.cvs[axis][0, :] if axis == 0 else self.cvs[axis][:, 0]
+        index = int(np.argmin(np.abs(axis_values - value)))
+        other = 1 - axis
+        if axis == 0:
+            return self.cvs[other][:, index], self.energy[:, index], float(axis_values[index])
+        return self.cvs[other][index, :], self.energy[index, :], float(axis_values[index])
+
+
+def _grid_from_columns(x, y, z):
+    """
+    Reshape scattered column data onto a regular grid when possible.
+
+    Parameters
+    ----------
+    x, y, z : numpy.ndarray
+        Flat coordinate and value arrays of equal length.
+
+    Returns
+    -------
+    tuple
+        ``(X, Y, Z, regular)``.  When the points form a complete rectangular
+        grid the arrays are 2-D and *regular* is True, otherwise the inputs
+        are returned unchanged with *regular* set to False.
+    """
+    n_x = np.unique(x).size
+    n_y = np.unique(y).size
+    if n_x * n_y != z.size:
+        return x, y, z, False
+
+    order = np.lexsort((x, y))
+    return (x[order].reshape(n_y, n_x),
+            y[order].reshape(n_y, n_x),
+            z[order].reshape(n_y, n_x),
+            True)
+
+
+def _fes_from_plumed(path, columns=None, cv_labels=None, energy_label=None):
+    """
+    Build an :class:`FES` from a PLUMED FES file.
+
+    Parameters
+    ----------
+    path : str
+        Path to the file.
+    columns : sequence of (str or int) or None, optional
+        Columns to use, ordered ``(cv1, energy)`` or ``(cv1, cv2, energy)``.
+        By default the leading columns are used, which matches the layout
+        written by ``plumed sum_hills`` and the OPES scripts once derivative
+        columns have been dropped.
+    cv_labels : sequence of str or None, optional
+        Override the collective-variable labels taken from the header.
+    energy_label : str or None, optional
+        Override the free-energy label.
+
+    Returns
+    -------
+    FES
+        The parsed surface, in the units of the file.
+
+    Raises
+    ------
+    ValueError
+        If the file has fewer than two usable columns.
+    """
+    plumed = read_plumed_file(path)
+    n_columns = plumed.data.shape[1]
+    if n_columns < 2:
+        raise ValueError(f"Need at least 2 columns to plot, got {n_columns} in {path}")
+
+    if columns is None:
+        # 2 columns -> 1-D FES, anything else -> use the first three columns.
+        indices = list(range(min(n_columns, 3)))
+    else:
+        indices = [plumed.index(column) for column in columns]
+        if len(indices) not in (2, 3):
+            raise ValueError(f"columns must select 2 or 3 fields, got {len(indices)}")
+
+    defaults = ["CV1", "CV2", r"$F$"] if len(indices) == 3 else ["CV1", r"$F$"]
+    labels = [plumed.label(index, default) for index, default in zip(indices, defaults)]
+    energies = plumed.data[:, indices[-1]]
+
+    if len(indices) == 2:
+        x = plumed.data[:, indices[0]]
+        order = np.argsort(x)
+        return FES(cvs=[x[order]],
+                   energy=energies[order],
+                   cv_labels=list(cv_labels) if cv_labels else labels[:1],
+                   energy_label=energy_label)
+
+    x, y, z, regular = _grid_from_columns(plumed.data[:, indices[0]],
+                                          plumed.data[:, indices[1]],
+                                          energies)
+    return FES(cvs=[x, y],
+               energy=z,
+               cv_labels=list(cv_labels) if cv_labels else labels[:2],
+               energy_label=energy_label,
+               regular=regular)
+
+
+def _fes_from_array(source, cv_labels=None, energy_label=None):
+    """
+    Build an :class:`FES` from in-memory arrays.
+
+    The following layouts are recognised:
+
+    ==========================  ==============================================
+    Input                       Interpretation
+    ==========================  ==============================================
+    ``(2, N)``                  1-D surface, rows ``[cv, F]``
+    ``(N, 2)``                  1-D surface, columns ``[cv, F]``
+    ``(3, ny, nx)``             2-D surface, stacked ``[X, Y, F]``
+    ``(X, Y, Z)`` sequence      2-D surface on a grid
+    ``(x, y, z)`` sequence      2-D surface, scattered points
+    ``(N, 3)``                  2-D surface, columns ``[cv1, cv2, F]``
+    ``(3, N)``                  2-D surface, rows ``[cv1, cv2, F]``
+    ==========================  ==============================================
+
+    Square inputs such as ``(2, 2)`` are ambiguous and are read row-wise,
+    matching the ``[cv, F]`` convention used elsewhere in the package.
+
+    Parameters
+    ----------
+    source : array_like or sequence of array_like
+        The free-energy data.
+    cv_labels : sequence of str or None, optional
+        Labels for the collective variables.
+    energy_label : str or None, optional
+        Label for the free energy.
+
+    Returns
+    -------
+    FES
+        The interpreted surface.
+
+    Raises
+    ------
+    ValueError
+        If the layout cannot be interpreted.
+    """
+    # A sequence of separate arrays, e.g. (X, Y, Z) of matching shape.
+    if isinstance(source, (list, tuple)) and len(source) in (2, 3):
+        parts = [np.asarray(part, dtype=float) for part in source]
+        if all(part.ndim == parts[0].ndim and part.shape == parts[0].shape for part in parts):
+            source = np.stack(parts)
+        else:
+            raise ValueError("Sequence FES input requires arrays of identical shape")
+
+    array = np.asarray(source, dtype=float)
+
+    if array.ndim == 3:
+        if array.shape[0] != 3:
+            raise ValueError(f"3-D FES input must be stacked as (3, ny, nx), got {array.shape}")
+        return FES(cvs=[array[0], array[1]],
+                   energy=array[2],
+                   cv_labels=list(cv_labels) if cv_labels else [],
+                   energy_label=energy_label)
+
+    if array.ndim != 2:
+        raise ValueError(f"Cannot interpret FES input with shape {array.shape}")
+
+    # Orient so that variables run along the rows.
+    if array.shape[0] not in (2, 3):
+        if array.shape[1] not in (2, 3):
+            raise ValueError(f"Cannot interpret FES input with shape {array.shape}")
+        array = array.T
+
+    if array.shape[0] == 2:
+        order = np.argsort(array[0])
+        return FES(cvs=[array[0][order]],
+                   energy=array[1][order],
+                   cv_labels=list(cv_labels) if cv_labels else [],
+                   energy_label=energy_label)
+
+    x, y, z, regular = _grid_from_columns(array[0], array[1], array[2])
+    return FES(cvs=[x, y],
+               energy=z,
+               cv_labels=list(cv_labels) if cv_labels else [],
+               energy_label=energy_label,
+               regular=regular)
+
+
+def as_fes(source,
+           energy_unit=None,
+           source_unit=DEFAULT_ENERGY_UNIT,
+           shift_min_to_zero=True,
+           max_energy=None,
+           columns=None,
+           cv_labels=None,
+           energy_label=None):
+    """
+    Coerce anything FES-shaped into a prepared :class:`FES`.
+
+    This is the single entry point used by every plotting function, so all
+    of them accept file paths, raw arrays and :class:`FES` objects
+    interchangeably.
+
+    Parameters
+    ----------
+    source : str, array_like or FES
+        A PLUMED FES file, an array in one of the layouts documented in
+        :func:`_fes_from_array`, or an already-built surface.
+    energy_unit : str or None, optional
+        Unit to convert the energies to, e.g. ``"eV"``.  ``None`` (default)
+        leaves them untouched.  Surfaces that already carry this unit are
+        not converted twice.
+    source_unit : str, optional
+        Unit the incoming energies are expressed in (default ``"kJ/mol"``,
+        which is what PLUMED writes when driven from OpenMM).
+    shift_min_to_zero : bool, optional
+        Whether to subtract the global minimum so the surface starts at zero
+        (default is True).  The operation is idempotent.
+    max_energy : float or None, optional
+        Energies above this value (in the *output* unit, after shifting) are
+        replaced by NaN so that poorly sampled regions do not dominate the
+        colour scale.  ``None`` (default) keeps everything.
+    columns : sequence of (str or int) or None, optional
+        Which file columns to use, ordered ``(cv1, energy)`` or
+        ``(cv1, cv2, energy)``.  Only meaningful for file sources.
+    cv_labels : sequence of str or None, optional
+        Override the collective-variable labels.
+    energy_label : str or None, optional
+        Override the free-energy label.
+
+    Returns
+    -------
+    FES
+        A new, prepared surface.  The input is never modified in place.
+    """
+    if isinstance(source, FES):
+        fes = FES(cvs=list(source.cvs),
+                  energy=source.energy.copy(),
+                  cv_labels=list(source.cv_labels),
+                  energy_unit=source.energy_unit,
+                  energy_label=source.energy_label,
+                  regular=source.regular)
+        if cv_labels:
+            fes.cv_labels = list(cv_labels)
+        if energy_label:
+            fes.energy_label = energy_label
+    elif isinstance(source, (str, os.PathLike)):
+        fes = _fes_from_plumed(source, columns=columns, cv_labels=cv_labels, energy_label=energy_label)
+    else:
+        fes = _fes_from_array(source, cv_labels=cv_labels, energy_label=energy_label)
+
+    # Non-finite entries (unvisited bins) must not take part in the shift.
+    fes.energy = np.where(np.isfinite(fes.energy), fes.energy, np.nan)
+
+    current_unit = fes.energy_unit or source_unit
+    if energy_unit is not None and current_unit is None:
+        raise ValueError("Cannot convert to energy_unit without knowing source_unit")
+    if energy_unit is not None:
+        fes.energy = convert_energy(fes.energy, source=current_unit, target=energy_unit)
+    fes.energy_unit = energy_unit or current_unit
+
+    if shift_min_to_zero and np.isfinite(fes.energy).any():
+        fes.energy = fes.energy - np.nanmin(fes.energy)
+
+    if max_energy is not None:
+        fes.energy = np.where(fes.energy > max_energy, np.nan, fes.energy)
+
+    return fes
+
+
+def _as_fes_list(sources, **kwargs):
+    """
+    Coerce one source or a collection of sources into a list of surfaces.
+
+    Parameters
+    ----------
+    sources : object
+        A single FES source, or a list/tuple of them.
+    **kwargs
+        Forwarded to :func:`as_fes`.
+
+    Returns
+    -------
+    list of FES
+        The prepared surfaces.
+    """
+    if _is_single_source(sources):
+        sources = [sources]
+    return [as_fes(source, **kwargs) for source in sources]
+
+
+def _looks_like_fes_array(array):
+    """
+    Return True when an array can stand on its own as a free-energy surface.
+
+    Used to tell ``[fes_a, fes_b]`` (a collection) apart from
+    ``(X, Y, Z)`` (one surface), since both are sequences of arrays.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        Candidate array.
+
+    Returns
+    -------
+    bool
+        True if the shape matches one of the layouts accepted by
+        :func:`_fes_from_array`.
+    """
+    shape = np.shape(array)
+    if len(shape) == 3:
+        return shape[0] == 3
+    if len(shape) == 2:
+        return shape[0] in (2, 3) or shape[1] in (2, 3)
+    return False
+
+
+def _is_single_source(source):
+    """
+    Return True when *source* is one FES rather than a collection of them.
+
+    A list or tuple is read as a single surface only when its elements are
+    plain coordinate/value arrays -- ``(x, F)``, ``(x, y, z)`` columns or
+    ``(X, Y, Z)`` grids.  As soon as an element could itself be a complete
+    free-energy surface the sequence is treated as a collection, so
+    ``[fes_a, fes_b]`` behaves as expected.  Stack genuinely ambiguous
+    grids with :func:`numpy.stack` to force the single-surface reading.
+
+    Parameters
+    ----------
+    source : object
+        Candidate FES source.
+
+    Returns
+    -------
+    bool
+        True if *source* should be treated as a single surface.
+    """
+    if isinstance(source, (FES, str, os.PathLike, np.ndarray)):
+        return True
+    if isinstance(source, (list, tuple)):
+        if len(source) not in (2, 3):
+            return False
+        parts = [part for part in source if isinstance(part, np.ndarray)]
+        if len(parts) != len(source):
+            return False
+        if any(part.shape != parts[0].shape for part in parts):
+            return False
+        return not _looks_like_fes_array(parts[0])
+    return True
+
+
+def _resolve_labels(labels, count, template=None):
+    """
+    Build one label per dataset.
+
+    Parameters
+    ----------
+    labels : sequence or None
+        Explicit labels, or values to be formatted with *template*.
+    count : int
+        Number of datasets.
+    template : str or None, optional
+        ``str.format`` template applied to non-string labels, e.g.
+        ``r"$t={:g}$ ps"``.
+
+    Returns
+    -------
+    list
+        A list of *count* labels; entries are None when nothing should be
+        shown in the legend.
+
+    Raises
+    ------
+    ValueError
+        If *labels* is given but has the wrong length.
+    """
+    if labels is None:
+        return [None] * count if count == 1 else [f"FES {i + 1}" for i in range(count)]
+
+    labels = list(labels)
+    if len(labels) != count:
+        raise ValueError(f"Got {len(labels)} labels for {count} datasets")
+
+    resolved = []
+    for label in labels:
+        if label is None or isinstance(label, str):
+            resolved.append(label)
+        elif template is not None:
+            resolved.append(template.format(label))
+        else:
+            resolved.append(f"{label}")
+    return resolved
+
+
+def _shared_levels(fes_list, levels):
+    """
+    Build contour levels spanning every surface in *fes_list*.
+
+    Sharing the levels is what makes a single colour bar meaningful across
+    panels.
+
+    Parameters
+    ----------
+    fes_list : sequence of FES
+        The surfaces to be drawn.
+    levels : int or array_like
+        Number of levels, or explicit level values which are returned
+        unchanged.
+
+    Returns
+    -------
+    numpy.ndarray
+        The contour levels.
+    """
+    if not np.isscalar(levels):
+        return np.asarray(levels, dtype=float)
+
+    lows, highs = zip(*(fes.finite_range() for fes in fes_list))
+    low = np.nanmin(lows)
+    high = np.nanmax(highs)
+    if not np.isfinite(low) or not np.isfinite(high) or high <= low:
+        return int(levels)
+    return np.linspace(low, high, int(levels))
+
+
+def _default_grid_size(n_panels, fig_size):
+    """
+    Pick a figure size that grows with the number of panels.
+
+    Parameters
+    ----------
+    n_panels : int
+        Number of side-by-side panels.
+    fig_size : tuple or None
+        Explicit size, returned unchanged when given.
+
+    Returns
+    -------
+    tuple of float
+        Figure size in inches.
+    """
+    if fig_size is not None:
+        return fig_size
+    return (3.2 * n_panels + 1.8, 3.4)
+
+
+# ---------------------------------------------------------------------------
+# Plotting
+# ---------------------------------------------------------------------------
+def plot_fes_1d(sources,
+                fig=None,
+                ax=None,
+                labels=None,
+                label_template=None,
+                max_datasets=None,
+                energy_unit=None,
+                source_unit=DEFAULT_ENERGY_UNIT,
+                shift_min_to_zero=True,
+                max_energy=None,
+                columns=None,
+                x_lab=None,
+                y_lab=None,
+                filename=None,
+                show=False,
+                fig_size=(8, 3),
+                **plot_kwargs):
+    """
+    Plot one or more 1-D free-energy profiles on a single axes.
+
+    This covers a single profile, a convergence series over time and a
+    method-to-method comparison, since they differ only in their labels.
+
+    Parameters
+    ----------
+    sources : FES source or sequence of FES sources
+        Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on.  A new one is created when either *fig* or *ax*
+        is None.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on.
+    labels : sequence, optional
+        Legend entries, one per dataset.  Non-string values are formatted
+        with *label_template*, which makes ``labels=times`` with
+        ``label_template=r"$t={:g}$ ps"`` a convenient time series.
+    label_template : str, optional
+        ``str.format`` template applied to non-string *labels*.
+    max_datasets : int, optional
+        Keep only the last *max_datasets* surfaces.  ``None`` (default)
+        plots all of them.
+    energy_unit : str, optional
+        Unit to convert energies to, e.g. ``"eV"``.
+    source_unit : str, optional
+        Unit the input energies are in (default ``"kJ/mol"``).
+    shift_min_to_zero : bool, optional
+        Whether to shift each surface so its minimum is zero (default True).
+    max_energy : float, optional
+        Mask energies above this value.
+    columns : sequence, optional
+        Columns to use for file sources, ordered ``(cv, energy)``.
+    x_lab, y_lab : str, optional
+        Axis labels.  Taken from the data when not given.
+    filename : str, optional
+        Output path; ``None`` (default) writes nothing.  A bare stem writes
+        both PNG and PDF.
+    show : bool, optional
+        Whether to display the figure (default is False).
+    fig_size : tuple, optional
+        Figure size in inches (default ``(8, 3)``).
+    **plot_kwargs
+        Extra keyword arguments forwarded to ``Axes.plot``.
+
+    Returns
+    -------
+    tuple
+        The matplotlib figure and axes.
+
+    Raises
+    ------
+    ValueError
+        If any source is not a 1-D surface.
+    """
+    fes_list = _as_fes_list(sources,
+                            energy_unit=energy_unit,
+                            source_unit=source_unit,
+                            shift_min_to_zero=shift_min_to_zero,
+                            max_energy=max_energy,
+                            columns=columns)
+    if any(fes.ndim != 1 for fes in fes_list):
+        raise ValueError("plot_fes_1d expects 1-D free-energy surfaces; use plot_fes_2d instead")
+
+    label_list = _resolve_labels(labels, len(fes_list), template=label_template)
+    if max_datasets is not None and len(fes_list) > max_datasets:
+        fes_list = fes_list[-max_datasets:]
+        label_list = label_list[-max_datasets:]
+
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+
+    for fes, label in zip(fes_list, label_list):
+        ax.plot(fes.cvs[0], fes.energy, label=label, **plot_kwargs)
+
+    if any(label is not None for label in label_list):
+        ax.legend(loc="best")
+
+    reference = fes_list[0]
+    _style_axes(fig, ax,
+                x_lab if x_lab is not None else reference.cv_labels[0],
+                y_lab if y_lab is not None else reference.label)
+    _finalise(fig, filename=filename, show=show)
+    return fig, ax
+
+
+def plot_fes_2d(sources,
+                fig=None,
+                ax=None,
+                labels=None,
+                label_template=None,
+                max_datasets=None,
+                energy_unit=None,
+                source_unit=DEFAULT_ENERGY_UNIT,
+                shift_min_to_zero=True,
+                max_energy=None,
+                columns=None,
+                levels=30,
+                cmap=None,
+                x_lab=None,
+                y_lab=None,
+                colorbar=True,
+                filename=None,
+                show=False,
+                fig_size=None,
+                **contour_kwargs):
+    """
+    Plot one or more 2-D free-energy surfaces as filled contours.
+
+    A single surface gives one panel; several surfaces are drawn side by
+    side with shared axes, shared contour levels and one colour bar, which
+    covers both convergence series and method comparisons.
+
+    Parameters
+    ----------
+    sources : FES source or sequence of FES sources
+        Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on.  A new one is created when either *fig* or *ax*
+        is None.
+    ax : matplotlib.axes.Axes or sequence of Axes, optional
+        Axes to draw on; must provide one per surface.
+    labels : sequence, optional
+        Panel titles, one per dataset.  Non-string values are formatted with
+        *label_template*.
+    label_template : str, optional
+        ``str.format`` template applied to non-string *labels*, e.g.
+        ``r"$t={:g}$ ps"``.
+    max_datasets : int, optional
+        Keep only the last *max_datasets* surfaces.  ``None`` (default)
+        plots all of them.
+    energy_unit : str, optional
+        Unit to convert energies to, e.g. ``"eV"``.
+    source_unit : str, optional
+        Unit the input energies are in (default ``"kJ/mol"``).
+    shift_min_to_zero : bool, optional
+        Whether to shift each surface so its minimum is zero (default True).
+    max_energy : float, optional
+        Mask energies above this value, leaving unsampled regions blank.
+    columns : sequence, optional
+        Columns to use for file sources, ordered ``(cv1, cv2, energy)``.
+    levels : int or array_like, optional
+        Number of contour levels, or explicit level values (default 30).
+        An integer is expanded to levels spanning every panel.
+    cmap : str or matplotlib.colors.Colormap, optional
+        Colour map passed to ``contourf``.
+    x_lab, y_lab : str, optional
+        Axis labels.  Taken from the data when not given.
+    colorbar : bool, optional
+        Whether to draw the shared colour bar (default is True).
+    filename : str, optional
+        Output path; ``None`` (default) writes nothing.
+    show : bool, optional
+        Whether to display the figure (default is False).
+    fig_size : tuple, optional
+        Figure size in inches.  Scales with the number of panels by default.
+    **contour_kwargs
+        Extra keyword arguments forwarded to ``contourf``/``tricontourf``.
+
+    Returns
+    -------
+    tuple
+        The matplotlib figure and the array of axes (always 1-D, even for a
+        single panel).
+
+    Raises
+    ------
+    ValueError
+        If any source is not a 2-D surface, or if the supplied axes do not
+        match the number of surfaces.
+    """
+    fes_list = _as_fes_list(sources,
+                            energy_unit=energy_unit,
+                            source_unit=source_unit,
+                            shift_min_to_zero=shift_min_to_zero,
+                            max_energy=max_energy,
+                            columns=columns)
+    if any(fes.ndim != 2 for fes in fes_list):
+        raise ValueError("plot_fes_2d expects 2-D free-energy surfaces; use plot_fes_1d instead")
+
+    label_list = _resolve_labels(labels, len(fes_list), template=label_template)
+    if max_datasets is not None and len(fes_list) > max_datasets:
+        fes_list = fes_list[-max_datasets:]
+        label_list = label_list[-max_datasets:]
+
+    n_panels = len(fes_list)
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(nrows=1,
+                               ncols=n_panels,
+                               figsize=_default_grid_size(n_panels, fig_size),
+                               sharex=True,
+                               sharey=True,
+                               constrained_layout=True)
+    axes = np.atleast_1d(ax).ravel()
+    if axes.size < n_panels:
+        raise ValueError(f"Got {axes.size} axes for {n_panels} surfaces")
+
+    shared_levels = _shared_levels(fes_list, levels)
+    contours = []
+    for axis, fes, label in zip(axes, fes_list, label_list):
+        if fes.regular:
+            mappable = axis.contourf(fes.cvs[0], fes.cvs[1], fes.energy,
+                                     levels=shared_levels, cmap=cmap, **contour_kwargs)
+        else:
+            finite = np.isfinite(fes.energy)
+            mappable = axis.tricontourf(fes.cvs[0][finite], fes.cvs[1][finite], fes.energy[finite],
+                                        levels=shared_levels, cmap=cmap, **contour_kwargs)
+        contours.append(mappable)
+        if label is not None and n_panels > 1:
+            axis.set_title(label)
+
+    reference = fes_list[0]
+    _style_axes(fig, axes[:n_panels],
+                x_lab if x_lab is not None else reference.cv_labels[0],
+                y_lab if y_lab is not None else reference.cv_labels[1])
+
+    if colorbar:
+        fig.colorbar(contours[-1],
+                     ax=list(axes[:n_panels]),
+                     orientation="vertical",
+                     label=reference.label)
+
+    _finalise(fig, filename=filename, show=show)
+    return fig, axes[:n_panels]
+
+
+def plot_fes_2d_overlay(sources,
+                        fig=None,
+                        ax=None,
+                        labels=None,
+                        label_template=None,
+                        energy_unit=None,
+                        source_unit=DEFAULT_ENERGY_UNIT,
+                        shift_min_to_zero=True,
+                        max_energy=None,
+                        columns=None,
+                        levels=6,
+                        colors=None,
+                        x_lab=None,
+                        y_lab=None,
+                        filename=None,
+                        show=False,
+                        fig_size=(5, 4),
+                        **contour_kwargs):
+    """
+    Overlay the contour lines of several 2-D free-energy surfaces.
+
+    Drawing the surfaces on the same axes in different colours makes small
+    shifts between them, such as the effect of nuclear quantum effects on a
+    barrier, easy to see.
+
+    Parameters
+    ----------
+    sources : sequence of FES sources
+        Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on.
+    labels : sequence, optional
+        Legend entries, one per dataset.
+    label_template : str, optional
+        ``str.format`` template applied to non-string *labels*.
+    energy_unit : str, optional
+        Unit to convert energies to, e.g. ``"eV"``.
+    source_unit : str, optional
+        Unit the input energies are in (default ``"kJ/mol"``).
+    shift_min_to_zero : bool, optional
+        Whether to shift each surface so its minimum is zero (default True).
+    max_energy : float, optional
+        Mask energies above this value.
+    columns : sequence, optional
+        Columns to use for file sources, ordered ``(cv1, cv2, energy)``.
+    levels : int or array_like, optional
+        Number of contour lines, or explicit level values (default 6).  The
+        levels are shared by every surface so the comparison is fair.
+    colors : sequence, optional
+        One colour per surface.  Defaults to the active colour cycle.
+    x_lab, y_lab : str, optional
+        Axis labels.  Taken from the data when not given.
+    filename : str, optional
+        Output path; ``None`` (default) writes nothing.
+    show : bool, optional
+        Whether to display the figure (default is False).
+    fig_size : tuple, optional
+        Figure size in inches (default ``(5, 4)``).
+    **contour_kwargs
+        Extra keyword arguments forwarded to ``contour``/``tricontour``.
+
+    Returns
+    -------
+    tuple
+        The matplotlib figure and axes.
+
+    Raises
+    ------
+    ValueError
+        If any source is not a 2-D surface.
+    """
+    fes_list = _as_fes_list(sources,
+                            energy_unit=energy_unit,
+                            source_unit=source_unit,
+                            shift_min_to_zero=shift_min_to_zero,
+                            max_energy=max_energy,
+                            columns=columns)
+    if any(fes.ndim != 2 for fes in fes_list):
+        raise ValueError("plot_fes_2d_overlay expects 2-D free-energy surfaces")
+
+    label_list = _resolve_labels(labels, len(fes_list), template=label_template)
+    if colors is None:
+        cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1"])
+        colors = [cycle[i % len(cycle)] for i in range(len(fes_list))]
+
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+
+    shared_levels = _shared_levels(fes_list, levels)
+    for fes, color in zip(fes_list, colors):
+        if fes.regular:
+            ax.contour(fes.cvs[0], fes.cvs[1], fes.energy,
+                       levels=shared_levels, colors=color, **contour_kwargs)
+        else:
+            finite = np.isfinite(fes.energy)
+            ax.tricontour(fes.cvs[0][finite], fes.cvs[1][finite], fes.energy[finite],
+                          levels=shared_levels, colors=color, **contour_kwargs)
+
+    handles = [plt.Line2D([0], [0], color=color, label=label)
+               for color, label in zip(colors, label_list) if label is not None]
+    if handles:
+        ax.legend(handles=handles, loc="best")
+
+    reference = fes_list[0]
+    _style_axes(fig, ax,
+                x_lab if x_lab is not None else reference.cv_labels[0],
+                y_lab if y_lab is not None else reference.cv_labels[1])
+    _finalise(fig, filename=filename, show=show)
+    return fig, ax
+
+
+def plot_fes_slices(sources,
+                    at,
+                    axis=0,
+                    fig=None,
+                    ax=None,
+                    labels=None,
+                    energy_unit=None,
+                    source_unit=DEFAULT_ENERGY_UNIT,
+                    shift_min_to_zero=True,
+                    max_energy=None,
+                    columns=None,
+                    slice_format="{label}, {cv}$={value:.2f}$",
+                    colors=None,
+                    linestyles=("-", "--", ":", "-."),
+                    x_lab=None,
+                    y_lab=None,
+                    filename=None,
+                    show=False,
+                    fig_size=(8, 3),
+                    **plot_kwargs):
+    """
+    Plot 1-D cuts through 2-D free-energy surfaces at fixed CV values.
+
+    Each surface gets its own colour and each requested cut its own line
+    style, so several surfaces can be compared at several slices at once.
+    Slices are requested by collective-variable *value*; the nearest grid
+    point is used and reported in the legend.
+
+    Parameters
+    ----------
+    sources : FES source or sequence of FES sources
+        2-D surfaces to slice; see :func:`as_fes`.
+    at : float or sequence of float
+        Value(s) of the held collective variable at which to cut.
+    axis : int, optional
+        Index of the collective variable held fixed (default is 0, i.e.
+        slices run along CV2).
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on.
+    labels : sequence, optional
+        Name for each surface, used in the legend.
+    energy_unit : str, optional
+        Unit to convert energies to, e.g. ``"eV"``.
+    source_unit : str, optional
+        Unit the input energies are in (default ``"kJ/mol"``).
+    shift_min_to_zero : bool, optional
+        Whether to shift each surface so its minimum is zero (default True).
+    max_energy : float, optional
+        Mask energies above this value.
+    columns : sequence, optional
+        Columns to use for file sources, ordered ``(cv1, cv2, energy)``.
+    slice_format : str, optional
+        ``str.format`` template for the legend entries, receiving ``label``,
+        ``cv`` and ``value``.
+    colors : sequence, optional
+        One colour per surface.  Defaults to the active colour cycle.
+    linestyles : sequence, optional
+        One line style per slice value.
+    x_lab, y_lab : str, optional
+        Axis labels.  Taken from the data when not given.
+    filename : str, optional
+        Output path; ``None`` (default) writes nothing.
+    show : bool, optional
+        Whether to display the figure (default is False).
+    fig_size : tuple, optional
+        Figure size in inches (default ``(8, 3)``).
+    **plot_kwargs
+        Extra keyword arguments forwarded to ``Axes.plot``.
+
+    Returns
+    -------
+    tuple
+        The matplotlib figure and axes.
+
+    Raises
+    ------
+    ValueError
+        If any source is not a 2-D surface on a regular grid.
+    """
+    fes_list = _as_fes_list(sources,
+                            energy_unit=energy_unit,
+                            source_unit=source_unit,
+                            shift_min_to_zero=shift_min_to_zero,
+                            max_energy=max_energy,
+                            columns=columns)
+    if any(fes.ndim != 2 for fes in fes_list):
+        raise ValueError("plot_fes_slices expects 2-D free-energy surfaces")
+
+    values = np.atleast_1d(np.asarray(at, dtype=float))
+    label_list = _resolve_labels(labels, len(fes_list))
+    if colors is None:
+        cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", ["C0", "C1"])
+        colors = [cycle[i % len(cycle)] for i in range(len(fes_list))]
+
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(figsize=fig_size, constrained_layout=True)
+
+    reference = fes_list[0]
+    for fes, color, label in zip(fes_list, colors, label_list):
+        for j, value in enumerate(values):
+            x, energy, used = fes.slice_at(value, axis=axis)
+            ax.plot(x, energy,
+                    color=color,
+                    linestyle=linestyles[j % len(linestyles)],
+                    label=slice_format.format(label=label if label is not None else "",
+                                              cv=fes.cv_labels[axis],
+                                              value=used).strip(", "),
+                    **plot_kwargs)
+
+    ax.legend(loc="best", fontsize=9, ncols=max(1, len(fes_list)))
+    _style_axes(fig, ax,
+                x_lab if x_lab is not None else reference.cv_labels[1 - axis],
+                y_lab if y_lab is not None else reference.label)
+    _finalise(fig, filename=filename, show=show)
+    return fig, ax
+
+
+#: Options understood only by the 2-D plotters, dropped by :func:`plot_fes`
+#: when the data turns out to be one dimensional.
+_2D_ONLY_KWARGS = ("levels", "cmap", "colorbar")
+
+#: Options consumed while turning a source into an :class:`FES`.
+_PREPARE_KWARGS = ("energy_unit", "source_unit", "shift_min_to_zero", "max_energy",
+                   "columns", "cv_labels", "energy_label")
+
+
+def plot_fes(sources, **kwargs):
+    """
+    Plot a free-energy surface, dispatching on its dimensionality.
+
+    Sends 1-D data to :func:`plot_fes_1d` and 2-D data to
+    :func:`plot_fes_2d`, which is convenient when the dimensionality is
+    decided by the PLUMED input rather than by the caller.  Sources are read
+    once here and handed on as :class:`FES` objects.  Options that only make
+    sense for contour plots (``levels``, ``cmap``, ``colorbar``) are ignored
+    for 1-D data instead of raising.
+
+    Parameters
+    ----------
+    sources : FES source or sequence of FES sources
+        Paths, arrays or :class:`FES` objects; see :func:`as_fes`.
+    **kwargs
+        Forwarded to the selected plotting function.
+
+    Returns
+    -------
+    tuple
+        The matplotlib figure and axes.
+    """
+    prepare = {key: kwargs.pop(key) for key in _PREPARE_KWARGS if key in kwargs}
+    fes_list = _as_fes_list(sources, **prepare)
+
+    if fes_list[0].ndim == 1:
+        for key in _2D_ONLY_KWARGS:
+            kwargs.pop(key, None)
+        return plot_fes_1d(fes_list, **kwargs)
+    return plot_fes_2d(fes_list, **kwargs)
+
+
+def plot_plumed_fes(path,
+                    ax=None,
+                    shift_min_to_zero=True,
+                    levels=30,
+                    **kwargs):
+    """
+    Plot a PLUMED free-energy surface from a data file.
+
+    Thin wrapper around :func:`plot_fes` kept for the example and test
+    workflows.  Whether the surface is 1-D or 2-D is determined from the
+    file; a 1-D FES is drawn as a line, a 2-D FES as filled contours with a
+    colour bar.
+
+    Parameters
+    ----------
+    path : str
+        Path to the PLUMED FES data file.
+    ax : matplotlib.axes.Axes or None, optional
+        Axes on which to draw.  A new figure is created when None.
+    shift_min_to_zero : bool, optional
+        Whether to shift the surface so its minimum is zero (default True).
+    levels : int, optional
+        Number of contour levels for 2-D plots (default is 30).
+    **kwargs
+        Further options forwarded to :func:`plot_fes_1d` /
+        :func:`plot_fes_2d`, such as ``energy_unit``, ``max_energy``,
+        ``filename`` or ``show``.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The matplotlib figure.
+    ax : matplotlib.axes.Axes
+        The matplotlib axes, or an array of axes if several were drawn.
+    """
+    fig, axes = plot_fes(path,
+                         fig=ax.figure if ax is not None else None,
+                         ax=ax,
+                         shift_min_to_zero=shift_min_to_zero,
+                         levels=levels,
+                         **kwargs)
+    axes = np.atleast_1d(axes)
+    return fig, axes[0] if axes.size == 1 else axes
+
+
+def plot_plumed_colvar(path,
+                       x_axis="time",
+                       columns=None,
+                       fig=None,
+                       axes=None,
+                       filename=None,
+                       show=False,
+                       figsize=(10, 8)):
+    """
+    Plot collective variables from a PLUMED COLVAR file.
+
+    Reads the ``#! FIELDS`` header to determine the column names and creates
+    a vertically stacked subplot for each variable.
+
+    Parameters
+    ----------
+    path : str
+        Path to the PLUMED COLVAR file.
+    x_axis : str, optional
+        Column name to use as the x-axis.  If the column is not found, the
+        row index is used instead.  Default is ``'time'``.
+    columns : sequence of str, optional
+        Restrict the plot to these columns.  By default every column other
+        than *x_axis* is plotted.
+    fig : matplotlib.figure.Figure, optional
+        Figure to draw on.  A new one is created when either *fig* or
+        *axes* is None.
+    axes : sequence of matplotlib.axes.Axes, optional
+        Axes to draw on; must provide one per plotted column.
+    filename : str, optional
+        Output path; ``None`` (default) writes nothing.  A bare stem writes
+        both PNG and PDF.
+    show : bool, optional
+        Whether to display the figure (default is False).
+    figsize : tuple of float, optional
+        Figure size in inches ``(width, height)``.  Default is ``(10, 8)``.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The matplotlib figure.
+    axes : numpy.ndarray of matplotlib.axes.Axes
+        One axes per plotted variable.
+
+    Raises
+    ------
+    ValueError
+        If no ``#! FIELDS`` header is found, or if there is nothing to plot.
+    """
+    plumed = read_plumed_file(path, drop_der=False)
+    if not plumed.fields:
+        raise ValueError(f"Could not find a usable '#! FIELDS' header in {path}. "
+                         "Ensure it is a valid PLUMED file.")
+
+    data = plumed.to_dataframe()
+    if x_axis in data.columns:
         x_data = data[x_axis]
         x_label = x_axis
+    else:
+        print(f"Warning: '{x_axis}' column not found. Using index as X-axis.")
+        x_data = data.index
+        x_label = "Step (index)"
 
-    plot_cols = [col for col in data.columns if col != x_axis]
-    n_plots = len(plot_cols)
+    plot_cols = list(columns) if columns else [col for col in data.columns if col != x_axis]
+    missing = [col for col in plot_cols if col not in data.columns]
+    if missing:
+        raise ValueError(f"Columns {missing} not found in {path}. Available: {list(data.columns)}")
+    if not plot_cols:
+        raise ValueError(f"No variables to plot in {path}")
 
-    if n_plots == 0:
-        print("No variables found to plot.")
-        return data, None
+    if fig is None or axes is None:
+        fig, axes = plt.subplots(len(plot_cols), 1, figsize=figsize, sharex=True,
+                                 constrained_layout=True)
+    axes = np.atleast_1d(axes).ravel()
+    if axes.size < len(plot_cols):
+        raise ValueError(f"Got {axes.size} axes for {len(plot_cols)} columns")
 
-    # Create subplots
-    fig, axes = plt.subplots(n_plots, 1, figsize=figsize, sharex=True)
+    for axis, col in zip(axes, plot_cols):
+        axis.plot(x_data, data[col], label=col, linewidth=1.5)
+        axis.legend(loc="upper right")
+        ax_plot(fig, axis, None, col)
 
-    # Handle the case where there is only one variable (axes is not a list)
-    if n_plots == 1:
-        axes = [axes]
-
-    for ax, col in zip(axes, plot_cols):
-        ax.plot(x_data, data[col], label=col, linewidth=1.5)
-        ax.set_ylabel(col)
-        ax.legend(loc='upper right')
-
-    # Set common X label on the bottom plot
-    axes[-1].set_xlabel(x_label)
-    plt.tight_layout()
-
-    # Show plot
-    plt.show()
-
-    return data, fig
+    axes[len(plot_cols) - 1].set_xlabel(x_label)
+    _finalise(fig, filename=filename, show=show)
+    return fig, axes[:len(plot_cols)]

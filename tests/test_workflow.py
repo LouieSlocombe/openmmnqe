@@ -1,6 +1,5 @@
 import os
 
-import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
 from ase.io import read, write
@@ -202,11 +201,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     # Run PLUMED sum_hills to get FES
     os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
     # Plot FES
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     n_beads = 4
     pdb = app.PDBFile("npt_equilibrate.pdb")
@@ -230,11 +227,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     # Run PLUMED sum_hills to get FES
     os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
     # Plot FES
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
@@ -309,11 +304,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     fes_cmd = os.path.join(nqe.openmm_nqe_dir, "opes", "FES_from_State.py")
     os.system(f'python3 {fes_cmd} --state STATE --min 0 --max 4.0 --bin 100 --kt {kbt}')
     # Plot FES
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
@@ -365,11 +358,9 @@ def test_malonaldehyde_pt():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -433,11 +424,9 @@ def test_malonaldehyde_pt_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -511,11 +500,9 @@ def test_malonaldehyde_pt_quantum_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('rpmd_ready*')
@@ -591,11 +578,9 @@ def test_malonaldehyde_pt_adqtb_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     # nqe.remove_file_pattern('adqtb_ready*')
@@ -679,11 +664,9 @@ def test_malonaldehyde_pt_solvated_full():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
@@ -755,11 +738,9 @@ def test_fad_pt_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -829,11 +810,9 @@ def test_gc_pt_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -912,11 +891,9 @@ def test_gc_pt_quantum_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('rpmd_ready*')
@@ -989,11 +966,9 @@ def test_g_enol_t_pt_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     # nqe.remove_file_pattern('prod*')
@@ -1075,11 +1050,9 @@ def test_gt_wob_pt_solvated():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     # nqe.remove_file_pattern('minimized*')
     # nqe.remove_file_pattern('prod*')
@@ -1169,11 +1142,9 @@ def test_malonaldehyde_pathmsd():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     # nqe.remove_file_pattern('prod*')
@@ -1263,11 +1234,9 @@ def test_gt_wob_pathmsd():
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     # nqe.remove_file_pattern('prod*')

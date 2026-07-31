@@ -87,16 +87,10 @@ if __name__ == "__main__":
 
     # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat")
-    plt.savefig("fes.png")
-    plt.savefig("fes.pdf")
-    plt.show()
+    nqe.plot_plumed_fes("fes.dat", filename="fes", show=True)
     plt.close()
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.savefig("colvar.png")
-    plt.savefig("colvar.pdf")
-    plt.show()
+    nqe.plot_plumed_colvar("COLVAR", filename="colvar", show=True)
     plt.close()
 
     nqe.remove_file_pattern('minimized*')

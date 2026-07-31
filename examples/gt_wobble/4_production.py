@@ -66,12 +66,8 @@ if __name__ == "__main__":
     os.system(sum_hills_input)
     shutil.copy('fes.dat', 'md_fes.dat')
 
-    nqe.plot_plumed_fes("md_fes.dat")
-    plt.savefig("md_fes.png")
-    plt.savefig("md_fes.pdf")
+    nqe.plot_plumed_fes("md_fes.dat", filename="md_fes")
     plt.close()
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.savefig("colvar.png")
-    plt.savefig("colvar.pdf")
+    nqe.plot_plumed_colvar("COLVAR", filename="colvar")
     plt.close()

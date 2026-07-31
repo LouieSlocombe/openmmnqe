@@ -71,12 +71,8 @@ if __name__ == "__main__":
     os.system(sum_hills_input)
     shutil.copy('fes.dat', 'rpmd_fes.dat')
 
-    nqe.plot_plumed_fes("rpmd_fes.dat")
-    plt.savefig("rpmd_fes.png")
-    plt.savefig("rpmd_fes.pdf")
+    nqe.plot_plumed_fes("rpmd_fes.dat", filename="rpmd_fes")
     plt.close()
 
-    nqe.plot_plumed_colvar("COLVAR")
-    plt.savefig("rpmd_colvar.png")
-    plt.savefig("rpmd_colvar.pdf")
+    nqe.plot_plumed_colvar("COLVAR", filename="rpmd_colvar")
     plt.close()
