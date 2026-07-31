@@ -104,7 +104,7 @@ def plumed_input_1pt(modeller,
 
     if f_opes:
         metad_line = f"metad:      OPES_METAD ARG=pt_cv PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
-        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     else:
         metad_line = f"metad:      METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
@@ -169,7 +169,7 @@ def plumed_input_2pt_1d(modeller,
 
     if f_opes:
         metad_line = f"metad:      OPES_METAD ARG=pt_cv PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
-        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     else:
         metad_line = f"metad:      METAD ARG=pt_cv PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
@@ -248,7 +248,7 @@ def plumed_input_2pt_2d(modeller,
 
     if f_opes:
         metad_line = f"metad:      OPES_METAD ARG=cv_diff1,cv_diff2 PACE={pace} BARRIER={height} SIGMA={sigma},{sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
-        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min},{grid_min} --max {grid_max},{grid_max} --bin {grid_bin},{grid_bin} --kt {kt_str}'
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --outfile fes.dat --min {grid_min},{grid_min} --max {grid_max},{grid_max} --bin {grid_bin},{grid_bin} --kt {kt_str}'
     else:
         metad_line = f"metad:      METAD ARG=cv_diff1,cv_diff2 PACE={pace} HEIGHT={height} SIGMA={sigma},{sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min},{grid_min} GRID_MAX={grid_max},{grid_max} GRID_BIN={grid_bin},{grid_bin}"
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min},{grid_min} --max {grid_max},{grid_max} --bin {grid_bin},{grid_bin} --kt {kt_str}'
@@ -535,7 +535,7 @@ def plumed_input_wob_4(modeller,
 
     if f_opes:
         metad_line = f"metad:      OPES_METAD ARG=z PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
-        sum_hills_input = f'python3 {fes_cmd} --state STATE --bin {grid_bin} --kt {kt_str}'
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
     else:
         metad_line = f"metad:      METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS"
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --bin {grid_bin} --kt {kt_str}'
@@ -628,7 +628,7 @@ def plumed_input_neb_path(temperature,
 
     if f_opes:
         metad_line = f"metad: OPES_METAD ARG=path.sss PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
-        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     else:
         metad_line = f"metad: METAD ARG=path.sss PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
@@ -667,7 +667,7 @@ def plumed_input_neb_path_wob(idx,
 
     if f_opes:
         metad_line = f"metad: OPES_METAD ARG=path.sss PACE={pace} BARRIER={height} SIGMA={sigma} TEMP={temperature_str} STATE_WFILE=STATE STATE_WSTRIDE={pace}"
-        sum_hills_input = f'python3 {fes_cmd} --state STATE --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
+        sum_hills_input = f'python3 {fes_cmd} --state STATE --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
     else:
         metad_line = f"metad: METAD ARG=path.sss PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS GRID_MIN={grid_min} GRID_MAX={grid_max} GRID_BIN={grid_bin}"
         sum_hills_input = f'plumed sum_hills --hills HILLS --outfile fes.dat --min {grid_min} --max {grid_max} --bin {grid_bin} --kt {kt_str}'
