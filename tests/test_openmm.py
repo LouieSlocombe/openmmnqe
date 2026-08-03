@@ -1,5 +1,6 @@
 import json
 import os
+import warnings
 from itertools import combinations
 
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pandas as pd
+import pytest
 from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
 from mace.calculators.foundations_models import mace_off
@@ -201,6 +203,33 @@ def test_prepare_ligand_ff_multiple():
 
     nqe.remove_file(cache_name)
     nqe.remove_file_pattern('minimized*')
+
+
+def test_ligand_already_in_force_field_warns():
+    print(flush=True)
+    # DGN and DTN are free deoxynucleosides: non-standard names as far as the
+    # ligand scan is concerned, but amber14-all.xml carries templates for both.
+    # OpenMM matches residue templates on the molecular graph and never looks at
+    # residue names, so the standard template wins and every bit of GAFF work
+    # done for these two is discarded -- which is what the warnings say.
+    with pytest.warns(UserWarning, match="standard AMBER residue names"):
+        _, molecules = nqe.prepare_lig_system("tests/data/pdb/gt_wob_solv_clean.pdb")
+    assert {mol.name for mol in molecules} == {'DGN', 'DTN'}
+
+    with pytest.warns(UserWarning, match="already matched by residue template"):
+        nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                              molecules)
+
+    # The negative control: GGG/CCC are genuine ligands, so neither warning may
+    # fire for them, or the check would be worthless.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _, gc_molecules = nqe.prepare_lig_system("tests/data/pdb/gc.pdb")
+        nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
+                              gc_molecules)
+    assert not [w for w in caught
+                if "standard AMBER residue names" in str(w.message)
+                or "already matched by residue template" in str(w.message)]
 
 
 def _get_total_mass(system):

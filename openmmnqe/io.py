@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import string
+import warnings
 from collections import defaultdict
 from typing import List
 
@@ -46,6 +47,44 @@ eVperA2_to_kJpermolpernm2 = eV_to_kJpermol / A_to_nm ** 2
 # names, e.g. "HG21" is a gamma hydrogen rather than mercury. These are only
 # consulted when a PDB line has no element column to fall back on.
 _HYDROGEN_LOOKALIKES = {'He', 'Hf', 'Hg', 'Ho', 'Hs'}
+
+# Residue names the non-standard residue scans treat as already parameterised.
+# Anything else in a PDB is assumed to be a ligand needing its own parameters.
+STANDARD_RESIDUE_NAMES = frozenset({
+    # Standard 20 protein residues
+    'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
+    'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
+    # Standard DNA residues (desoxy)
+    'DA', 'DC', 'DG', 'DT',
+    # Standard RNA residues (ribo)
+    'A', 'C', 'G', 'U', 'RA', 'RC', 'RG', 'RU',
+    # Common alternative protonation states for Histidine
+    'HID', 'HIE', 'HIP',
+    # Common synonyms
+    'ADE', 'CYT', 'GUA', 'THY', 'URA',
+    # Water
+    'HOH', 'WAT', 'SOL',
+    # Ions
+    'NA', 'CL', 'K', 'MG', 'CA',
+    'Na+', 'Cl-', 'K+', 'Mg2+', 'Ca2+'
+})
+
+# Residue names that amber14-all.xml ships templates for but which are
+# deliberately absent from STANDARD_RESIDUE_NAMES: the chain-terminal and free
+# nucleoside variants, and the peptide capping groups. Calling them standard
+# would leave a PDB made only of, say, two free deoxynucleosides with no
+# residues at all to hand back from prepare_lig_system, so they stay detectable
+# as ligands and instead trigger the warning in _warn_ff_named_ligands.
+FORCE_FIELD_RESIDUE_NAMES = frozenset({
+    # DNA 5'/3' termini and free deoxynucleosides
+    'DA5', 'DA3', 'DAN', 'DC5', 'DC3', 'DCN',
+    'DG5', 'DG3', 'DGN', 'DT5', 'DT3', 'DTN',
+    # RNA 5'/3' termini and free nucleosides
+    'A5', 'A3', 'AN', 'C5', 'C3', 'CN',
+    'G5', 'G3', 'GN', 'U5', 'U3', 'UN',
+    # Peptide capping groups
+    'ACE', 'NME', 'NHE'
+})
 
 
 def _element_from_pdb_line(line):
@@ -501,9 +540,10 @@ def extract_nonstandard_res(pdb_file_path: str,
     """
     Extracts non-standard residues from a PDB file and saves them as XYZ files.
 
-    This function identifies residues in a PDB file that are not part of a predefined
-    set of standard residues. Each non-standard residue is saved as a separate XYZ file
-    in the specified output directory. Optionally, the XYZ files can be converted to SDF format.
+    This function identifies residues in a PDB file that are not part of
+    :data:`STANDARD_RESIDUE_NAMES`. Each non-standard residue is saved as a
+    separate XYZ file in the specified output directory. Optionally, the XYZ
+    files can be converted to SDF format.
 
     Parameters
     ----------
@@ -526,24 +566,6 @@ def extract_nonstandard_res(pdb_file_path: str,
     positions_quantity = pdb.getPositions(asNumpy=True)
     positions_angstrom = positions_quantity.value_in_unit(unit.angstrom)
 
-    # Define a set of standard residues to ignore
-    manual_standard_residues = {
-        # Standard 20 protein residues
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
-        'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-        # Standard DNA residues (desoxy)
-        'DA', 'DC', 'DG', 'DT',
-        # Standard RNA residues (ribo)
-        'A', 'C', 'G', 'U', 'RA', 'RC', 'RG', 'RU',
-        # Common alternative protonation states for Histidine
-        'HID', 'HIE', 'HIP',
-        # Common synonyms
-        'ADE', 'CYT', 'GUA', 'THY', 'URA',
-        # Water
-        'HOH', 'WAT', 'SOL'
-    }
-
-    residues_to_ignore = manual_standard_residues.copy()
     generated_files = []
 
     # Ensure the output directory exists
@@ -551,7 +573,7 @@ def extract_nonstandard_res(pdb_file_path: str,
 
     # Iterate through residues in the topology
     for residue in topology.residues():
-        if residue.name not in residues_to_ignore:
+        if residue.name not in STANDARD_RESIDUE_NAMES:
 
             # Extract residue details
             res_name = residue.name
@@ -601,7 +623,7 @@ def get_non_standard_residues(pdb_file):
     Identifies non-standard residues in a PDB file.
 
     This function reads a PDB file, splits it into residues, and compares each residue
-    against a predefined set of standard residues. Residues not in the standard set
+    against :data:`STANDARD_RESIDUE_NAMES`. Residues not in the standard set
     are considered non-standard and are returned as RDKit molecule objects.
 
     Parameters
@@ -614,26 +636,6 @@ def get_non_standard_residues(pdb_file):
     list
         A list of RDKit molecule objects representing non-standard residues.
     """
-    # Define a set of standard residues, including protein, DNA, RNA, water, and common ions
-    standard_residues = {
-        # Standard 20 protein residues
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
-        'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-        # Standard DNA residues (desoxy)
-        'DA', 'DC', 'DG', 'DT',
-        # Standard RNA residues (ribo)
-        'A', 'C', 'G', 'U', 'RA', 'RC', 'RG', 'RU',
-        # Common alternative protonation states for Histidine
-        'HID', 'HIE', 'HIP',
-        # Common synonyms
-        'ADE', 'CYT', 'GUA', 'THY', 'URA',
-        # Water
-        'HOH', 'WAT', 'SOL',
-        # Ions
-        'NA', 'CL', 'K', 'MG', 'CA',
-        'Na+', 'Cl-', 'K+', 'Mg2+', 'Ca2+'
-    }
-
     # Load the PDB file without sanitization or hydrogen removal
     mol = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
     # Split the molecule into residues
@@ -646,7 +648,7 @@ def get_non_standard_residues(pdb_file):
     for residue_key, fragment_mol in mols_by_residue.items():
         # Extract the residue name from the residue key
         res_name = residue_key.split('_')[0].strip()
-        if res_name not in standard_residues:
+        if res_name not in STANDARD_RESIDUE_NAMES:
             # Log non-standard residues
             print(f"  > Found non-standard residue: {residue_key}")
             print(Chem.MolToSmiles(fragment_mol))
@@ -663,7 +665,7 @@ def list_non_standard_residues(pdb_file):
     Identifies and lists non-standard residues in a PDB file.
 
     This function reads a PDB file, splits it into residues, and compares each residue
-    against a predefined set of standard residues. Residues not in the standard set
+    against :data:`STANDARD_RESIDUE_NAMES`. Residues not in the standard set
     are considered non-standard and are returned.
 
     Parameters
@@ -676,25 +678,6 @@ def list_non_standard_residues(pdb_file):
     list
         A list of residue keys representing non-standard residues.
     """
-    standard_residues = {
-        # Standard 20 protein residues
-        'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
-        'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP', 'TYR', 'VAL',
-        # Standard DNA residues (desoxy)
-        'DA', 'DC', 'DG', 'DT',
-        # Standard RNA residues (ribo)
-        'A', 'C', 'G', 'U', 'RA', 'RC', 'RG', 'RU',
-        # Common alternative protonation states for Histidine
-        'HID', 'HIE', 'HIP',
-        # Common synonyms
-        'ADE', 'CYT', 'GUA', 'THY', 'URA',
-        # Water
-        'HOH', 'WAT', 'SOL',
-        # Ions
-        'NA', 'CL', 'K', 'MG', 'CA',
-        'Na+', 'Cl-', 'K+', 'Mg2+', 'Ca2+'
-    }
-
     # Load the PDB file without sanitization or hydrogen removal
     mol = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
     # Split the molecule into residues
@@ -704,7 +687,7 @@ def list_non_standard_residues(pdb_file):
     # Iterate through residues and identify non-standard ones
     for residue_key, fragment_mol in mols_by_residue.items():
         res_name = residue_key.split('_')[0].strip()
-        if res_name not in standard_residues:
+        if res_name not in STANDARD_RESIDUE_NAMES:
             non_standard_mols.append(residue_key)
     return non_standard_mols
 
@@ -1080,6 +1063,73 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
         PDBFile.writeFile(combined_topology, combined_positions * unit.nanometers, f)
 
 
+def _warn_ff_named_ligands(lig_names_list):
+    """
+    Warn about "ligands" whose residue names belong to a standard force field.
+
+    A name-only heads-up, raised as early as possible so the caller does not
+    pay for SDF extraction and charge generation before finding out. It only
+    knows about the names in :data:`FORCE_FIELD_RESIDUE_NAMES`;
+    :func:`_warn_ff_matched_molecules` is the authoritative check, since it
+    asks the force field itself.
+
+    Parameters
+    ----------
+    lig_names_list : list of str
+        Residue names about to be treated as ligands.
+    """
+    known = sorted(name for name in lig_names_list if name in FORCE_FIELD_RESIDUE_NAMES)
+    if known:
+        warnings.warn(
+            f"Residue(s) {', '.join(known)} are being treated as ligands, but they are "
+            "standard AMBER residue names (amber14-all.xml ships templates for all the "
+            "terminal and free-nucleoside variants). If you go on to parameterise them "
+            "with GAFF, OpenMM will match the standard template instead and that work "
+            "will be discarded. Pass lig_names explicitly, or relabel them via "
+            "residue_map, to leave them to the standard force field.",
+            UserWarning,
+            stacklevel=3)
+
+
+def _warn_ff_matched_molecules(forcefield, molecules):
+    """
+    Warn about ligands the standard force field already has a template for.
+
+    OpenMM matches residue templates on the molecular graph -- residue names
+    are never consulted -- so a "ligand" that happens to be a standard residue
+    is parameterised from the standard force field and the GAFF template
+    generator is simply never called for it. The GAFF conformers, charges and
+    cache entries produced for such a molecule are silently discarded, which is
+    what this warning exists to make visible.
+
+    ``forcefield`` must not have the GAFF generator registered yet, or every
+    molecule would match.
+
+    Parameters
+    ----------
+    forcefield : openmm.app.ForceField
+        Force field built from the standard XML files alone.
+    molecules : list of openff.toolkit.Molecule
+        The ligand molecules about to be parameterised.
+    """
+    for mol in molecules:
+        try:
+            templates = forcefield.getMatchingTemplates(mol.to_topology().to_openmm())
+        except ValueError:
+            # No template for this molecule: GAFF is genuinely needed.
+            continue
+        template_names = ', '.join(sorted({template.name for template in templates}))
+        warnings.warn(
+            f"Ligand '{mol.name}' is already matched by residue template(s) "
+            f"{template_names} in the supplied standard force field. OpenMM matches "
+            "templates on the molecular graph and ignores residue names, so the GAFF "
+            "parameters generated here will never be used and no cache entry will be "
+            "written for it. Drop it from the ligand list unless it is covalently "
+            "bonded to the rest of the system, where the match may not hold.",
+            UserWarning,
+            stacklevel=3)
+
+
 def prepare_lig_system(input_pdb,
                        combined_pdb='combined_system.pdb',
                        clean_pdb='cleaned.pdb',
@@ -1141,6 +1191,13 @@ def prepare_lig_system(input_pdb,
     molecules : openff.toolkit.Molecule or list of openff.toolkit.Molecule
         The ligand molecule(s). A single ``Molecule`` is returned when only
         one ligand is present; otherwise a list.
+
+    Warns
+    -----
+    UserWarning
+        If a residue treated as a ligand is named after a residue a standard
+        force field already provides a template for (see
+        :data:`FORCE_FIELD_RESIDUE_NAMES`).
     """
     remove_water_residues_in_pdb(input_pdb, clean_pdb)
 
@@ -1157,6 +1214,8 @@ def prepare_lig_system(input_pdb,
         lig_names_list = [lig_names]
     else:
         lig_names_list = list(lig_names)
+
+    _warn_ff_named_ligands(lig_names_list)
 
     molecules = []
     generated_sdfs = []
@@ -1257,6 +1316,14 @@ def prepare_ligand_ff(standard_ff,
     forcefield : openmm.app.ForceField
         An OpenMM ForceField with a registered GAFF template generator for
         the supplied ligand molecule(s).
+
+    Warns
+    -----
+    UserWarning
+        If ``standard_ff`` already has a residue template matching one of the
+        molecules. OpenMM matches templates on the molecular graph rather than
+        by residue name, so the standard template wins and the GAFF parameters
+        for that molecule are never used.
     """
     if not isinstance(molecule, list):
         molecules = [molecule]
@@ -1265,6 +1332,11 @@ def prepare_ligand_ff(standard_ff,
 
     if isinstance(standard_ff, str):
         standard_ff = [standard_ff]
+
+    forcefield = app.ForceField(*standard_ff)
+    # Before any charges are computed, since anything the standard force field
+    # already covers is work thrown away.
+    _warn_ff_matched_molecules(forcefield, molecules)
 
     if not use_cache:
         print(f'Pre-calculating conformers and charges ({pc_method})...', flush=True)
@@ -1283,7 +1355,6 @@ def prepare_ligand_ff(standard_ff,
                                  cache=active_cache,
                                  forcefield=gaff_ver)
 
-    forcefield = app.ForceField(*standard_ff)
     forcefield.registerTemplateGenerator(gaff.generator)
 
     if gen_cache:
