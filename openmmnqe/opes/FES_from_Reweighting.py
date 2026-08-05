@@ -1,14 +1,16 @@
 #! /usr/bin/env python3
+"""
+Get the FES estimate from reweighting. 1-D or 2-D only.
 
-### Get the FES estimate from reweighting. 1D or 2D only ###
-# uses a weighted kernel density estimation, so it requires the bandwidth sigma
-# usage is similar to plumed sum_hills
+Uses a weighted kernel density estimation, so it requires the bandwidth
+*sigma*. Usage is similar to ``plumed sum_hills``; run with ``--help`` for the
+full option list.
 
-# NB: in case of multiple walkers one should combine them in a single file
-# when using --stride or --skiprows one should sort them:
-#   sort -gs COLVAR.* > COLVAR
-# when using --blocks it is better to concatenate them:
-#   cat COLVAR.* > COLVAR
+In case of multiple walkers, combine them into a single file first: when
+using ``--stride`` or ``--skiprows``, sort them (``sort -gs COLVAR.* >
+COLVAR``); when using ``--blocks``, concatenate them instead
+(``cat COLVAR.* > COLVAR``).
+"""
 
 import argparse
 import sys
@@ -319,8 +321,19 @@ if stride != len_tot:
     outfile_it = prefix + outfile_it + '_%d' + suffix
 
 
-# print function needs the grid and size, effsize, fes, der_fes
 def printFES(outfilename):
+    """
+    Write the current FES estimate to a PLUMED-style grid file.
+
+    Reads the grid and ``size``, ``effsize``, ``fes``, ``der_fes_x``/``_y``
+    from the enclosing module scope rather than taking them as arguments,
+    since it is called once per stride/block from the main loop below.
+
+    Parameters
+    ----------
+    outfilename : str
+        Path to write the FES grid to.
+    """
     if do_bck:
         cmd = subprocess.Popen(bck_script + ' -i ' + outfilename, shell=True)
         cmd.wait()
@@ -328,7 +341,6 @@ def printFES(outfilename):
         shift = np.amin(fes)
     else:
         shift = 0
-    # calculate deltaF
     # NB: summing is as accurate as trapz, and logaddexp avoids overflows
     if calc_deltaF:
         if not dim2:
@@ -338,7 +350,6 @@ def printFES(outfilename):
             fesA = -kbt * np.logaddexp.reduce(-1 / kbt * fes[x < ts])
             fesB = -kbt * np.logaddexp.reduce(-1 / kbt * fes[x > ts])
         deltaF = fesB - fesA
-    # actual printing
     with open(outfilename, 'w') as f:
         fields = '#! FIELDS ' + name_cv_x
         if dim2:
@@ -384,8 +395,32 @@ def printFES(outfilename):
 
 
 ### Calculate FES ###
-# on single grid point
 def calcFESpoint(start, end, point_x, point_y=None):
+    """
+    Evaluate the reweighted kernel density FES estimate at one grid point.
+
+    Reads ``cv_x``/``cv_y``, ``bias``, ``sigma_x``/``sigma_y`` and
+    ``period_x``/``period_y`` from the enclosing module scope. Samples
+    outside ``[start, end)`` are excluded, which is what lets the caller
+    build a running (strided or blocked) estimate.
+
+    Parameters
+    ----------
+    start, end : int
+        Half-open range of sample indices to include.
+    point_x : float
+        Grid coordinate along the first CV.
+    point_y : float or None, optional
+        Grid coordinate along the second CV, for 2-D surfaces. Default is
+        None.
+
+    Returns
+    -------
+    float or tuple of float
+        The FES value at this point when *calc_der* is False. When
+        *calc_der* is True, a tuple of the FES value and its derivative(s)
+        with respect to the given CV(s).
+    """
     if period_x == 0:
         dist_x = (point_x - cv_x[start:end]) / sigma_x
     else:
@@ -422,7 +457,6 @@ it = 1
 for n in range(s + stride, len_tot + 1, stride):
     if stride != len_tot:
         print('   working...   0% of {:.0%}'.format(n / (len_tot + 1)), end='\r')
-    # loop over whole grid
     if not dim2:
         for i in range(grid_bin_x):
             print('   working...  {:.0%}'.format(i / grid_bin_x), end='\r')
@@ -438,7 +472,6 @@ for n in range(s + stride, len_tot + 1, stride):
                     fes[i, j] = calcFESpoint(s, n, x[i, j], y[i, j])
                 else:
                     fes[i, j], der_fes_x[i, j], der_fes_y[i, j] = calcFESpoint(s, n, x[i, j], y[i, j])
-    # calculate sample size
     weights = np.exp(bias[s:n] - np.amax(bias[s:n]))  # these are safe to sum
     size = len(weights)
     effsize = np.sum(weights) ** 2 / np.sum(weights ** 2)
@@ -481,7 +514,6 @@ if block_av:
         cmd.wait()
     if mintozero:
         fes -= np.amin(fes)
-    # calculate deltaF
     # NB: summing is as accurate as trapz, and logaddexp avoids overflows
     if calc_deltaF:
         if not dim2:
@@ -491,7 +523,6 @@ if block_av:
             fesA = -kbt * np.logaddexp.reduce(-1 / kbt * fes[x < ts])
             fesB = -kbt * np.logaddexp.reduce(-1 / kbt * fes[x > ts])
         deltaF = fesB - fesA
-    # actual printing
     with open(outfile, 'w') as f:
         fields = '#! FIELDS ' + name_cv_x
         if dim2:

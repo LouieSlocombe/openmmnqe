@@ -67,7 +67,6 @@ if __name__ == "__main__":
                              checkpoint_file='rpmd_ready.chk'
                              )
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     shutil.copy('fes.dat', 'rpmd_fes.dat')
 

@@ -28,7 +28,6 @@ if __name__ == "__main__":
     modeller.addHydrogens()
     forcefield = nqe.prepare_ligand_ff(forcefield_names, molecule)
 
-    # Prepare the box
     padding = 1.5
     box_shape = 'cube'
     modeller.addSolvent(forcefield,
@@ -57,25 +56,6 @@ if __name__ == "__main__":
                                                             bias=10.0,
                                                             f_opes=True)
 
-    pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_heating(modeller,
-    #                        forcefield,
-    #                        calculator=calc,
-    #                        ml_idx=ml_atoms,
-    #                        target_temp=temperature)
-    #
-    # pdb = app.PDBFile("equilibrate.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_npt(modeller,
-    #                    forcefield,
-    #                    calculator=calc,
-    #                    ml_idx=ml_atoms,
-    #                    temperature=temperature)
-    #
-    # pdb = app.PDBFile("npt_equilibrate.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
-
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
@@ -88,7 +68,6 @@ if __name__ == "__main__":
                         calculator=calc,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
 
     nqe.plot_plumed_fes("fes.dat", filename="fes", show=True)

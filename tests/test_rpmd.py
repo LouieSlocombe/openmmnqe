@@ -14,7 +14,6 @@ device = "CUDA"
 
 def test_openmm_rpmd():
     print(flush=True)
-    # Simple run parameters
     n_steps = 1_000
     report_every = 100
     in_pdb = "tests/data/pdb/input_aaa.pdb"
@@ -57,7 +56,6 @@ def test_openmm_rpmd():
 
 def test_openmm_rpmd_solvated():
     print(flush=True)
-    # Simple run parameters
     n_steps = 200
     report_every = 100
     in_pdb = "tests/data/pdb/input_aaa.pdb"
@@ -73,7 +71,6 @@ def test_openmm_rpmd_solvated():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    # Solvate
     modeller.addSolvent(forcefield,
                         padding=1.0 * unit.nanometer,
                         boxShape='dodecahedron')
@@ -104,7 +101,6 @@ def test_openmm_rpmd_solvated():
 
 def test_openmm_rpmd_ml():
     print(flush=True)
-    # Simple run parameters
     n_steps = 200
     report_every = 100
     in_pdb = "tests/data/pdb/input_aaa.pdb"
@@ -146,7 +142,6 @@ def test_openmm_rpmd_ml():
 
 def test_openmm_rpmd_mixed():
     print(flush=True)
-    # Simple run parameters
     n_steps = 200
     report_every = 100
     in_pdb = "tests/data/pdb/input_aaa.pdb"
@@ -346,7 +341,6 @@ def test_rpmd_centroid_reporter():
 
 def test_openmm_adqtb():
     print(flush=True)
-    # Simple run parameters
     n_steps = 1_000
     report_every = 100
     in_pdb = "tests/data/pdb/input_aaa.pdb"
@@ -494,7 +488,6 @@ def test_run_openmm_adqtb_prod():
     modeller.deleteWater()
     modeller.addHydrogens()
 
-    # Solvate
     modeller.addSolvent(forcefield,
                         padding=1.5 * unit.nanometer,
                         boxShape='dodecahedron')

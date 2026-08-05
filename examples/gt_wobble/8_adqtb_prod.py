@@ -65,7 +65,6 @@ if __name__ == "__main__":
                               ml_idx=ml_atoms,
                               )
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     shutil.copy('fes.dat', 'adqtb_fes.dat')
 

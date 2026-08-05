@@ -1,7 +1,10 @@
 #! /usr/bin/env python3
+"""
+Get the FES estimate used by OPES, from a dumped state file (STATE_WFILE).
 
-### Get the FES estimate used by OPES, from a dumped state file (STATE_WFILE). 1D or 2D only ###
-# usage is similar to plumed sum_hills
+1-D or 2-D only. Usage is similar to ``plumed sum_hills``; run with ``--help``
+for the full option list.
+"""
 
 import argparse
 import sys
@@ -38,7 +41,7 @@ parser.add_argument('--all_stored', dest='all_stored', action='store_true', defa
 parser.add_argument('--nomintozero', dest='nomintozero', action='store_true', default=False,
                     help='do not shift the minimum to zero')
 parser.add_argument('--der', dest='der', action='store_true', default=False, help='calculate also FES derivatives')
-# some easy parsing
+# Unpack the parsed arguments into plain working variables.
 args = parser.parse_args()
 filename = args.filename
 outfile = args.outfile
@@ -72,7 +75,7 @@ if all_stored:
 explore = 'unset'
 
 ### Get data ###
-# get data and check number of stored states
+# Load the state file and check how many stored states it holds.
 try:
     import datatable  # datatable is faster than pandas, but less common
 
@@ -298,7 +301,6 @@ for n in range(len(fields_pos) - 1):
         der_fes_x = -kbt * sf / prob * der_prob_x
         if dim2:
             der_fes_y = -kbt * sf / prob * der_prob_y
-    # calculate deltaF
     # NB: summing is as accurate as trapz, and logaddexp avoids overflows
     if calc_deltaF:
         if not dim2:

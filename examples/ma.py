@@ -23,7 +23,6 @@ if __name__ == "__main__":
     modeller.addHydrogens()
     forcefield = nqe.prepare_ligand_ff(forcefield_names, molecule)
 
-    # Prepare the box
     padding = 1.5
     box_shape = 'cube'
     modeller.addSolvent(forcefield,
@@ -85,7 +84,6 @@ if __name__ == "__main__":
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", filename="fes", show=True)
     plt.close()

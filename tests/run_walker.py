@@ -10,8 +10,19 @@ from openmmplumed import PlumedForce
 
 def build_toy_dimer():
     """
-    Minimal 2-particle system so the example runs without external files.
-    The PLUMED script must then use ATOMS=1,2 (PLUMED indexing).
+    Build a minimal 2-particle system so the example runs without external files.
+
+    The PLUMED script driving this system must use ``ATOMS=1,2`` (PLUMED
+    indexing).
+
+    Returns
+    -------
+    top : openmm.app.Topology
+        Topology for the two-atom dimer.
+    system : openmm.System
+        System with a single harmonic bond between the two particles.
+    positions : openmm.unit.Quantity
+        Initial positions of the two particles.
     """
     system = mm.System()
     mass = 39.948 * unit.amu  # argon-ish
@@ -23,7 +34,6 @@ def build_toy_dimer():
                  2000 * unit.kilojoule_per_mole / unit.nanometer ** 2)
     system.addForce(bond)
 
-    # Minimal topology
     top = app.Topology()
     chain = top.addChain()
     res = top.addResidue("DUM", chain)
@@ -36,6 +46,28 @@ def build_toy_dimer():
 
 
 def load_pdb_system(pdb_path, ff_xmls, nonbonded_cutoff_nm=1.0):
+    """
+    Build a solvated system from a PDB file and force-field XML(s).
+
+    Parameters
+    ----------
+    pdb_path : str
+        Path to the input PDB file.
+    ff_xmls : sequence of str
+        Force-field XML file names passed to ``openmm.app.ForceField``.
+    nonbonded_cutoff_nm : float, optional
+        Nonbonded cutoff, in nanometers. Default is 1.0.
+
+    Returns
+    -------
+    topology : openmm.app.Topology
+        Topology read from the PDB file.
+    system : openmm.System
+        System built with PME electrostatics and constrained bonds to
+        hydrogen.
+    positions : openmm.unit.Quantity
+        Positions read from the PDB file.
+    """
     pdb = app.PDBFile(pdb_path)
     ff = app.ForceField(*ff_xmls)
     system = ff.createSystem(
@@ -65,7 +97,6 @@ def main():
     seed = (12345 + 1000 * args.walker_id) % 2 ** 31
     random.seed(seed)
 
-    # Build system
     if args.pdb:
         topology, system, positions = load_pdb_system(args.pdb, args.ff)
         # Make sure your PLUMED ATOMS indices match the atoms in this PDB/topology.
@@ -74,7 +105,6 @@ def main():
         topology, system, positions = build_toy_dimer()
         # For toy dimer, use in plumed.dat: DISTANCE ATOMS=1,2
 
-    # Read & parameterize PLUMED script
     with open(args.plumed) as f:
         script = f.read()
     script = (script
@@ -83,14 +113,12 @@ def main():
 
     system.addForce(PlumedForce(script))
 
-    # Integrator
     temperature = args.temp_k * unit.kelvin
     friction = args.friction_ps / unit.picosecond
     dt = args.dt_fs * unit.femtoseconds
     integrator = mm.LangevinMiddleIntegrator(temperature, friction, dt)
     integrator.setRandomNumberSeed(seed)
 
-    # Platform selection (optional)
     if args.platform:
         platform = mm.Platform.getPlatformByName(args.platform)
         simulation = app.Simulation(topology, system, integrator, platform)

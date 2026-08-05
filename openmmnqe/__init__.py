@@ -1,3 +1,16 @@
+"""
+openmmnqe: OpenMM workflows for nuclear quantum effects and enhanced sampling.
+
+Bundles system preparation (:mod:`openmmnqe.io`), OpenMM simulation stages
+including RPMD and adQTB nuclear-quantum-effect integrators and ML/MM
+potentials (:mod:`openmmnqe.openmm`), PLUMED-based collective variables and
+enhanced sampling (:mod:`openmmnqe.plumed`), reference-path estimation
+(:mod:`openmmnqe.path`), ORCA/NEB quantum-chemistry helpers
+(:mod:`openmmnqe.qm`), RPMD reporters (:mod:`openmmnqe.reporters`),
+free-energy-surface plotting (:mod:`openmmnqe.plotting`) and assorted
+simulation-setup utilities (:mod:`openmmnqe.tools`).
+"""
+
 __version__ = "0.1.0"
 
 from .io import (remove_directory,

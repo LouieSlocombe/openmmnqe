@@ -279,11 +279,9 @@ def plumed_input_steered_pt(modeller,
     if cv_stop is None:
         cv_stop = -cv_start
 
-    # Limits
     wall = np.round(r_02 * wall, decimals=2)
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    # Convert atom indices to PLUMED format
     idx = atom_indices_to_plumed(idx)
 
     cv_block = f"""c_d:        COORDINATION GROUPA={idx[0]} GROUPB={idx[1]} R_0={r_0}
@@ -326,17 +324,73 @@ def plumed_input_1pt(modeller,
                      grid_bin=200,
                      kappa=500.0,
                      f_opes=False):
-    # Distances
+    """
+    Build a PLUMED input that biases a single proton transfer with metadynamics.
+
+    The collective variable is the same one :func:`plumed_input_steered_pt`
+    drags: the difference between the donor-hydrogen and acceptor-hydrogen
+    coordination numbers, running from +1 (bonded to the donor) to -1
+    (bonded to the acceptor). Distance and angle walls keep the hydrogen
+    bond intact while the proton moves. Use this to bias the transfer with
+    metadynamics; use :func:`plumed_input_steered_pt` to drag it instead.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller holding the reactant geometry, used to size the switching
+        function and the walls.
+    idx : list of int
+        Three 0-based atom indices, ordered donor, hydrogen, acceptor.
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR/OPES scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    r_0 : float, optional
+        Multiplier on the shorter of the two donor/acceptor-hydrogen
+        distances that sets ``R_0`` of the coordination switching function.
+        Default is 1.1.
+    wall : float, optional
+        Multiplier on the donor-acceptor distance that sets the upper wall
+        keeping the hydrogen bond intact. Default is 1.5.
+    angle_lim : float, optional
+        Lower wall on the donor-hydrogen-acceptor angle, in degrees.
+        Default is 130.0.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
+        for ``OPES_METAD``, in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias, in CV units. Default is 0.05.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
+        Default is 20.0.
+    grid_min, grid_max : float, optional
+        Bounds of the bias/FES grid. Default is -1.1 and 1.1.
+    grid_bin : int, optional
+        Number of grid bins. Default is 200.
+    kappa : float, optional
+        Spring constant of the distance and angle walls. Default is 500.0.
+    f_opes : bool, optional
+        If True, bias with ``OPES_METAD`` instead of well-tempered
+        ``METAD``. Default is False.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command that reconstructs the free-energy surface from the
+        bias written by *plumed_input*: ``plumed sum_hills``, or the bundled
+        OPES ``FES_from_State.py`` when *f_opes* is True.
+    """
     r_01 = distance_between_atoms(modeller, idx[0], idx[1])
     r_21 = distance_between_atoms(modeller, idx[2], idx[1])
     r_02 = distance_between_atoms(modeller, idx[0], idx[2])
     r_0 = np.round(min(r_01, r_21) * r_0, decimals=2)
 
-    # Limits
     wall = np.round(r_02 * wall, decimals=2)
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    # Convert atom indices to PLUMED format
     idx = atom_indices_to_plumed(idx)
 
     temperature_str = temperature.value_in_unit(unit.kelvin)
@@ -384,23 +438,80 @@ def plumed_input_2pt_1d(modeller,
                         grid_bin=200,
                         kappa=500.0,
                         f_opes=False):
-    # Proton transfer 1
+    """
+    Build a PLUMED input that biases two proton transfers as a single 1-D CV.
+
+    Each proton transfer gets its own donor-hydrogen/acceptor-hydrogen
+    coordination-difference CV, as in :func:`plumed_input_1pt`, and the two
+    are averaged into one collective variable, ``pt_cv = 0.5 * cv_diff1 +
+    0.5 * cv_diff2``, which is what the metadynamics bias acts on. Use this
+    for a concerted double proton transfer where only the combined reaction
+    coordinate matters; use :func:`plumed_input_2pt_2d` to resolve the two
+    transfers on separate axes.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller holding the reactant geometry, used to size the switching
+        functions and the walls.
+    idx1, idx2 : list of int
+        Three 0-based atom indices each, ordered donor, hydrogen, acceptor,
+        for the first and second proton transfer.
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR/OPES scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    r_0 : float, optional
+        Multiplier on the shorter donor/acceptor-hydrogen distance in each
+        pair that sets ``R_0`` of its coordination switching function.
+        Default is 1.1.
+    wall : float, optional
+        Multiplier on the larger of the two donor-acceptor distances that
+        sets the upper wall keeping both hydrogen bonds intact. Default is
+        1.5.
+    angle_lim : float, optional
+        Lower wall on each donor-hydrogen-acceptor angle, in degrees.
+        Default is 130.0.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
+        for ``OPES_METAD``, in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias, in CV units. Default is 0.05.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
+        Default is 20.0.
+    grid_min, grid_max : float, optional
+        Bounds of the bias/FES grid. Default is -1.1 and 1.1.
+    grid_bin : int, optional
+        Number of grid bins. Default is 200.
+    kappa : float, optional
+        Spring constant of the distance and angle walls. Default is 500.0.
+    f_opes : bool, optional
+        If True, bias with ``OPES_METAD`` instead of well-tempered
+        ``METAD``. Default is False.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command that reconstructs the free-energy surface from the
+        bias written by *plumed_input*.
+    """
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
     r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
     r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
     r1_0 = np.round(min(r1_01, r1_21) * r_0, decimals=2)
 
-    # Proton transfer 2
     r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1])
     r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1])
     r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2])
     r2_0 = np.round(min(r2_01, r2_21) * r_0, decimals=2)
 
-    # Limits
     wall = np.round(max(r1_02, r2_02) * wall, decimals=2)
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    # Convert atom indices to PLUMED format
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
 
@@ -463,23 +574,81 @@ def plumed_input_2pt_2d(modeller,
                         grid_bin=200,
                         kappa=500.0,
                         f_opes=False):
-    # Proton transfer 1
+    """
+    Build a PLUMED input that biases two proton transfers on a 2-D surface.
+
+    Each proton transfer gets its own donor-hydrogen/acceptor-hydrogen
+    coordination-difference CV, as in :func:`plumed_input_1pt`, and the two
+    are kept as separate axes (``ARG=cv_diff1,cv_diff2``) so the free-energy
+    surface resolves how the transfers are correlated. Use
+    :func:`plumed_input_2pt_1d` instead when only the combined coordinate is
+    needed.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller holding the reactant geometry, used to size the switching
+        functions and the walls.
+    idx1, idx2 : list of int
+        Three 0-based atom indices each, ordered donor, hydrogen, acceptor,
+        for the first and second proton transfer.
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR/OPES scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    r_0 : float, optional
+        Multiplier on the shorter donor/acceptor-hydrogen distance in each
+        pair that sets ``R_0`` of its coordination switching function.
+        Default is 1.1.
+    wall : float, optional
+        Multiplier on the larger of the two donor-acceptor distances that
+        sets the upper wall keeping both hydrogen bonds intact. Default is
+        1.5.
+    angle_lim : float, optional
+        Lower wall on each donor-hydrogen-acceptor angle, in degrees.
+        Default is 130.0.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
+        for ``OPES_METAD``, in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias along each axis, in CV units. Default is
+        0.05.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
+        Default is 20.0.
+    grid_min, grid_max : float, optional
+        Bounds of the bias/FES grid, applied to both axes. Default is -1.1
+        and 1.1.
+    grid_bin : int, optional
+        Number of grid bins per axis. Default is 200.
+    kappa : float, optional
+        Spring constant of the distance and angle walls. Default is 500.0.
+    f_opes : bool, optional
+        If True, bias with ``OPES_METAD`` instead of well-tempered
+        ``METAD``. Default is False.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command that reconstructs the free-energy surface from the
+        bias written by *plumed_input*.
+    """
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
     r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
     r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
     r1_0 = np.round(min(r1_01, r1_21) * r_0, decimals=2)
 
-    # Proton transfer 2
     r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1])
     r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1])
     r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2])
     r2_0 = np.round(min(r2_01, r2_21) * r_0, decimals=2)
 
-    # Limits
     wall = np.round(max(r1_02, r2_02) * wall, decimals=2)
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
-    # Convert atom indices to PLUMED format
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
 
@@ -536,10 +705,58 @@ def plumed_input_wob_1(idx1,
                        grid_min=-1.1,
                        grid_max=1.1,
                        grid_bin=200):
-    # Convert atom indices to PLUMED format
+    """
+    Build a PLUMED input biasing the asynchronicity of two proton transfers.
+
+    Each proton transfer gets its own donor-hydrogen/acceptor-hydrogen
+    coordination-difference CV, as in :func:`plumed_input_1pt`, but here the
+    two are *subtracted* rather than averaged, ``pt_cv = cv_diff1 -
+    cv_diff2``. This CV is near zero when the two transfers move together
+    and grows when one runs ahead of the other, i.e. the wobble base pair's
+    concerted-vs-stepwise double proton transfer coordinate. Unlike the
+    ``1pt``/``2pt_*`` builders, *r_0* and *wall* here are absolute distances
+    rather than multipliers on the current geometry, and the walls always
+    use a fixed spring constant of 500 kJ/mol/nm^2.
+
+    Parameters
+    ----------
+    idx1, idx2 : list of int
+        Three 0-based atom indices each, ordered donor, hydrogen, acceptor,
+        for the first and second proton transfer.
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    r_0 : float, optional
+        ``R_0`` of each coordination switching function, in nm. Default is
+        0.14.
+    wall : float, optional
+        Upper wall on each donor-acceptor distance, in nm. Default is 0.4.
+    angle_lim : float, optional
+        Lower wall on each donor-hydrogen-acceptor angle, in degrees.
+        Default is 100.0.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``), in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias, in CV units. Default is 0.05.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Default is 20.0.
+    grid_min, grid_max : float, optional
+        Bounds of the bias/FES grid. Default is -1.1 and 1.1.
+    grid_bin : int, optional
+        Number of grid bins. Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command (``plumed sum_hills``) that reconstructs the
+        free-energy surface from the bias written by *plumed_input*.
+    """
     idx1 = atom_indices_to_plumed(idx1)
     idx2 = atom_indices_to_plumed(idx2)
-    # Convert angle limit to radians and round
     angle_lim = np.round(np.deg2rad(angle_lim), decimals=2)
 
     temperature_str = temperature.value_in_unit(unit.kelvin)
@@ -586,10 +803,58 @@ def plumed_input_wob_2(modeller,
                        grid_min=-1.1,
                        grid_max=1.1,
                        grid_bin=200):
-    # Unpack indices
+    """
+    Build a PLUMED input biasing a 5-term wobble base-pair hydrogen-bond CV.
+
+    Ten atoms spanning the wobble base pair's hydrogen-bond network (N3, H3,
+    O6, O4, N1, H1, O2, N2, matching PDB nucleobase atom names) are combined
+    into five coordination-difference terms, ``z1`` through ``z5`` -- one
+    per competing hydrogen bond -- which are summed into a single CV ``z``
+    that metadynamics biases. This generalises the two-atom-pair CV of
+    :func:`plumed_input_1pt` to the wobble pair's full hydrogen-bond
+    network. Upper walls on the O6-O4 and N1-N3 distances keep the base
+    pair from separating.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller holding the reactant geometry, used to size the
+        coordination switching functions.
+    idx : sequence of int
+        Eight 0-based atom indices, ordered N3, H3, O6, O4, N1, H1, O2, N2.
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    r_0 : float, optional
+        Multiplier on each measured distance that sets the ``R_0`` of its
+        coordination switching function. Default is 1.1.
+    wall : float, optional
+        Multiplier on the O6-O4 and N1-N3 distances that sets their upper
+        walls. Default is 4.0.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``), in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias, in CV units. Default is 0.05.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Default is 20.0.
+    grid_min, grid_max : float, optional
+        Unused; kept for signature parity with the other ``wob`` builders.
+    grid_bin : int, optional
+        Number of grid bins reported to the FES reconstruction command.
+        Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command (``plumed sum_hills``) that reconstructs the
+        free-energy surface from the bias written by *plumed_input*.
+    """
     idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
 
-    # Calculate r_0 for each distance
     r_1 = np.round(distance_between_atoms(modeller, idx_n3, idx_h3) * r_0, decimals=2)
     r_2 = np.round(distance_between_atoms(modeller, idx_o6, idx_h3) * r_0, decimals=2)
     r_3 = np.round(distance_between_atoms(modeller, idx_o6, idx_h3) * r_0, decimals=2)
@@ -600,16 +865,6 @@ def plumed_input_wob_2(modeller,
     r_8 = np.round(distance_between_atoms(modeller, idx_n2, idx_o2) * r_0, decimals=2)
     r_9 = np.round(distance_between_atoms(modeller, idx_n2, idx_o2) * r_0, decimals=2)
     r_10 = np.round(distance_between_atoms(modeller, idx_n3, idx_h3) * r_0, decimals=2)
-
-    # # Convert atom indices to PLUMED format
-    # idx_n3 = atom_indices_to_plumed(idx_n3)
-    # idx_h3 = atom_indices_to_plumed(idx_h3)
-    # idx_o6 = atom_indices_to_plumed(idx_o6)
-    # idx_o4 = atom_indices_to_plumed(idx_o4)
-    # idx_n1 = atom_indices_to_plumed(idx_n1)
-    # idx_h1 = atom_indices_to_plumed(idx_h1)
-    # idx_o2 = atom_indices_to_plumed(idx_o2)
-    # idx_n2 = atom_indices_to_plumed(idx_n2)
 
     idx_n3 += 1
     idx_h3 += 1
@@ -694,13 +949,64 @@ def plumed_input_wob_3(modeller,
                        grid_min=-1.1,
                        grid_max=1.1,
                        grid_bin=200):
+    """
+    Build a PLUMED input biasing a wobble base pair's transfer and opening.
+
+    The CV combines two terms: ``z1``, the O4-H3/O2-H3 distance difference
+    (the proton-transfer coordinate), and ``z2``, the N2-O6-O4 angle (how
+    open the wobble pair is). Walls bound the opening angle, the distance
+    between the two bases' R-group atoms (keeps the bases from drifting
+    apart) and the O6-O4/N2-O2 distances (keeps the pair from separating
+    entirely).
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller holding the reactant geometry, used to size the walls.
+    idx_o4, idx_h3, idx_o2, idx_o6, idx_n2 : list of int
+        Single-element lists each holding the 0-based index of the named
+        atom (O4, H3, O2, O6, N2) in the wobble pair's hydrogen-bond
+        network.
+    idx_nr1, idx_nr2 : list of int
+        Single-element lists holding the 0-based index of an R-group atom
+        on each base, used to bound how far the bases can separate.
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    r_0 : float, optional
+        Unused; kept for signature parity with the other ``wob`` builders.
+    wall : float, optional
+        Multiplier defining the R-group distance's lower/upper walls
+        (``2 - wall`` and *wall* times the current distance) and the upper
+        walls on the O6-O4 and N2-O2 distances. Default is 1.1.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``), in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias, in CV units. Default is 0.05.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Default is 20.0.
+    grid_min, grid_max : float, optional
+        Unused; kept for signature parity with the other ``wob`` builders.
+    grid_bin : int, optional
+        Number of grid bins reported to the FES reconstruction command.
+        Default is 200.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command (``plumed sum_hills``) that reconstructs the
+        free-energy surface from the bias written by *plumed_input*.
+    """
     wall_u = np.round(distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]) * wall, decimals=2)
     wall_l = np.round(distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]) * (2.0 - wall), decimals=2)
 
     wall_1 = np.round(distance_between_atoms(modeller, idx_o6[0], idx_o4[0]) * wall, decimals=2)
     wall_2 = np.round(distance_between_atoms(modeller, idx_n2[0], idx_o2[0]) * wall, decimals=2)
 
-    # Proton-transfer CVs
     idx_o4 = atom_indices_to_plumed(idx_o4)[0]
     idx_h3 = atom_indices_to_plumed(idx_h3)[0]
     idx_o2 = atom_indices_to_plumed(idx_o2)[0]
@@ -758,6 +1064,63 @@ def plumed_input_wob_4(modeller,
                        grid_bin=200,
                        kappa=2000.0,
                        f_opes=False):
+    """
+    Build a PLUMED input biasing a 5-term wobble base-pair CV with fixed walls.
+
+    Like :func:`plumed_input_wob_2`, ten atoms spanning the wobble base
+    pair's hydrogen-bond network (N3, H3, O6, O4, N1, H1, O2, N2, plus two
+    R-group atoms NR1/NR2) are combined into five distance-difference terms
+    summed into a single CV ``z`` that metadynamics biases, but here the
+    sub-CVs use plain ``DISTANCE`` rather than ``COORDINATION``, and the
+    hydrogen-bond and base-pair-opening distances are held with fixed
+    (rather than geometry-scaled) upper/lower walls. A restraint on the
+    inter-base rise (``dist.z``) and walls on an R-group angle further
+    constrain the pair geometry.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller holding the reactant geometry, used to size the walls.
+    idx : sequence of int
+        Ten 0-based atom indices, ordered N3, H3, O6, O4, N1, H1, O2, N2,
+        NR1, NR2 (NR1/NR2 being an R-group atom on each base).
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR/OPES scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    r_0 : float, optional
+        Unused; kept for signature parity with the other ``wob`` builders.
+    wall : float, optional
+        Multiplier defining the (currently unused) R-group distance walls
+        ``rr_u``/``rr_l``. Default is 1.1.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
+        for ``OPES_METAD``, in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias, in CV units. Default is 0.05.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
+        Default is 20.0.
+    grid_bin : int, optional
+        Number of grid bins reported to the FES reconstruction command.
+        Default is 200.
+    kappa : float, optional
+        Spring constant used by every wall and the rise restraint. Default
+        is 2000.0.
+    f_opes : bool, optional
+        If True, bias with ``OPES_METAD`` instead of well-tempered
+        ``METAD``. Default is False.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command that reconstructs the free-energy surface from the
+        bias written by *plumed_input*: ``plumed sum_hills``, or the bundled
+        OPES ``FES_from_State.py`` when *f_opes* is True.
+    """
     rr_u = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * wall, decimals=2)
     rr_l = np.round(distance_between_atoms(modeller, idx[-1], idx[-2]) * (2.0 - wall), decimals=2)
 
@@ -765,9 +1128,7 @@ def plumed_input_wob_4(modeller,
     r2 = np.round(distance_between_atoms(modeller, idx[4], idx[0]), decimals=2)
     r3 = np.round(distance_between_atoms(modeller, idx[6], idx[7]), decimals=2)
 
-    # Convert atom indices to PLUMED format
     idx = atom_indices_to_plumed(idx)
-    # Unpack indices
     # 0 1   2   3   4   5   6   7   8    9
     n3, h3, o6, o4, n1, h1, o2, n2, nr1, nr2 = idx
     temperature_str = temperature.value_in_unit(unit.kelvin)
@@ -863,6 +1224,65 @@ def plumed_input_neb_path(temperature,
                           lambda_val=250.0,
                           neigh_size=8,
                           f_opes=False):
+    """
+    Build a PLUMED input that biases progress along a NEB-derived path.
+
+    Uses PLUMED's ``PATHMSD`` collective variable against a reference path
+    (``neb_path.pdb``, as produced by :func:`openmmnqe.qm.get_neb_path` /
+    :func:`openmmnqe.qm.stitch_path`) to define the progress-along-path
+    coordinate ``path.sss``, which metadynamics biases, and the
+    distance-from-path coordinate ``path.zzz``, which is kept small by an
+    upper wall so sampling stays near the path. ``FIT_TO_TEMPLATE`` aligns
+    each frame to ``index_atoms.pdb`` before the path distances are
+    computed, so both files must exist in the working directory the
+    resulting script is run from.
+
+    Parameters
+    ----------
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR/OPES scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    wall : float, optional
+        Upper wall on ``path.zzz``, the mean-squared distance from the
+        reference path. Default is 0.1.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
+        for ``OPES_METAD``, in kJ/mol. Default is 15.0.
+    sigma : float, optional
+        Gaussian width of the bias along ``path.sss``, in nm. Default is
+        0.1.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
+        Default is 5.0.
+    grid_min, grid_max : float, optional
+        Bounds of the ``path.sss`` bias/FES grid, in units of path node
+        index. Default is 0.0 and 26.0.
+    grid_bin : int, optional
+        Number of grid bins. Default is 500.
+    kappa : float, optional
+        Spring constant of the ``path.zzz`` wall. Default is 500.0.
+    lambda_val : float, optional
+        ``LAMBDA`` parameter of ``PATHMSD``, controlling how sharply
+        ``path.sss`` distinguishes neighbouring frames; see
+        :func:`estimate_path_lambda`. Default is 250.0.
+    neigh_size : int, optional
+        ``NEIGH_SIZE`` of ``PATHMSD``, the number of reference frames
+        considered when computing the path distance. Default is 8.
+    f_opes : bool, optional
+        If True, bias with ``OPES_METAD`` instead of well-tempered
+        ``METAD``. Default is False.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command that reconstructs the free-energy surface from the
+        bias written by *plumed_input*: ``plumed sum_hills``, or the bundled
+        OPES ``FES_from_State.py`` when *f_opes* is True.
+    """
     temperature_str = temperature.value_in_unit(unit.kelvin)
     kt_str = temperature_to_kbt(temperature)
 
@@ -897,9 +1317,67 @@ def plumed_input_neb_path_wob(idx,
                               lambda_val=500.0,
                               neigh_size=8,
                               f_opes=False):
-    # Convert atom indices to PLUMED format
+    """
+    Build a PLUMED input biasing progress along a NEB path, with wobble-pair walls.
+
+    Extends :func:`plumed_input_neb_path` with two extra restraints that
+    keep a wobble base pair intact while ``path.sss`` is biased: a torsion
+    wall bounding the CA1-NR1-CB1-NR2 dihedral, and a monitored (currently
+    unrestrained) distance between the two bases' R-group atoms. As in
+    :func:`plumed_input_neb_path`, ``neb_path.pdb`` and ``index_atoms.pdb``
+    must exist in the working directory the resulting script is run from.
+
+    Parameters
+    ----------
+    idx : sequence of int
+        Six 0-based atom indices, ordered CA1, CA2, CB1, CB2, NR1, NR2: a
+        backbone atom and an R-group atom on each base, used to define the
+        dihedral wall and the monitored R-group distance.
+    temperature : openmm.unit.Quantity
+        Simulation temperature, used for the BIASFACTOR/OPES scaling and to
+        report ``--kt`` to the FES reconstruction command.
+    wall : float, optional
+        Upper wall on ``path.zzz``, the mean-squared distance from the
+        reference path. Default is 0.1.
+    pace : int, optional
+        ``PACE`` of the metadynamics bias, in steps. Default is 500.
+    height : float, optional
+        Gaussian height (``HEIGHT``) for standard METAD, or the ``BARRIER``
+        for ``OPES_METAD``, in kJ/mol. Default is 10.0.
+    sigma : float, optional
+        Gaussian width of the bias along ``path.sss``, in nm. Default is
+        0.1.
+    bias : float, optional
+        Well-tempered ``BIASFACTOR``. Ignored when *f_opes* is True.
+        Default is 5.0.
+    grid_min, grid_max : float, optional
+        Bounds of the ``path.sss`` bias/FES grid, in units of path node
+        index. Default is 0.0 and 26.0.
+    grid_bin : int, optional
+        Number of grid bins. Default is 500.
+    kappa : float, optional
+        Spring constant of the ``path.zzz`` and dihedral walls. Default is
+        500.0.
+    lambda_val : float, optional
+        ``LAMBDA`` parameter of ``PATHMSD``; see :func:`estimate_path_lambda`.
+        Default is 500.0.
+    neigh_size : int, optional
+        ``NEIGH_SIZE`` of ``PATHMSD``, the number of reference frames
+        considered when computing the path distance. Default is 8.
+    f_opes : bool, optional
+        If True, bias with ``OPES_METAD`` instead of well-tempered
+        ``METAD``. Default is False.
+
+    Returns
+    -------
+    plumed_input : str
+        The PLUMED input script.
+    sum_hills_input : str
+        Shell command that reconstructs the free-energy surface from the
+        bias written by *plumed_input*: ``plumed sum_hills``, or the bundled
+        OPES ``FES_from_State.py`` when *f_opes* is True.
+    """
     idx = atom_indices_to_plumed(idx)
-    # Unpack indices
     ca1, ca2, cb1, cb2, nr1, nr2 = idx
 
     temperature_str = temperature.value_in_unit(unit.kelvin)

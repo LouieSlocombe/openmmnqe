@@ -22,7 +22,6 @@ def test_run_openmm_relaxation():
     modeller.addSolvent(forcefield,
                         padding=padding * unit.nanometer,
                         boxShape=box_shape)
-    # nqe.center_in_box(modeller)
 
     nqe.run_openmm_relaxation(modeller, forcefield)
     nqe.remove_file('minimized.pdb')
@@ -176,11 +175,9 @@ phi: TORSION ATOMS={idx_str}
 metad: METAD ARG=phi PACE=500 HEIGHT=4.0 SIGMA=0.35 BIASFACTOR=12 TEMP=300 GRID_MIN=-pi GRID_MAX=pi GRID_BIN=300 FILE=HILLS
 PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 """
-    # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
-    # Minimise the system first
     nqe.run_openmm_relaxation_simple(modeller, forcefield)
 
     pdb = app.PDBFile("minimized.pdb")
@@ -198,9 +195,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         plumed_script_path=plumed_script_path,
                         steps=50_000)
 
-    # Run PLUMED sum_hills to get FES
     os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
-    # Plot FES
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
@@ -224,9 +219,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                              plumed_script_path=plumed_script_path,
                              checkpoint_file='rpmd_ready.chk')
 
-    # Run PLUMED sum_hills to get FES
     os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
-    # Plot FES
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
@@ -278,11 +271,9 @@ metad: OPES_METAD ARG=phi PACE=500 BARRIER=4.0 SIGMA=0.2 TEMP={temperature.value
 PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 """
 
-    # Write PLUMED script to a temporary file
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
         f.write(plumed_input)
-    # Minimise the system first
     nqe.run_openmm_relaxation_simple(modeller, forcefield)
 
     pdb = app.PDBFile("minimized.pdb")
@@ -300,10 +291,8 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         plumed_script_path=plumed_script_path,
                         steps=n_steps)
 
-    # Run PLUMED sum_hills to get FES
     fes_cmd = os.path.join(nqe.openmm_nqe_dir, "opes", "FES_from_State.py")
     os.system(f'python3 {fes_cmd} --state STATE --min 0 --max 4.0 --bin 100 --kt {kbt}')
-    # Plot FES
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
@@ -356,7 +345,6 @@ def test_malonaldehyde_pt():
                         barostat_freq=None,
                         steps=steps_prod)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
@@ -422,7 +410,6 @@ def test_malonaldehyde_pt_solvated():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
@@ -498,7 +485,6 @@ def test_malonaldehyde_pt_quantum_solvated():
                              potential=potential,
                              ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
@@ -576,15 +562,12 @@ def test_malonaldehyde_pt_adqtb_solvated():
                               potential=potential,
                               ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('adqtb_ready*')
-    # nqe.remove_file_pattern('adqtb_prod*')
 
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
@@ -662,7 +645,6 @@ def test_malonaldehyde_pt_solvated_full():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
@@ -736,7 +718,6 @@ def test_fad_pt_solvated():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
@@ -808,7 +789,6 @@ def test_gc_pt_solvated():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
@@ -889,7 +869,6 @@ def test_gc_pt_quantum_solvated():
                              potential=potential,
                              ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
@@ -964,14 +943,12 @@ def test_g_enol_t_pt_solvated():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('prod*')
 
     nqe.remove_file('STATE')
     nqe.remove_file('KERNELS')
@@ -1048,14 +1025,11 @@ def test_gt_wob_pt_solvated():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
 
-    # nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('prod*')
     nqe.remove_file('STATE')
     nqe.remove_file('KERNELS')
     nqe.remove_file('COLVAR')
@@ -1099,14 +1073,11 @@ def test_malonaldehyde_pathmsd():
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    # view(reactant)
 
     product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
-    # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.01)
     neb_path = nqe.quick_guess_path(reactant, product, n_images=n_images)
-    # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
     lambda_val = nqe.estimate_path_lambda("neb_path.pdb") * 0.5
@@ -1114,7 +1085,7 @@ def test_malonaldehyde_pathmsd():
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
     nqe.strip_hydrogens_keep_indices("neb_path.pdb", "neb_path_tmp.pdb", keep=idx)
     nqe.strip_hydrogens_keep_indices("index_atoms.pdb", "index_atoms_tmp.pdb", keep=idx)
-    # rename the files to overwrite
+    # Written to _tmp names above since strip_hydrogens_keep_indices can't write in place.
     os.rename("neb_path_tmp.pdb", "neb_path.pdb")
     os.rename("index_atoms_tmp.pdb", "index_atoms.pdb")
 
@@ -1140,14 +1111,12 @@ def test_malonaldehyde_pathmsd():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('prod*')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
     nqe.remove_file('KERNELS')
@@ -1193,13 +1162,10 @@ def test_gt_wob_pathmsd():
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    # view(reactant)
     product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
-    # view(product)
     calc = mace_off(model_name=ml_model, device='cuda')
     product = nqe.optimise_geom(product, calc, fmax=0.01)
     neb_path = nqe.quick_guess_path(reactant, product)
-    # view(neb_path)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
@@ -1232,14 +1198,12 @@ def test_gt_wob_pathmsd():
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", show=True)
 
     nqe.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
-    # nqe.remove_file_pattern('prod*')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
     nqe.remove_file('STATE')

@@ -73,13 +73,13 @@ def centroid_positions(simulation, n_atoms, n_beads):
     list of openmm.Vec3
         A list of centroid positions for each atom, with units of nanometers.
     """
-    acc = np.zeros((n_atoms, 3), dtype=float)  # Initialize accumulator for positions.
+    acc = np.zeros((n_atoms, 3), dtype=float)
     for b in range(n_beads):
-        state = simulation.integrator.getState(b, getPositions=True)  # Get state for bead `b`.
-        r = state.getPositions(asNumpy=True)  # Extract positions as a NumPy array.
-        acc += r.value_in_unit(unit.nanometer)  # Accumulate positions in nanometers.
-    acc /= n_beads  # Compute the average positions across all beads.
-    return [openmm.Vec3(*acc[i]) for i in range(n_atoms)] * unit.nanometer  # Return centroid positions.
+        state = simulation.integrator.getState(b, getPositions=True)
+        r = state.getPositions(asNumpy=True)
+        acc += r.value_in_unit(unit.nanometer)
+    acc /= n_beads
+    return [openmm.Vec3(*acc[i]) for i in range(n_atoms)] * unit.nanometer
 
 
 def get_thermal_de_broglie_wavelength(mass, temperature):
@@ -148,35 +148,28 @@ def init_beads_scaled(simulation, positions, n_beads, temperature, scale_factor=
     system = simulation.system
     n_atoms = system.getNumParticles()
 
-    # Get the masses of all particles in daltons.
     masses_val = np.array([system.getParticleMass(i).value_in_unit(unit.dalton)
                            for i in range(n_atoms)])
     masses_quantity = masses_val * unit.dalton
 
-    # Calculate the thermal de Broglie wavelength for each particle.
     lambdas = get_thermal_de_broglie_wavelength(masses_quantity, temperature)
     lambdas_nm = lambdas.value_in_unit(unit.nanometer)
 
-    # Ensure positions are in the correct unit (nanometers).
     if not unit.is_quantity(positions):
         positions = positions * unit.nanometer
     pos0 = positions.value_in_unit(unit.nanometer)
 
-    # Initialize a random number generator with a fixed seed.
     rng = np.random.default_rng(0)
 
-    # Log information about the thermal wavelengths.
     print(f"Initializing {n_beads} beads scaled by thermal wavelengths...")
     print(f"Max Lambda (lightest atom): {np.max(lambdas_nm):.4f} nm")
     print(f"Min Lambda (heaviest atom): {np.min(lambdas_nm):.4f} nm")
 
-    # Perturb the positions for each bead.
     for b in range(n_beads):
         noise = rng.normal(size=(n_atoms, 3)) * lambdas_nm[:, np.newaxis] * scale_factor
         bead_pos = pos0 + noise
         simulation.integrator.setPositions(b, bead_pos * unit.nanometer)
 
-    # Set the velocities of the system to match the target temperature.
     simulation.context.setVelocitiesToTemperature(temperature)
 
 
@@ -245,7 +238,6 @@ def count_dna_and_estimate_charge(topology):
         if residue.name.strip() in dna_residue_names:
             num_dna_residues += 1
 
-    # Estimate: -1 e per nucleotide
     estimated_charge = -num_dna_residues
 
     return estimated_charge
@@ -289,7 +281,6 @@ def deuterate_system(modeller, system, option='all', target_resname=None):
     """
     deuterium_mass = app.element.deuterium.mass
 
-    # Define residue sets for different options
     protein_residues = {
         'ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY', 'HIS',
         'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER', 'THR', 'TRP',
@@ -314,7 +305,6 @@ def deuterate_system(modeller, system, option='all', target_resname=None):
 
     nucleic_residues = dna_residues.union(rna_residues)
 
-    # Determine target residues based on the option
     target_residues = set()
     if option == 'all':
         pass
@@ -335,13 +325,11 @@ def deuterate_system(modeller, system, option='all', target_resname=None):
     else:
         raise ValueError("Option must be 'all', 'water', 'protein', 'dna', 'rna', 'nucleic', or 'ligand'")
 
-    # Deuterate all hydrogens if option is 'all'
     if option == 'all':
         for atom in modeller.topology.atoms():
             if atom.element and atom.element.symbol == 'H':
                 system.setParticleMass(atom.index, deuterium_mass)
     else:
-        # Deuterate hydrogens in the specified residue set
         found_target = False
         for residue in modeller.topology.residues():
             if residue.name in target_residues:
@@ -350,7 +338,6 @@ def deuterate_system(modeller, system, option='all', target_resname=None):
                     if atom.element and atom.element.symbol == 'H':
                         system.setParticleMass(atom.index, deuterium_mass)
 
-        # Print warnings if no matching residues are found
         if not found_target and option == 'ligand':
             print(f"Warning: No ligand named '{target_resname}' was found.")
         elif not found_target and option != 'all':
@@ -488,7 +475,6 @@ def set_adqtb_particle_types_by_element(
         Z : int
             The atomic number, or 10**9 if unknown.
         """
-        # OpenMM Element has .symbol and .atomic_number; allow strings too.
         if el is None:
             return unknown_symbol, 10 ** 9
         sym = getattr(el, "symbol", None)
@@ -501,7 +487,6 @@ def set_adqtb_particle_types_by_element(
             Z = 10 ** 9
         return sym, Z
 
-    # Infer per-particle elements
     if particle_elements is None:
         if topology is None:
             raise ValueError("Provide topology or particle_elements.")
@@ -510,7 +495,6 @@ def set_adqtb_particle_types_by_element(
 
     n = len(particle_elements)
 
-    # Optional sanity check against the System particle count
     if system is not None:
         n_sys = system.getNumParticles()
         if n_sys != n:
@@ -520,7 +504,6 @@ def set_adqtb_particle_types_by_element(
                 "pass particle_elements with one entry per System particle."
             )
 
-    # Build a stable symbol -> type_id mapping (sorted by atomic number, then symbol)
     symbol_to_Z: dict[str, int] = {}
     for el in particle_elements:
         sym, Z = _sym_and_Z(el)
@@ -529,7 +512,6 @@ def set_adqtb_particle_types_by_element(
     ordered_symbols = sorted(symbol_to_Z.items(), key=lambda kv: (kv[1], kv[0]))
     element_to_type = {sym: start_type + i for i, (sym, _) in enumerate(ordered_symbols)}
 
-    # Assign types to particles
     for idx, el in enumerate(particle_elements):
         sym, _ = _sym_and_Z(el)
         integrator.setParticleType(idx, int(element_to_type[sym]))
@@ -581,7 +563,6 @@ def atom_indices_from_vmd_picks(
     """
     topo = modeller.topology
 
-    # Build lookup: (chain_id_or_None, resname, resid_str, atomname) -> [atom.index,...]
     lookup = {}
     for atom in topo.atoms():
         res = atom.residue
@@ -600,7 +581,6 @@ def atom_indices_from_vmd_picks(
         resname, resid_num, ins_code, atomname = m.groups()
         resid_str = f"{resid_num}{ins_code or ''}"
 
-        # collect matches across chains unless chain_id specified
         matches: List[int] = []
         if chain_id is not None:
             matches = lookup.get((chain_id, resname, resid_str, atomname), [])
@@ -697,18 +677,15 @@ def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
     float
         Angle in radians (default) or degrees.
     """
-    # Positions are Vec3 with units (typically nanometers)
     pos = modeller.positions
 
     ri = pos[i].value_in_unit(unit.nanometer)
     rj = pos[j].value_in_unit(unit.nanometer)
     rk = pos[k].value_in_unit(unit.nanometer)
 
-    # Vectors from j to i and j to k
     v1 = (ri[0] - rj[0], ri[1] - rj[1], ri[2] - rj[2])
     v2 = (rk[0] - rj[0], rk[1] - rj[1], rk[2] - rj[2])
 
-    # Dot product and norms
     dot = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]
     n1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2 + v1[2] ** 2)
     n2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2 + v2[2] ** 2)
@@ -776,27 +753,31 @@ def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_inde
     """
     Swap the bonding configuration from O-H...O to O...H-O in an Atoms object.
 
-    Parameters:
-    atoms (Atoms): The ASE Atoms object.
-    donor_index (int): The index of the donor oxygen atom.
-    hydrogen_index (int): The index of the hydrogen atom.
-    acceptor_index (int): The index of the acceptor oxygen atom.
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        The ASE Atoms object.
+    donor_index : int
+        The index of the donor oxygen atom.
+    hydrogen_index : int
+        The index of the hydrogen atom.
+    acceptor_index : int
+        The index of the acceptor oxygen atom.
 
-    Returns:
-    Atoms: The updated Atoms object with the swapped bonding configuration.
+    Returns
+    -------
+    ase.Atoms
+        The updated Atoms object with the swapped bonding configuration.
     """
     atoms = atoms.copy()
-    # Get the positions of the donor, hydrogen, and acceptor atoms
     donor_pos = atoms.positions[donor_index]
     hydrogen_pos = atoms.positions[hydrogen_index]
     acceptor_pos = atoms.positions[acceptor_index]
 
-    # Calculate the new position for the hydrogen atom
     direction = acceptor_pos - donor_pos
-    direction /= np.linalg.norm(direction)  # Normalise the direction vector
+    direction /= np.linalg.norm(direction)
     new_hydrogen_pos = acceptor_pos - direction * np.linalg.norm(hydrogen_pos - donor_pos)
 
-    # Update the position of the hydrogen atom
     atoms.positions[hydrogen_index] = new_hydrogen_pos
 
     return atoms

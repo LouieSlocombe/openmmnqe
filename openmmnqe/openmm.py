@@ -308,7 +308,6 @@ def run_openmm_relaxation_simple(modeller,
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
 
-    # Local energy minimization
     print("Minimizing energy", flush=True)
     simulation.minimizeEnergy()
 
@@ -1379,15 +1378,13 @@ def run_openmm_rpmd_contracted(modeller,
     print("Assigning force groups for contraction...", flush=True)
 
     for force in system.getForces():
-        # Check for NonbondedForce (Handles VdW + Coulomb)
         if isinstance(force, openmm.NonbondedForce):
-            # Set the Direct Space calculation to Group 1
+            # NonbondedForce handles both VdW+Coulomb (direct space) and PME
+            # (reciprocal space), so its two parts are split across groups.
             force.setForceGroup(1)
-            # Set the Reciprocal Space (PME) calculation to Group 2
             force.setReciprocalSpaceForceGroup(2)
             print(f"  - {force.__class__.__name__}: Direct->Group 1, Reciprocal->Group 2")
 
-        # Check for Bonded Forces (HarmonicBond, Angle, Torsion, etc.)
         elif isinstance(force, (openmm.HarmonicBondForce,
                                 openmm.HarmonicAngleForce,
                                 openmm.PeriodicTorsionForce,
@@ -1396,7 +1393,6 @@ def run_openmm_rpmd_contracted(modeller,
             force.setForceGroup(0)
             print(f"  - {force.__class__.__name__}: Group 0")
 
-        # Barostat and others
         else:
             force.setForceGroup(0)
 
@@ -1807,9 +1803,6 @@ def run_openmm_adqtb_eq(modeller,
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
-    # set_adqtb_particle_types_by_element(integrator,
-    #                                     topology=modeller.topology,
-    #                                     system=system)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
@@ -1999,9 +1992,6 @@ def run_openmm_adqtb_prod(modeller,
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
-    # set_adqtb_particle_types_by_element(integrator,
-    #                                     topology=modeller.topology,
-    #                                     system=system)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)

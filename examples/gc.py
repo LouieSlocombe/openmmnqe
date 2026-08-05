@@ -21,7 +21,6 @@ if __name__ == "__main__":
     modeller.addHydrogens()
     forcefield = nqe.prepare_ligand_ff(forcefield_names, molecule)
 
-    # Prepare the box
     padding = 1.5
     box_shape = 'cube'
     modeller.addSolvent(forcefield,
@@ -39,39 +38,6 @@ if __name__ == "__main__":
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
-    #
-    # reactant = read('index_atoms.pdb')
-    # # view(reactant)
-    # product = nqe.swap_bonding_configuration(reactant, 17, 19, 11)
-    # product = nqe.swap_bonding_configuration(product, 5, 7, 20)
-    # # view(product)
-    # calc = mace_off(model_name=ml_model, device='cuda')
-    # product = nqe.optimise_geom(product, calc, fmax=0.01)
-    # neb_path = nqe.quick_guess_path(reactant, product)
-    # write("neb_path.xyz", neb_path)
-    # view(neb_path)
-    # nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-    # plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
-
-    pdb = app.PDBFile("minimized.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_heating(modeller,
-    #                        forcefield,
-    #                        potential=potential,
-    #                        ml_idx=ml_atoms,
-    #                        target_temp=temperature)
-    #
-    # pdb = app.PDBFile("equilibrate.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
-    # nqe.run_openmm_npt(modeller,
-    #                    forcefield,
-    #                    potential=potential,
-    #                    ml_idx=ml_atoms,
-    #                    temperature=temperature)
-    #
-    # pdb = app.PDBFile("npt_equilibrate.pdb")
-    # modeller = app.Modeller(pdb.topology, pdb.positions)
 
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['GGG1:O1', 'CCC1:H2', 'CCC1:N1'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['CCC1:N2', 'GGG1:H3', 'GGG1:N3'])
@@ -97,7 +63,6 @@ if __name__ == "__main__":
                         potential=potential,
                         ml_idx=ml_atoms)
 
-    # Run PLUMED sum_hills to get FES
     os.system(sum_hills_input)
     nqe.plot_plumed_fes("fes.dat", filename="fes", show=True)
     plt.close()
@@ -108,7 +73,6 @@ if __name__ == "__main__":
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
     nqe.remove_file_pattern('npt_equilibrate*')
-    # nqe.remove_file_pattern('prod*')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
     nqe.remove_file('STATE')

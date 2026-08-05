@@ -14,19 +14,34 @@ WHAM = os.environ.get("WHAM_PATH", "/home/louie/skunkworks/wham/wham/wham/wham")
 
 
 def compute_rdf(context, particles, box_size):
+    """
+    Compute the radial distribution function by sampling an OpenMM context.
+
+    Parameters
+    ----------
+    context : openmm.Context
+        Context to advance and sample positions from.
+    particles : int
+        Number of particles in the system.
+    box_size : float
+        Length of the (cubic) periodic box, in nanometers.
+
+    Returns
+    -------
+    list of float
+        RDF value for each of the first half of the histogram bins.
+    """
     bins = 100
     iterations = 2_000
     counts = [0] * bins
     for _ in range(iterations):
-        # Run a few steps of dynamics.
         context.getIntegrator().step(20)
 
-        # Count the number of distances in each bin.
         pos = context.getState(positions=True).getPositions().value_in_unit(unit.nanometer)
         for i in range(particles):
             for j in range(i):
                 delta = pos[i] - pos[j]
-                delta -= np.round(delta / box_size) * box_size  # Apply periodic boundary conditions
+                delta -= np.round(delta / box_size) * box_size  # Minimum-image convention
                 dist = unit.norm(delta)
                 counts[int(bins * dist / box_size)] += 1
 
@@ -69,7 +84,7 @@ def test_parahydrogen():
     openmm.LocalEnergyMinimizer.minimize(context)
     context.setVelocitiesToTemperature(temperature)
     # Equilibrate before collecting data
-    integrator.step(1_000)
+    integrator.step(1_000)  # Equilibrate before collecting data
     classical_rdf = compute_rdf(context, particles, box_size)
 
     n_beads = 4
@@ -131,7 +146,6 @@ def test_smd():
     simulation = app.Simulation(pdb.topology, system, integrator)
     simulation.context.setPositions(pdb.positions)
 
-    # Minimize
     openmm.LocalEnergyMinimizer.minimize(simulation.context)
 
     simulation.reporters.append(app.DCDReporter('smd_traj.dcd', 1_000))
@@ -144,7 +158,6 @@ def test_smd():
                                                       temperature=True,
                                                       speed=True))
 
-    # Equilibrate
     simulation.context.setVelocitiesToTemperature(300 * unit.kelvin)
     simulation.step(100_000)
 
@@ -156,7 +169,6 @@ def test_smd():
     i, j = a1.index, a2.index
     print("OpenMM indices:", i, j, "| names:", a1.name, a2.name)
 
-    # Distance from the loaded coordinates
     pos = pdb.positions
     delta = (pos[i] - pos[j]).value_in_unit(unit.nanometer)
     dist = np.linalg.norm([delta.x, delta.y, delta.z]) * unit.nanometer
@@ -168,31 +180,20 @@ def test_smd():
     cv = openmm.CustomBondForce('r')
     cv.addBond(index1, index2)
 
-    # starting value
     r0 = round(dist.value_in_unit(unit.nanometer), 1) * unit.nanometer
     r_start = r0.value_in_unit(unit.nanometer)
     r_end = 2.0
     n_windows = 24
     print("Starting distance r0 =", r_start, "nm")
 
-    # force constant
     fc_pull = 1_000.0 * unit.kilojoules_per_mole / unit.nanometers ** 2
-
-    # pulling speed
-    v_pulling = 0.01 * unit.nanometers / unit.picosecond  # nm/ps
-
-    # simulation time step
+    v_pulling = 0.01 * unit.nanometers / unit.picosecond
     dt = simulation.integrator.getStepSize()
+    total_steps = 30_000  # 120 ps
+    increment_steps = 10  # steps between incrementing r0 (1 makes the simulation slow)
 
-    # total number of steps
-    total_steps = 30_000  # 120ps
-
-    # number of steps to run between incrementing r0 (1 makes the simulation slow)
-    increment_steps = 10
-
-    # define a harmonic restraint on the CV
-    # the location of the restrain will be moved as we run the simulation
-    # this is constant velocity steered MD
+    # A harmonic restraint on the CV whose centre moves at a constant velocity
+    # as the simulation runs -- constant velocity steered MD.
     pullingForce = openmm.CustomCVForce('0.5 * fc_pull * (cv-r0)^2')
     pullingForce.addGlobalParameter('fc_pull', fc_pull)
     pullingForce.addGlobalParameter('r0', r0)
@@ -200,13 +201,12 @@ def test_smd():
     system.addForce(pullingForce)
     simulation.context.reinitialize(preserveState=True)
 
-    # define the windows
-    # during the pulling loop we will save specific configurations corresponding to the windows
+    # Umbrella-sampling windows; the pulling loop below saves the configuration
+    # closest to each one as that window's starting structure.
     windows = np.linspace(r_start, r_end, n_windows)
     window_coords = []
     window_index = 0
 
-    # SMD pulling loop
     smd_cv_values = []
     for i in range(total_steps // increment_steps):
         simulation.step(increment_steps)
@@ -216,22 +216,19 @@ def test_smd():
         if (i * increment_steps) % 5_000 == 0:
             print("r0 = ", r0, "r = ", current_cv_value)
 
-        # increment the location of the CV based on the pulling velocity
         r0 += v_pulling * dt * increment_steps
         simulation.context.setParameter('r0', r0)
 
-        # check if we should save this config as a window starting structure
+        # Save this configuration once the CV reaches the next window centre.
         if (window_index < len(windows) and current_cv_value >= windows[window_index]):
             window_coords.append(
                 simulation.context.getState(getPositions=True, enforcePeriodicBox=False).getPositions())
             window_index += 1
 
-    # save the window structures
     for i, coords in enumerate(window_coords):
         with open(f'window_{i}.pdb', 'w') as outfile:
             app.PDBFile.writeFile(simulation.topology, coords, outfile)
 
-    # Save the simulation
     simulation.saveCheckpoint('eq.chk')
 
     smd_cv_values = np.array(smd_cv_values)
@@ -243,37 +240,24 @@ def test_smd():
     def run_window(window_index):
         print('running window', window_index)
 
-        # load in the starting configuration for this window
         pdb = app.PDBFile(f'window_{window_index}.pdb')
 
-        # we can reuse the existing Simulation
+        # Reuse the existing Simulation, just with this window's positions and r0.
         simulation.context.setPositions(pdb.positions)
-
-        # Set the fixed location of the harmonic restraint for this window
         simulation.context.setParameter('r0', windows[window_index])
 
-        # run short equilibration with new positions and r0
         simulation.context.setVelocitiesToTemperature(300.0 * unit.kelvin)
         simulation.step(1_000)
 
-        # run the data collection
-
-        # total number of steps
         total_steps = 100_000  # 400 ps
-
-        # frequency to record the current CV value
         record_steps = 1_000
 
-        # run the simulation and record the value of the CV.
         cv_values = []
         for i in range(total_steps // record_steps):
             simulation.step(record_steps)
-
-            # get the current value of the cv
             current_cv_value = pullingForce.getCollectiveVariableValues(simulation.context)
             cv_values.append([i, current_cv_value[0]])
 
-        # save the CV timeseries to a file so we can postprocess
         np.savetxt(f'cv_values_window_{window_index}.txt', np.array(cv_values))
 
         print('Completed window', window_index)
@@ -281,7 +265,6 @@ def test_smd():
     for n in range(n_windows):
         run_window(n)
 
-    # plot the histograms
     metafilelines = []
     for i in range(len(windows)):
         data = np.loadtxt(f'cv_values_window_{i}.txt')
@@ -296,21 +279,18 @@ def test_smd():
     with open("metafile.txt", "w") as f:
         f.writelines(metafilelines)
 
-    # execute WHAM to get the PMF using os
-    # wget http://membrane.urmc.rochester.edu/sites/default/files/wham/wham-release-2.1.0.tgz
-    # tar xf wham-release-2.0.11.tgz
-    # cd wham/wham && make
-
+    # Run WHAM to get the PMF from the umbrella histograms. To build it:
+    #   wget http://membrane.urmc.rochester.edu/sites/default/files/wham/wham-release-2.1.0.tgz
+    #   tar xf wham-release-2.0.11.tgz
+    #   cd wham/wham && make
     os.system(f'{WHAM} {r_start} {r_end} 50 1e-6 300 0 metafile.txt pmf.txt > wham_log.txt')
 
-    # plot the PMF
     pmf = np.loadtxt("pmf.txt")
     plt.plot(pmf[:, 0], pmf[:, 1])
     plt.xlabel("r (nm)")
     plt.ylabel("PMF (kJ/mol)")
     plt.show()
 
-    # Clean up
     for i in range(len(windows)):
         nqe.remove_file(f'cv_values_window_{i}.txt')
         nqe.remove_file(f'window_{i}.pdb')

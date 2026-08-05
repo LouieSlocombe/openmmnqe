@@ -128,8 +128,6 @@ def test_prepare_ligand_ff():
                                        cache_name=cache_name)
     forcefield.createSystem(modeller.topology)
 
-    # nqe.remove_file(cache_name)
-
 
 def test_nonstandard_ligand():
     print(flush=True)
@@ -332,20 +330,26 @@ def ase_distance_between_atoms(atoms, index1, index2):
     """
     Calculate the distances between two atoms across all frames in a trajectory.
 
-    Parameters:
-        atoms (list): A list of ASE `Atoms` objects representing the trajectory frames.
-        index1 (int): The index of the first atom.
-        index2 (int): The index of the second atom.
+    Parameters
+    ----------
+    atoms : list of ase.Atoms
+        Trajectory frames.
+    index1 : int
+        Index of the first atom.
+    index2 : int
+        Index of the second atom.
 
-    Returns:
-        list: A list of distances (float) between the two specified atoms for each frame.
+    Returns
+    -------
+    list of float
+        Distance between the two specified atoms for each frame.
     """
     distances = []
     for frame in atoms:
-        pos1 = frame[index1].position  # Position of the first atom in the current frame
-        pos2 = frame[index2].position  # Position of the second atom in the current frame
-        distance = np.linalg.norm(pos1 - pos2)  # Calculate the Euclidean distance
-        distances.append(distance)  # Append the distance to the result list
+        pos1 = frame[index1].position
+        pos2 = frame[index2].position
+        distance = np.linalg.norm(pos1 - pos2)
+        distances.append(distance)
     return distances
 
 
@@ -353,58 +357,57 @@ def ase_angle_between_atoms(atoms, index1, index2, index3):
     """
     Calculate the angles formed by three atoms across all frames in a trajectory.
 
-    Parameters:
-        atoms (list): A list of ASE `Atoms` objects representing the trajectory frames.
-        index1 (int): The index of the first atom.
-        index2 (int): The index of the second atom (vertex of the angle).
-        index3 (int): The index of the third atom.
+    Parameters
+    ----------
+    atoms : list of ase.Atoms
+        Trajectory frames.
+    index1 : int
+        Index of the first atom.
+    index2 : int
+        Index of the second atom (vertex of the angle).
+    index3 : int
+        Index of the third atom.
 
-    Returns:
-        list: A list of angles (float, in degrees) formed by the three specified atoms for each frame.
+    Returns
+    -------
+    list of float
+        Angle in degrees formed by the three specified atoms for each frame.
     """
     angles = []
     for frame in atoms:
-        pos1 = frame[index1].position  # Position of the first atom
-        pos2 = frame[index2].position  # Position of the second atom (vertex)
-        pos3 = frame[index3].position  # Position of the third atom
-        v1 = pos1 - pos2  # Vector from the vertex to the first atom
-        v2 = pos3 - pos2  # Vector from the vertex to the third atom
-        cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))  # Cosine of the angle
-        angle = np.arccos(cos_angle) * 180.0 / np.pi  # Convert the angle to degrees
-        angles.append(angle)  # Append the calculated angle to the result list
+        pos1 = frame[index1].position
+        pos2 = frame[index2].position
+        pos3 = frame[index3].position
+        v1 = pos1 - pos2
+        v2 = pos3 - pos2
+        cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        angle = np.arccos(cos_angle) * 180.0 / np.pi
+        angles.append(angle)
     return angles
 
 
 def test_pca_distances():
     from sklearn.decomposition import PCA
-    # 1. Load the NEB path
     images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
     n_atoms = len(images[0])
     n_frames = len(images)
 
-    # 2. Get indices for all unique pairs (the upper triangle of the distance matrix)
-    # This ensures we don't count dist(1,2) and dist(2,1) separately
+    # Upper-triangle indices, so dist(1,2) and dist(2,1) aren't counted twice.
     triu_i, triu_j = np.triu_indices(n_atoms, k=1)
 
     def get_all_distances(atoms):
         pos = atoms.get_positions()
-        # Efficiently calculate all pairwise distances
         diff = pos[:, np.newaxis, :] - pos[np.newaxis, :, :]
         dist_matrix = np.linalg.norm(diff, axis=-1)
         return dist_matrix[triu_i, triu_j]
 
-    # 3. Build the Feature Matrix
     print(f"Processing {n_frames} frames with {len(triu_i)} distances each...")
     feature_matrix = np.array([get_all_distances(img) for img in images])
 
-    # 4. Run PCA
     pca = PCA(n_components=1)
     pca.fit(feature_matrix)
-
-    # 5. Extract the "Recipe" (The Weights/Loadings)
     pc1_weights = pca.components_[0]
 
-    # 6. Map weights back to atom pairs for easy reading
     results = []
     for idx, weight in enumerate(pc1_weights):
         results.append({
@@ -425,16 +428,13 @@ def test_pca_distances():
 
 def test_pca_angles():
     from sklearn.decomposition import PCA
-    # 1. Load the NEB path
     images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
     n_atoms = len(images[0])
     n_frames = len(images)
     symbols = images[0].get_chemical_symbols()
 
-    # 2. Generate all unique triplets (i, j, k) where j is the vertex
-    # We use combinations for indices, but any atom can be the center (vertex)
-    # To get all unique angles, we pick 3 atoms and realize one is the vertex.
-    # Actually, to be thorough, for every 3 atoms, there are 3 possible angles.
+    # Every 3-atom combination gives 3 distinct angles depending on which atom
+    # is the vertex, so each combo contributes all three (i-j-k, j-i-k, i-k-j).
     triplets = []
     for combo in combinations(range(n_atoms), 3):
         i, j, k = combo
@@ -446,32 +446,27 @@ def test_pca_angles():
         pos = atoms.get_positions()
         angles = []
         for i, j, k in triplet_list:
-            # Vectors: ba = a - b, bc = c - b (j is the vertex)
             v_ji = pos[i] - pos[j]
             v_jk = pos[k] - pos[j]
 
-            # Cosine rule
             norm_product = np.linalg.norm(v_ji) * np.linalg.norm(v_jk)
             if norm_product == 0:
                 angles.append(0.0)
                 continue
 
             cosine_angle = np.dot(v_ji, v_jk) / norm_product
-            # Clip to avoid floating point errors outside [-1, 1]
+            # Clip to guard against floating-point drift outside [-1, 1].
             angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
             angles.append(angle)
         return np.array(angles)
 
-    # 3. Build the Feature Matrix
     print(f"Calculating {len(triplets)} angles for {n_frames} frames...")
     feature_matrix = np.array([get_all_angles(img, triplets) for img in images])
 
-    # 4. Run PCA
     pca = PCA(n_components=1)
     pca.fit(feature_matrix)
     pc1_weights = pca.components_[0]
 
-    # 5. Extract and Map Results
     results = []
     for idx, weight in enumerate(pc1_weights):
         i, j, k = triplets[idx]
@@ -491,17 +486,24 @@ def test_pca_angles():
 
 def check_linear_relationship(y, x=None, f_print=True):
     """
-    Check the linear relationship between two variables using the coefficient of determination (R²).
+    Check the linear relationship between two variables using the coefficient of determination (R^2).
 
-    Parameters:
-        y (array-like): The dependent variable (response data).
-        x (array-like, optional): The independent variable (predictor data). If None, defaults to a range of integers
-                                  from 0 to the length of `y`.
-        f_print (bool, optional): If True, prints the calculated R² value. Defaults to True.
+    Parameters
+    ----------
+    y : array_like
+        The dependent variable (response data).
+    x : array_like, optional
+        The independent variable (predictor data). If None, defaults to a
+        range of integers from 0 to the length of `y`.
+    f_print : bool, optional
+        If True, prints the calculated R^2 value. Default is True.
 
-    Returns:
-        float: The coefficient of determination (R²), which indicates the strength of the linear relationship
-               between `x` and `y`. A value closer to 1 indicates a strong linear relationship.
+    Returns
+    -------
+    float
+        The coefficient of determination (R^2), which indicates the strength
+        of the linear relationship between `x` and `y`. A value closer to 1
+        indicates a strong linear relationship.
     """
     if x is None:
         x = np.arange(len(y))
@@ -713,10 +715,8 @@ def test_check_neb_distances():
     o2 = 18
     n2 = 8
 
-    # view(atoms)
     d_o6_o4 = np.array(ase_distance_between_atoms(atoms, o6, o4))
     d_o6_n3 = np.array(ase_distance_between_atoms(atoms, o6, n3))
-    # d_o6_o2 = np.array(ase_distance_between_atoms(atoms, o6, n3))
 
     d_n1_n3 = np.array(ase_distance_between_atoms(atoms, n1, n3))
     d_n1_o2 = np.array(ase_distance_between_atoms(atoms, n1, o2))
@@ -731,7 +731,6 @@ def test_check_neb_distances():
     dist = [d_o6_o4, d_o6_n3, d_n1_n3, d_n1_o2, d_n2_o2]
     items = [o6_o4, o6_n3, n1_n3, n1_o2, n2_o2]
     for i, item in enumerate(items):
-        # print the minimum and maximum of the item
         print(f"{labels[i]}: Start: {dist[i][0]:.2f} Min: {np.min(item):.2f}, Max: {np.max(item):.2f}", flush=True)
         tmp = labels[i].split('_')
         line = f'{labels[i]}: DISTANCE ATOMS=' + '{' + tmp[0] + '},' + '{' + tmp[1] + '}'
@@ -742,9 +741,3 @@ def test_check_neb_distances():
         line = f'LOWER_WALLS ARG={labels[i]} AT={0.1 * dist[i][0] * np.min(item):.2f} ' + ' KAPPA={kappa}'
         print(line, flush=True)
         print(flush=True)
-
-    #     plt.plot(item, label=labels[i])
-    # plt.xlabel('Frame')
-    # plt.ylabel('Distance (Angstrom)')
-    # plt.legend(loc='best')
-    # plt.show()

@@ -1,8 +1,12 @@
 #! /usr/bin/env python3
+"""
+Generate an OPES STATE file from a KERNELS file.
 
-### Generate an OPES STATE file from a KERNELS file ###
-# For postprocessing only, do not use for restarting a simulation
-# (the idea is to fake a restart with the plumed driver and dump the OPES state)
+For postprocessing only -- do not use the resulting STATE file to restart a
+simulation. The idea is to fake a restart with the ``plumed driver`` and dump
+the OPES state it would have produced, so that :mod:`FES_from_State` can read
+it.
+"""
 
 import argparse
 import subprocess
@@ -11,7 +15,6 @@ import sys
 plumed_exe = 'plumed'
 
 error = '--- ERROR: %s '
-# parser
 parser = argparse.ArgumentParser(
     description='Generate an OPES STATE file from a KERNELS file, so that it can be used with FES_from_State.py. DO NOT use the obtained STATE file for restart')
 parser.add_argument('--kernels', '-f', dest='filename', type=str, default='KERNELS',
@@ -20,12 +23,11 @@ parser.add_argument('--outfile', '-o', dest='outfile', type=str, default='STATE'
 parser.add_argument('--tmpname', dest='tmpname', type=str, default='tmp-plumed_driver.dat',
                     help='name of the temporary plumed file')
 args = parser.parse_args()
-# parsing
 filename = args.filename
 outfile = args.outfile
 tmp_plumed_file = args.tmpname
 
-# get info
+# Parse the KERNELS file header for CV names, sigmas and OPES settings.
 with open(filename, 'r') as f:
     line = f.readline()  # fields
     if line.split()[1] != 'FIELDS':
@@ -75,8 +77,8 @@ with open(filename, 'r') as f:
                 periodic[i] += line.split()[3]
         line = f.readline()
 
-# unfourtunately plumed does not allow for CVs to be named with a dot
-# for now we only support .x .y .z in no periodic CVs
+# Unfortunately PLUMED does not allow CVs to be named with a dot;
+# for now we only support .x .y .z on non-periodic CVs.
 suffix = [''] * ncv
 for i in range(ncv):
     if cvname[i].find('.') != -1:
@@ -86,12 +88,12 @@ for i in range(ncv):
         else:
             sys.exit(error % (' %s: you must modify the KERNELS file and remove any "." from CVs names' % cvname[i]))
 
-# create temporary plumed file
+# Build the temporary PLUMED input that will fake the restart.
 plumed_input = '# Temporary file used to convert an opes KERNELS file into a STATE file\n'
 plumed_input += '# vim:ft=plumed\nUNITS NATURAL\n'
 plumed_input += 'RESTART\n'
 plumed_input += 'f: FIXEDATOM AT=0,0,0\n'  # fake atom
-plumed_input += 'd: DISTANCE ATOMS=f,f\n'  # unfourtunately the FAKE colvar has issues with PERIODIC
+plumed_input += 'd: DISTANCE ATOMS=f,f\n'  # unfortunately the FAKE colvar has issues with PERIODIC
 plumed_input += 'COMMITTOR ARG=d BASIN_LL1=-1 BASIN_UL1=1\n'  # this will kill the driver
 for i in range(ncv):
     if suffix[i] == '':
@@ -118,7 +120,7 @@ for ii in range(1, ncv):
 with open(tmp_plumed_file, 'w') as f:
     f.write(plumed_input)
 
-# run driver
+# Run the PLUMED driver on the temporary input to produce the STATE file.
 cmd_string = plumed_exe + ' driver --noatoms --plumed ' + tmp_plumed_file
 cmd = subprocess.Popen(cmd_string, shell=True)
 cmd.wait()

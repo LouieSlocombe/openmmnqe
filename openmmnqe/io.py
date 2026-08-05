@@ -29,18 +29,18 @@ from .plotting import as_fes
 
 # Conversion factor from Bohr to Angstrom
 bohr_to_angstrom = const["Bohr radius"][0] * 1e10
-# Conversion factor between Angstrom and nm
-A_to_nm = 1.0e-1  # Å to nm
+# Conversion factor from Angstrom to nm
+A_to_nm = 1.0e-1
 # Conversion factor from eV to J
 eV_to_J = const["electron volt-joule relationship"][0]
 # Conversion factor from J to kJ
-J_to_kJ = 1.0e-3  # 1 J = 0.001 kJ
-# Avogadro's number
-avo_num = const["Avogadro constant"][0]  # mol^-1
+J_to_kJ = 1.0e-3
+# Avogadro's number, mol^-1
+avo_num = const["Avogadro constant"][0]
 
-# Conversion factor from eV to 1 kJ/mol
+# Conversion factor from eV to kJ/mol
 eV_to_kJpermol = eV_to_J * J_to_kJ * avo_num
-# Conversion factor from eV/Å² to 1 kJ/(mol·nm²)
+# Conversion factor from eV/Angstrom^2 to kJ/(mol*nm^2)
 eVperA2_to_kJpermolpernm2 = eV_to_kJpermol / A_to_nm ** 2
 
 # Two-letter element symbols that are also common prefixes of hydrogen atom
@@ -561,42 +561,32 @@ def extract_nonstandard_res(pdb_file_path: str,
     """
     pdb = PDBFile(pdb_file_path)
 
-    # Extract topology and positions from the PDB file
     topology = pdb.getTopology()
     positions_quantity = pdb.getPositions(asNumpy=True)
     positions_angstrom = positions_quantity.value_in_unit(unit.angstrom)
 
     generated_files = []
 
-    # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    # Iterate through residues in the topology
     for residue in topology.residues():
         if residue.name not in STANDARD_RESIDUE_NAMES:
-
-            # Extract residue details
             res_name = residue.name
             res_id = residue.id
             chain_id = residue.chain.id
 
-            # Generate a safe filename for the residue
             safe_res_name = "".join(c for c in res_name if c.isalnum())
             filename = f"{safe_res_name}_{chain_id}_{res_id}.xyz"
             output_path = os.path.join(output_dir, filename)
 
-            # Get atoms in the residue
             atoms_in_residue = list(residue.atoms())
             num_atoms = len(atoms_in_residue)
 
-            # Skip residues with 1 or fewer atoms
             if num_atoms <= 1:
                 continue
 
-            # Log the found non-standard residue
             print(f"Found non-standard residue: {res_name} (Chain {chain_id}, ResID {res_id})", flush=True)
 
-            # Write the XYZ file
             comment = f"Residue: {res_name}, Chain: {chain_id}, ResID: {res_id}, Source: {os.path.basename(pdb_file_path)}"
             with open(output_path, 'w') as f:
                 _write_xyz_frame(f,
@@ -607,7 +597,6 @@ def extract_nonstandard_res(pdb_file_path: str,
             generated_files.append(output_path)
             print(f"Successfully wrote {num_atoms} atoms to {os.path.splitext(output_path)[0]}", flush=True)
 
-    # Optionally convert XYZ files to SDF format
     if sdf:
         for xyz_file in generated_files:
             sdf_file = os.path.splitext(xyz_file)[0] + ".sdf"
@@ -636,25 +625,19 @@ def get_non_standard_residues(pdb_file):
     list
         A list of RDKit molecule objects representing non-standard residues.
     """
-    # Load the PDB file without sanitization or hydrogen removal
     mol = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
-    # Split the molecule into residues
     mols_by_residue = Chem.SplitMolByPDBResidues(mol)
 
     print(f"\n--- Found {len(mols_by_residue)} total residue fragments ---")
 
     non_standard_mols = []
-    # Iterate through residues and identify non-standard ones
     for residue_key, fragment_mol in mols_by_residue.items():
-        # Extract the residue name from the residue key
         res_name = residue_key.split('_')[0].strip()
         if res_name not in STANDARD_RESIDUE_NAMES:
-            # Log non-standard residues
             print(f"  > Found non-standard residue: {residue_key}")
             print(Chem.MolToSmiles(fragment_mol))
             non_standard_mols.append(fragment_mol)
         else:
-            # Log standard residues being skipped
             print(f"  - Skipping standard residue: {residue_key}")
 
     return non_standard_mols
@@ -678,13 +661,10 @@ def list_non_standard_residues(pdb_file):
     list
         A list of residue keys representing non-standard residues.
     """
-    # Load the PDB file without sanitization or hydrogen removal
     mol = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
-    # Split the molecule into residues
     mols_by_residue = Chem.SplitMolByPDBResidues(mol)
 
     non_standard_mols = []
-    # Iterate through residues and identify non-standard ones
     for residue_key, fragment_mol in mols_by_residue.items():
         res_name = residue_key.split('_')[0].strip()
         if res_name not in STANDARD_RESIDUE_NAMES:
@@ -720,30 +700,25 @@ def clean_ions_in_pdb(pdb_input_path: str, ions_to_remove: List[str], pdb_output
     all_found_ion_types = set()
     residues_to_delete = []
 
-    # Iterate through residues in the topology
     for res in modeller.topology.residues():
         res_name_upper = res.name.upper()
-        # Skip water residues
         if res_name_upper in ['HOH', 'WAT']:
             continue
-        # Identify single-atom residues as potential ions
+        # A single-atom residue is treated as an ion.
         if len(list(res.atoms())) == 1:
             all_found_ion_types.add(res.name)
             if res_name_upper in ions_to_remove_upper:
                 residues_to_delete.append(res)
 
-    # Log the found ion types and residues to remove
     print(f"-> Found all potential ion types: {sorted(list(all_found_ion_types))}")
     print(f"-> Will remove {len(residues_to_delete)} residues matching: {ions_to_remove}")
 
-    # Remove the identified residues
     if residues_to_delete:
         modeller.delete(residues_to_delete)
         print(f"Successfully removed {len(residues_to_delete)} ion residues.")
     else:
         print("No matching ion residues found to remove.")
 
-    # Save the cleaned PDB structure to the output file
     with open(pdb_output_path, 'w') as f:
         PDBFile.writeFile(modeller.topology, modeller.positions, f)
     print(f"Cleaned PDB saved to: {pdb_output_path}")
@@ -777,7 +752,6 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
     positions = pdb.positions
     changed_residues = {}
 
-    # Iterate through residues and relabel if they match the relabel_map
     for residue in topology.residues():
         if residue.name in relabel_map:
             original_name = residue.name
@@ -788,7 +762,6 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
                 changed_residues[change_key] = 0
             changed_residues[change_key] += 1
 
-    # Print a summary of changes
     if changed_residues:
         print("Relabeling complete. Summary of changes:")
         for (old, new), count in changed_residues.items():
@@ -796,7 +769,6 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
     else:
         print("No residues found matching the relabel map. Topology is unchanged.")
 
-    # Save the modified topology and positions to the output file
     print("Saving modified topology and positions...")
     if isinstance(output_file, str):
         with open(output_file, 'w') as f:
@@ -826,24 +798,20 @@ def remove_residues_in_pdb(input_pdb, output_pdb, names):
     -------
     None
     """
-    # Load the PDB file
     pdb = PDBFile(input_pdb)
     modeller = Modeller(pdb.topology, pdb.positions)
 
-    # Identify residues to delete based on the provided names
     residues_to_delete = [res for res in modeller.topology.residues()
                           if res.name in names]
 
     print(f"Found {len(residues_to_delete)} residues to delete.")
 
-    # Delete the identified residues if any are found
     if residues_to_delete:
         modeller.delete(residues_to_delete)
         print("Successfully deleted residues.")
     else:
         print("No matching residues found to delete.")
 
-    # Write the modified structure to the output PDB file
     with open(output_pdb, 'w') as f:
         PDBFile.writeFile(modeller.topology, modeller.positions, f)
 
@@ -935,7 +903,6 @@ def make_sdf(pdb_file, lig_name='LIG'):
     u.add_TopologyAttr('elements', elements)
     lig = u.select_atoms(f"resname {lig_name}")
     mol = lig.convert_to("RDKIT")
-    # write to sdf file
     Chem.MolToMolFile(mol, f"{lig_name}.sdf", kekulize=False)
     return None
 
@@ -992,7 +959,6 @@ def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
     -------
     None
     """
-    # Combine ligand and receptor into one pdb
     pdb = app.PDBFile(input_pdb)
     molecule = Molecule.from_file(f'{lig_name}.sdf')
     ligand_ff_topology = molecule.to_topology()
@@ -1238,8 +1204,6 @@ def prepare_lig_system(input_pdb,
     if is_ligand_only:
         print('Only ligand residues found in PDB.', flush=True)
         combined_pdb = clean_pdb
-        # convert_sdfs_to_pdb(generated_sdfs, output_filename=combined_pdb)
-        # fix_pdb(clean_pdb, combined_pdb, rm_heterogens=False)
         for lig_name in lig_names_list:
             pdb_patcher(combined_pdb, lig_name=lig_name)
     else:
@@ -1474,16 +1438,11 @@ def move_pdb_to_origin(input_pdb, output_filename):
     None
         The function writes the modified PDB structure to the specified output file.
     """
-    # Load the PDB file
     pdb = PDBFile(input_pdb)
-    # Get atomic positions as a NumPy array
     positions = pdb.getPositions(asNumpy=True)
-    # Calculate the geometric center (centroid) of the positions
     center = np.mean(positions, axis=0)
-    # Shift all positions so that the centroid is at the origin
     new_positions = positions - center
 
-    # Write the modified structure to the output file
     with open(output_filename, 'w') as f:
         PDBFile.writeFile(pdb.topology, new_positions, f)
 
@@ -1506,39 +1465,32 @@ def center_in_box(modeller):
     None
         The function modifies the positions of the modeller object in place.
     """
-    # Extract positions in nanometers
     pos_list = modeller.positions.value_in_unit(unit.nanometer)
 
-    # Ensure positions are a NumPy array of shape (N, 3)
     try:
         pos_nm = np.asarray(pos_list, dtype=float)
         if pos_nm.ndim != 2 or pos_nm.shape[1] != 3:
             raise ValueError
     except Exception:
-        # Handle cases where positions are not directly convertible to NumPy array
+        # Fallback for position sequences that don't convert directly, e.g. Vec3 objects.
         pos_nm = np.array([[getattr(p, 'x', p[0]),
                             getattr(p, 'y', p[1]),
                             getattr(p, 'z', p[2])] for p in pos_list], dtype=float)
 
-    # Calculate the centroid of the positions
     centroid = pos_nm.mean(axis=0)
-
-    # Initialize box dimensions
     box_vec = None
 
-    # Check if the topology has unit cell dimensions
     if hasattr(modeller.topology, 'getUnitCellDimensions'):
         dims = modeller.topology.getUnitCellDimensions()
         if dims is not None:
             box_vec = np.array([dims.x, dims.y, dims.z])
 
-    # If unit cell dimensions are not available, check for periodic box vectors
+    # Fall back to the periodic box vectors if unit cell dimensions aren't set.
     if box_vec is None and hasattr(modeller.topology, 'getPeriodicBoxVectors'):
         vecs = modeller.topology.getPeriodicBoxVectors()
         if vecs is not None:
             box_vec = np.array([vecs[0].x, vecs[1].y, vecs[2].z])
 
-    # If box dimensions are available, center the positions
     if box_vec is not None:
         box_center = box_vec / 2.0
         shift = box_center - centroid
@@ -1659,18 +1611,16 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
     --------
     convert_pdb_to_xyz : The inverse conversion.
     """
-    # 1. Load the original structure
     original_atoms = read(input_file, index=index)
     n_atoms = len(original_atoms)
 
-    # 2. Connectivity pass to identify molecules (clusters)
     cutoffs = [c * cutoff_multiplier for c in natural_cutoffs(original_atoms)]
     i, j = neighbor_list('ij', original_atoms, cutoffs)
 
     adjacency_matrix = csr_matrix((np.ones_like(i), (i, j)), shape=(n_atoms, n_atoms))
     n_clusters, labels = connected_components(csgraph=adjacency_matrix, directed=False)
 
-    # 3. Canonicalise atom ordering: group by cluster, then Hill system (C, H, others)
+    # Group atoms by cluster, then order each cluster by the Hill system (C, H, others).
     hill_priority = {'C': 0, 'H': 1}
     symbols = original_atoms.get_chemical_symbols()
     order = sorted(range(n_atoms),
@@ -1679,13 +1629,12 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
     atoms = original_atoms[order]
     sorted_labels = [labels[idx] for idx in order]
 
-    # 4. Re-index the connectivity from step 2 onto the new ordering, rather
-    # than paying for a second neighbour-list pass over the sorted atoms
+    # Re-index the connectivity found above onto the new ordering, rather than
+    # paying for a second neighbour-list pass over the sorted atoms.
     old_to_new = np.empty(n_atoms, dtype=int)
     old_to_new[order] = np.arange(n_atoms)
     i, j = old_to_new[i], old_to_new[j]
 
-    # 5. Map each cluster onto a chain ID, residue ID and residue name
     unique_labels = list(dict.fromkeys(sorted_labels))
     available_chains = string.ascii_uppercase + string.ascii_lowercase + string.digits
     num_chains = len(available_chains)
@@ -1702,7 +1651,6 @@ def convert_xyz_to_pdb(input_file: str, output_file: str, cutoff_multiplier: flo
 
         cluster_ids[lbl] = (chain, resid, resname)
 
-    # 6. Write the properly grouped and ordered PDB file
     element_counts_per_cluster = defaultdict(int)
 
     with open(output_file, 'w') as f:
@@ -1829,11 +1777,9 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
     -------
     None
     """
-    # 1. Read template and keep BOTH atom lines and TER lines
     with open(template_pdb, 'r') as f:
         template_lines = [line for line in f if line.startswith(atom_line) or line.startswith('TER')]
 
-    # 2. Parse the XYZ file
     with open(xyz_file, 'r') as f:
         lines = f.readlines()
 
@@ -1846,7 +1792,6 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
         frame_coords = lines[i + 2: i + num_atoms + 2]
         frames.append([l.split()[1:] for l in frame_coords])
 
-    # 3. Write out the PLUMED-formatted multi-model PDB
     with open(output_file, 'w') as f:
         f.write("REMARK TYPE=MULTI-ST-PDB\n")
         f.write("REMARK ARG=path.s,path.z\n")
@@ -1855,20 +1800,20 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
             f.write(f"REMARK NUMBER={i + 1}\n")
             f.write(f"REMARK STEP={i}\n")
 
-            coord_idx = 0  # Independent counter for the XYZ coordinates
+            # Tracks position within `frame` separately from `template_lines`,
+            # since TER lines consume the latter but not the former.
+            coord_idx = 0
 
             for t_line in template_lines:
                 if t_line.startswith('TER'):
-                    # Write TER lines exactly as they appear in the template
                     f.write(t_line)
                 else:
-                    # Inject XYZ coordinates into the ATOM/HETATM lines
                     coords = frame[coord_idx]
                     new_line = (t_line[:30] +
                                 f"{float(coords[0]):8.3f}{float(coords[1]):8.3f}{float(coords[2]):8.3f}" +
                                 t_line[54:])
                     f.write(new_line)
-                    coord_idx += 1  # Only advance coordinate index for actual atoms
+                    coord_idx += 1
 
             f.write("ENDMDL\n")
     pdb_remove_ter_index(template_pdb, template_pdb)
@@ -1976,6 +1921,24 @@ def pdb_remove_ter_index(input_path, output_path):
 
 
 def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
+    """
+    Remove hydrogen atoms from a PDB file, except for a chosen subset.
+
+    Parameters
+    ----------
+    input_pdb : str
+        Path to the input PDB file.
+    output_pdb : str
+        Path to write the filtered PDB file.
+    keep : iterable of int, optional
+        0-based atom indices (matching PDB serial number minus one) of
+        hydrogens to retain even though they would otherwise be stripped.
+        If None, all hydrogens are removed. Default is None.
+
+    Returns
+    -------
+    None
+    """
     if keep is None:
         keep = set()
     else:

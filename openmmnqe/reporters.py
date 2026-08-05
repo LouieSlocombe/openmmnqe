@@ -32,14 +32,10 @@ def _calculate_quantum_spread(integrator, atom_indices=None):
             pos = pos[atom_indices]
         all_bead_positions.append(pos)
 
-    # Convert to numpy array for vector math
     coords = np.array(all_bead_positions)
-    # Calculate Centroid (average position across beads)
     centroid = np.mean(coords, axis=0)
-    # Calculate Squared Distance of each bead from the Centroid
     diff = coords - centroid
     sq_dist = np.sum(diff ** 2, axis=2)  # Sum x,y,z components -> (n_beads, n_atoms)
-    # Average over beads (Mean Squared Displacement from Centroid)
     mean_sq_dist = np.mean(sq_dist, axis=0)
     quantum_rg = np.sqrt(mean_sq_dist)
     return quantum_rg * unit.nanometers
@@ -71,7 +67,6 @@ class RPMDQuantumSpreadReporter(object):
         self._atom_indices = atom_indices
         self._out = open(file, 'w')
 
-        # Header
         if names:
             header = "Step\t" + "\t".join([f"Rg_{n}(nm)" for n in names])
         else:
@@ -113,14 +108,9 @@ class RPMDQuantumSpreadReporter(object):
         -------
         None
         """
-        # We need access to the integrator to get bead positions, not just the simulation state
         integrator = simulation.integrator
-
-        # Calculate spreads using the helper function defined above
-        # Note: This requires the helper function to be available or methodized
         spreads = _calculate_quantum_spread(integrator, self._atom_indices)
 
-        # Write to file
         step = simulation.currentStep
         spread_values = spreads.value_in_unit(unit.nanometers)
 
@@ -164,12 +154,10 @@ class RPMDBeadReporter(object):
         self._topology = topology
         self._next_frame_index = 0
 
-        # Create a list of open file handles, one for each bead
         self._files = []
         for i in range(num_beads):
             filename = f"{file_base_name}_bead_{i}.pdb"
             f = open(filename, 'w')
-            # Write the PDB Header for each file
             app.PDBFile.writeHeader(topology, f)
             self._files.append(f)
 
@@ -208,20 +196,17 @@ class RPMDBeadReporter(object):
         -------
         None
         """
-        # We must access the integrator specifically to get bead positions
         integrator = simulation.integrator
 
-        # Loop through every bead
         for i in range(self._num_beads):
-            # getState(bead_index, ...) is specific to RPMDIntegrator
-            # Note: enforcePeriodicBox must match your system settings
+            # getState(bead_index, ...) is specific to RPMDIntegrator.
+            # enforcePeriodicBox must match your system settings.
             bead_state = integrator.getState(i, getPositions=True, enforcePeriodicBox=True)
             positions = bead_state.getPositions()
 
-            # Write the frame (Model) to the specific bead's file
             app.PDBFile.writeModel(self._topology, positions, self._files[i], self._next_frame_index)
 
-            # Flush periodically to ensure data is written to disk
+            # Flush periodically rather than every frame, to limit I/O overhead.
             if self._next_frame_index % 10 == 0:
                 self._files[i].flush()
 
@@ -305,19 +290,15 @@ class RPMDCentroidReporter(object):
         """
         integrator = simulation.integrator
 
-        # Get first bead to initialize sum
-        # We use asNumpy=True for vector efficiency, though OpenMM Quantities also support math.
+        # asNumpy=True for vector efficiency, though OpenMM Quantities also support math.
         sum_pos = integrator.getState(0, getPositions=True, enforcePeriodicBox=True).getPositions(asNumpy=True)
 
-        # Sum positions of remaining beads
         for i in range(1, self._num_beads):
             pos = integrator.getState(i, getPositions=True, enforcePeriodicBox=True).getPositions(asNumpy=True)
             sum_pos += pos
 
-        # Calculate Average
         centroid_pos = sum_pos / self._num_beads
 
-        # Write to file
         app.PDBFile.writeModel(self._topology, centroid_pos, self._out, self._next_frame_index)
         self._next_frame_index += 1
 
