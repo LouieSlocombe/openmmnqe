@@ -276,6 +276,14 @@ class RPMDCentroidReporter(object):
         """
         Compute the bead centroid and write it to the PDB file.
 
+        Each bead state is wrapped into the box independently, so beads of a
+        ring polymer (or copies of a whole molecule) that straddle a periodic
+        boundary can land on opposite sides of the box. Averaging those wrapped
+        coordinates directly would put the centroid in the middle of the box,
+        so each bead is first unwrapped relative to bead 0 via the minimum
+        image of its displacement — valid because bead spreads are far smaller
+        than half a box length.
+
         Parameters
         ----------
         simulation : openmm.app.Simulation
@@ -290,14 +298,22 @@ class RPMDCentroidReporter(object):
         """
         integrator = simulation.integrator
 
-        # asNumpy=True for vector efficiency, though OpenMM Quantities also support math.
-        sum_pos = integrator.getState(0, getPositions=True, enforcePeriodicBox=True).getPositions(asNumpy=True)
+        ref_state = integrator.getState(0, getPositions=True, enforcePeriodicBox=True)
+        ref = ref_state.getPositions(asNumpy=True).value_in_unit(unit.nanometers)
+        box = ref_state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(unit.nanometers)
 
+        sum_pos = ref.copy()
         for i in range(1, self._num_beads):
-            pos = integrator.getState(i, getPositions=True, enforcePeriodicBox=True).getPositions(asNumpy=True)
-            sum_pos += pos
+            pos = integrator.getState(i, getPositions=True, enforcePeriodicBox=True) \
+                .getPositions(asNumpy=True).value_in_unit(unit.nanometers)
+            disp = pos - ref
+            # Minimum image in OpenMM's reduced box form: remove whole box
+            # vectors from the displacement, c then b then a.
+            for k in (2, 1, 0):
+                disp -= box[k] * np.round(disp[:, k:k + 1] / box[k][k])
+            sum_pos += ref + disp
 
-        centroid_pos = sum_pos / self._num_beads
+        centroid_pos = (sum_pos / self._num_beads) * unit.nanometers
 
         app.PDBFile.writeModel(self._topology, centroid_pos, self._out, self._next_frame_index)
         self._next_frame_index += 1
