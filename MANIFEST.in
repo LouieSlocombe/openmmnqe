@@ -1,2 +1,1 @@
-recursive-include openmmnqe/data *
 include README.md

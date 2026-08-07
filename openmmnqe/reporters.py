@@ -221,7 +221,7 @@ class RPMDBeadReporter(object):
                 # Write footer before closing to ensure valid PDB syntax
                 app.PDBFile.writeFooter(self._topology, f)
                 f.close()
-            except:
+            except Exception:
                 pass
 
 
@@ -312,5 +312,5 @@ class RPMDCentroidReporter(object):
         try:
             app.PDBFile.writeFooter(self._topology, self._out)
             self._out.close()
-        except:
+        except Exception:
             pass

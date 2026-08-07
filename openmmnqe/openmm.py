@@ -13,6 +13,199 @@ from .reporters import (RPMDQuantumSpreadReporter,
 from .tools import deuterate_system, check_platform, init_beads
 
 
+def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calculator):
+    """
+    Construct the system and platform shared by every ``run_openmm_*`` driver.
+
+    When an ML potential (or ASE calculator) and ML atom indices are supplied,
+    the MM system is promoted to a mixed system via ``createMixedSystem`` and
+    the platform is forced to CUDA.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The OpenMM Modeller containing topology and positions.
+    forcefield : openmm.app.ForceField
+        The force field used to parameterise the system.
+    platform_name : str or None
+        OpenMM platform name. None auto-detects via ``check_platform``.
+    potential : object or None
+        ML potential object with a ``createMixedSystem`` method.
+    ml_idx : list of int or None
+        Atom indices for the ML region.
+    calculator : object or None
+        Optional calculator object to pass to the ML potential.
+
+    Returns
+    -------
+    tuple of (openmm.System, openmm.Platform)
+    """
+    if (potential is not None or calculator is not None) and ml_idx is not None:
+        print("Adding ML potential to the system...", flush=True)
+        run_mixed = True
+        platform_name = 'CUDA'
+        print("ML potential in use: forcing platform to CUDA.", flush=True)
+    else:
+        run_mixed = False
+
+    if calculator is not None:
+        potential = MLPotential('ase')
+
+    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
+    has_box = modeller.topology.getUnitCellDimensions() is not None
+
+    if run_mixed:
+        mm_system = forcefield.createSystem(
+            modeller.topology,
+            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+            nonbondedCutoff=1.0 * unit.nanometer,
+            constraints=None,
+            rigidWater=False,
+            removeCMMotion=True,
+        )
+        if calculator is not None:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = potential.createMixedSystem(
+                modeller.topology,
+                mm_system,
+                ml_idx,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
+    else:
+        if calculator is not None:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+                calculator=calculator,
+            )
+        else:
+            system = forcefield.createSystem(
+                modeller.topology,
+                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometer,
+                constraints=None,
+                rigidWater=False,
+                removeCMMotion=True,
+            )
+
+    return system, platform
+
+
+def _maybe_deuterate(modeller, system, deuterate, deuterate_option):
+    """Deuterate the system in place when requested."""
+    if deuterate:
+        print("Deuterating system...", flush=True)
+        deuterate_system(modeller, system, option=deuterate_option)
+
+
+def _load_plumed(system, plumed_script_path):
+    """Attach a PLUMED bias force to the system if a script path is given."""
+    if plumed_script_path is not None:
+        print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
+
+        with open(plumed_script_path, 'r') as f:
+            script_content = f.read()
+
+        plumed_force = PlumedForce(script_content)
+        system.addForce(plumed_force)
+
+
+def _add_standard_reporters(simulation, output_prefix, n_report,
+                            pdb_steps=False, stdout_volume=False,
+                            checkpoint_interval=None):
+    """
+    Append the standard reporter set shared by the drivers.
+
+    Order: optional PDB trajectory, stdout state data, ``.log`` state data,
+    optional periodic checkpoint.
+    """
+    if pdb_steps:
+        simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
+    simulation.reporters.append(app.StateDataReporter(sys.stdout,
+                                                      n_report,
+                                                      step=True,
+                                                      potentialEnergy=True,
+                                                      temperature=True,
+                                                      speed=True,
+                                                      volume=stdout_volume))
+    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
+                                                      n_report,
+                                                      step=True,
+                                                      time=True,
+                                                      potentialEnergy=True,
+                                                      kineticEnergy=True,
+                                                      totalEnergy=True,
+                                                      temperature=True,
+                                                      volume=True))
+    if checkpoint_interval is not None:
+        simulation.reporters.append(app.CheckpointReporter(f'{output_prefix}.chk',
+                                                           checkpoint_interval))
+
+
+def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
+                        atoms_to_watch):
+    """Append the RPMD reporter trio (optional spread, centroid, beads)."""
+    if atoms_to_watch is not None:
+        simulation.reporters.append(RPMDQuantumSpreadReporter(
+            file=f'{output_prefix}_spread.log',
+            reportInterval=n_report,
+            atom_indices=atoms_to_watch,
+        ))
+
+    simulation.reporters.append(RPMDCentroidReporter(
+        topology=topology,
+        file_name=f"{output_prefix}_centroid.pdb",
+        reportInterval=n_report,
+        num_beads=n_beads,
+    ))
+
+    simulation.reporters.append(RPMDBeadReporter(
+        topology=topology,
+        file_base_name=output_prefix,
+        reportInterval=n_report,
+        num_beads=n_beads,
+    ))
+
+
+def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpoint=True):
+    """Save an optional checkpoint and write the final structure to PDB."""
+    if save_checkpoint:
+        simulation.saveCheckpoint(f'{output_prefix}.chk')
+    state = simulation.context.getState(getPositions=True, getVelocities=True)
+    with open(f'{output_prefix}{pdb_suffix}', 'w') as f:
+        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+
+
+def _load_checkpoint_or_abort(simulation, checkpoint_file):
+    """Load an equilibration checkpoint; return False if it does not exist."""
+    if not os.path.exists(checkpoint_file):
+        print(f"Error: Checkpoint {checkpoint_file} not found. Run equilibration first.", flush=True)
+        return False
+
+    print(f"Loading state from {checkpoint_file}...", flush=True)
+    simulation.loadCheckpoint(checkpoint_file)
+    return True
+
+
 def run_openmm_relaxation(modeller,
                           forcefield,
                           output_prefix='minimized',
@@ -67,12 +260,16 @@ def run_openmm_relaxation(modeller,
         Spring constant for stage 2 in kJ/mol/nm². Default is 10.0.
     ks_3 : float, optional
         Spring constant for stage 3 in kJ/mol/nm². Default is 0.0.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     potential : object or None, optional
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Returns
     -------
@@ -81,71 +278,8 @@ def run_openmm_relaxation(modeller,
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
-
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
     current_positions = modeller.positions
     restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
@@ -174,19 +308,17 @@ def run_openmm_relaxation(modeller,
     simulation.context.setParameter("k", k_strong)
     simulation.minimizeEnergy(maxIterations=n_1)
 
-    print("\n--- Stage 2: Weak Backbone Restraints (10 kJ/mol/nm^2) ---", flush=True)
+    print(f"\n--- Stage 2: Weak Backbone Restraints ({ks_2} kJ/mol/nm^2) ---", flush=True)
     k_weak = ks_2 * unit.kilojoules_per_mole / (unit.nanometer ** 2)
     simulation.context.setParameter("k", k_weak)
     simulation.minimizeEnergy(maxIterations=n_2)
 
-    print("\n--- Stage 3: Unrestrained Relaxation ---", flush=True)
+    print(f"\n--- Stage 3: Unrestrained Relaxation ({ks_3} kJ/mol/nm^2) ---", flush=True)
     k_vweak = ks_3 * unit.kilojoules_per_mole / (unit.nanometer ** 2)
     simulation.context.setParameter("k", k_vweak)
     simulation.minimizeEnergy(maxIterations=n_3)
 
-    final_state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, final_state.getPositions(), f)
+    _save_final_state(simulation, output_prefix, save_checkpoint=False)
     print(f"\nProcess complete. Saved to {output_prefix}", flush=True)
 
 
@@ -222,8 +354,10 @@ def run_openmm_relaxation_simple(modeller,
         Friction coefficient. Default is 1.0 / ps.
     time_step : openmm.unit.Quantity, optional
         Integration time step. Default is 1.0 fs.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CUDA'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     potential : object or None, optional
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
@@ -235,71 +369,8 @@ def run_openmm_relaxation_simple(modeller,
     -------
     None
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
-
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
@@ -311,10 +382,7 @@ def run_openmm_relaxation_simple(modeller,
     print("Minimizing energy", flush=True)
     simulation.minimizeEnergy()
 
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    final_state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, final_state.getPositions(), f)
+    _save_final_state(simulation, output_prefix)
     print(f"\nProcess complete. Saved to {output_prefix}", flush=True)
 
 
@@ -372,8 +440,10 @@ def run_openmm_heating(modeller,
     steps_final : int, optional
         Number of MD steps for the final equilibration at target temperature.
         Default is 5000.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -383,6 +453,8 @@ def run_openmm_heating(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Returns
     -------
@@ -391,74 +463,10 @@ def run_openmm_heating(modeller,
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     print("Applying backbone restraints for heating...", flush=True)
     restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
@@ -480,22 +488,7 @@ def run_openmm_heating(modeller,
     simulation.context.setPositions(modeller.positions)
 
     print(f"\n--- Starting Gentle Heating (0K -> {target_temp}) ---", flush=True)
-    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
+    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True)
 
     temp = temp_step
     while temp <= target_temp:
@@ -509,10 +502,7 @@ def run_openmm_heating(modeller,
     print(f"Running final equilibration at {target_temp} for {steps_final} steps...", flush=True)
     simulation.step(steps_final)
 
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix)
     print(f"Saved equilibrated structure to {output_prefix}", flush=True)
 
 
@@ -573,8 +563,10 @@ def run_openmm_npt(modeller,
         Number of steps for restrained NPT (Phase 1). Default is 5000.
     n_2 : int, optional
         Number of steps for unrestrained NPT (Phase 2). Default is 15000.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -583,6 +575,8 @@ def run_openmm_npt(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Returns
     -------
@@ -591,75 +585,10 @@ def run_openmm_npt(modeller,
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
         system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
@@ -684,23 +613,8 @@ def run_openmm_npt(modeller,
     simulation.context.setPositions(modeller.positions)
     simulation.context.setVelocitiesToTemperature(temperature)
 
-    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True,
-                                                      volume=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
+    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
+                            stdout_volume=True)
 
     print("\n--- Phase 1: Restrained NPT (Relaxing Density) ---", flush=True)
     simulation.step(n_1)
@@ -709,10 +623,7 @@ def run_openmm_npt(modeller,
     simulation.context.setParameter("k", 0.0)
     simulation.step(n_2)
 
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix)
 
     print(f"\nDensity equilibration complete. Saved to {output_prefix}", flush=True)
 
@@ -768,8 +679,10 @@ def run_openmm_prod(modeller,
         Total number of production MD steps. Default is 500000.
     output_prefix : str, optional
         Prefix for output files (PDB, checkpoint, log). Default is ``'prod'``.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -778,92 +691,22 @@ def run_openmm_prod(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Returns
     -------
     None
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
         system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
 
-    if plumed_script_path is not None:
-        print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
-
-        with open(plumed_script_path, 'r') as f:
-            script_content = f.read()
-
-        plumed_force = PlumedForce(script_content)
-        system.addForce(plumed_force)
+    _load_plumed(system, plumed_script_path)
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
                                                  time_step)
@@ -871,32 +714,13 @@ def run_openmm_prod(modeller,
     simulation.context.setPositions(modeller.positions)
     simulation.context.setVelocitiesToTemperature(temperature)
 
-    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
-
-    simulation.reporters.append(app.CheckpointReporter(f'{output_prefix}.chk', n_report * 10))
+    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
+                            checkpoint_interval=n_report * 10)
     print(f"Starting production run for {steps} steps...", flush=True)
     simulation.step(steps)
     print("Production run complete.", flush=True)
 
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix)
 
 
 def run_openmm_steered(modeller,
@@ -1054,8 +878,10 @@ def run_openmm_rpmd_equilibration(modeller,
         Number of steps for stage 1 (bead expansion). Default is 1000.
     n_2 : int, optional
         Number of steps for stage 2 (relaxation). Default is 5000.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -1064,6 +890,8 @@ def run_openmm_rpmd_equilibration(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
     atoms_to_watch : list of int or None, optional
         Atom indices for quantum spread monitoring. Default is None.
 
@@ -1071,116 +899,19 @@ def run_openmm_rpmd_equilibration(modeller,
     -------
     None
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
     simulation.context.setVelocitiesToTemperature(temperature)
 
-    if atoms_to_watch is not None:
-        simulation.reporters.append(RPMDQuantumSpreadReporter(
-            file=f'{output_prefix}_spread.log',
-            reportInterval=n_report,
-            atom_indices=atoms_to_watch,
-        ))
-
-    simulation.reporters.append(RPMDCentroidReporter(
-        topology=modeller.topology,
-        file_name=f"{output_prefix}_centroid.pdb",
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
-
-    simulation.reporters.append(RPMDBeadReporter(
-        topology=modeller.topology,
-        file_base_name=output_prefix,
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
+    _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
+                        n_beads, atoms_to_watch)
+    _add_standard_reporters(simulation, output_prefix, n_report)
 
     init_beads(modeller, simulation, n_beads)
 
@@ -1193,10 +924,7 @@ def run_openmm_rpmd_equilibration(modeller,
     simulation.step(n_2)
 
     print("\n--- Saving State ---", flush=True)
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}_centroid.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix, pdb_suffix='_centroid.pdb')
     print(f"Saved centroid visualization to {output_prefix}_centroid.pdb", flush=True)
 
 
@@ -1262,8 +990,10 @@ def run_openmm_rpmd_contracted(modeller,
     contractions : dict or None, optional
         Mapping of force group to the number of contracted copies. If None,
         defaults to ``{1: 8, 2: 1}``. Default is None.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -1272,6 +1002,8 @@ def run_openmm_rpmd_contracted(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
     atoms_to_watch : list of int or None, optional
         Atom indices for quantum spread monitoring. Default is None.
 
@@ -1279,18 +1011,8 @@ def run_openmm_rpmd_contracted(modeller,
     -------
     None
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
-
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
     if contractions is None:
         # Note: NumCopies must be a divisor of num_beads (32).
@@ -1301,74 +1023,12 @@ def run_openmm_rpmd_contracted(modeller,
         }
         # Group 0 is not in the dict, so it defaults to num_beads (32)
 
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
         system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
-    if plumed_script_path is not None:
-        print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
-
-        with open(plumed_script_path, 'r') as f:
-            script_content = f.read()
-
-        plumed_force = PlumedForce(script_content)
-        system.addForce(plumed_force)
+    _load_plumed(system, plumed_script_path)
 
     # We must assign specific forces to specific integer groups (0-31).
     # Group 0: Bonded Forces (Cheap) -> 32 copies (Implicit default)
@@ -1400,59 +1060,20 @@ def run_openmm_rpmd_contracted(modeller,
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep, contractions)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
-    if not os.path.exists(checkpoint_file):
-        print(f"Error: Checkpoint {checkpoint_file} not found. Run equilibration first.", flush=True)
+    if not _load_checkpoint_or_abort(simulation, checkpoint_file):
         return
 
-    print(f"Loading state from {checkpoint_file}...", flush=True)
-    simulation.loadCheckpoint(checkpoint_file)
+    _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
+                        n_beads, atoms_to_watch)
 
-    if atoms_to_watch is not None:
-        simulation.reporters.append(RPMDQuantumSpreadReporter(
-            file=f'{output_prefix}_spread.log',
-            reportInterval=n_report,
-            atom_indices=atoms_to_watch,
-        ))
-
-    simulation.reporters.append(RPMDCentroidReporter(
-        topology=modeller.topology,
-        file_name=f"{output_prefix}_centroid.pdb",
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
-
-    simulation.reporters.append(RPMDBeadReporter(
-        topology=modeller.topology,
-        file_base_name=output_prefix,
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
-
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
+    _add_standard_reporters(simulation, output_prefix, n_report)
 
     print(f"\nStarting Production Run ({steps} steps)...")
     simulation.step(steps)
     print("Done.", flush=True)
 
     print("\n--- Saving State ---", flush=True)
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}_centroid.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix, pdb_suffix='_centroid.pdb')
     print(f"Saved centroid visualization to {output_prefix}_centroid.pdb", flush=True)
 
 
@@ -1513,8 +1134,10 @@ def run_openmm_rpmd_prod(modeller,
         Reporter interval in steps. Default is 1000.
     steps : int, optional
         Total number of production steps. Default is 500000.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -1523,6 +1146,8 @@ def run_openmm_rpmd_prod(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
     atoms_to_watch : list of int or None, optional
         Atom indices for quantum spread monitoring. Default is None.
 
@@ -1530,144 +1155,33 @@ def run_openmm_rpmd_prod(modeller,
     -------
     None
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
         system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
-    if plumed_script_path is not None:
-        print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
-
-        with open(plumed_script_path, 'r') as f:
-            script_content = f.read()
-
-        plumed_force = PlumedForce(script_content)
-        system.addForce(plumed_force)
+    _load_plumed(system, plumed_script_path)
     integrator = openmm.RPMDIntegrator(n_beads,
                                        temperature,
                                        gamma,
                                        time_step)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    if not os.path.exists(checkpoint_file):
-        print(f"Error: Checkpoint {checkpoint_file} not found. Run equilibration first.", flush=True)
+    if not _load_checkpoint_or_abort(simulation, checkpoint_file):
         return
 
-    print(f"Loading state from {checkpoint_file}...", flush=True)
-    simulation.loadCheckpoint(checkpoint_file)
+    _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
+                        n_beads, atoms_to_watch)
 
-    if atoms_to_watch is not None:
-        simulation.reporters.append(RPMDQuantumSpreadReporter(
-            file=f'{output_prefix}_spread.log',
-            reportInterval=n_report,
-            atom_indices=atoms_to_watch,
-        ))
-
-    simulation.reporters.append(RPMDCentroidReporter(
-        topology=modeller.topology,
-        file_name=f"{output_prefix}_centroid.pdb",
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
-
-    simulation.reporters.append(RPMDBeadReporter(
-        topology=modeller.topology,
-        file_base_name=output_prefix,
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
-
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
+    _add_standard_reporters(simulation, output_prefix, n_report)
 
     print(f"Starting production run for {steps} steps...", flush=True)
     simulation.step(steps)
     print("Production run complete.", flush=True)
 
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix)
 
 
 def run_openmm_adqtb_eq(modeller,
@@ -1715,8 +1229,10 @@ def run_openmm_adqtb_eq(modeller,
         Total number of equilibration steps. Default is 500000.
     output_prefix : str, optional
         Prefix for output files. Default is ``'adqtb_ready'``.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -1725,80 +1241,17 @@ def run_openmm_adqtb_eq(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Returns
     -------
     None
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
@@ -1808,32 +1261,13 @@ def run_openmm_adqtb_eq(modeller,
     simulation.context.setPositions(modeller.positions)
     simulation.context.setVelocitiesToTemperature(temperature)
 
-    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
-
-    simulation.reporters.append(app.CheckpointReporter(f'{output_prefix}.chk', n_report * 10))
+    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
+                            checkpoint_interval=n_report * 10)
     print(f"Starting production run for {steps} steps...", flush=True)
     simulation.step(steps)
     print("Production run complete.", flush=True)
 
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix)
 
 
 def run_openmm_adqtb_prod(modeller,
@@ -1892,8 +1326,10 @@ def run_openmm_adqtb_prod(modeller,
         Total number of production steps. Default is 500000.
     output_prefix : str, optional
         Prefix for output files. Default is ``'adqtb_prod'``.
-    platform_name : str, optional
-        OpenMM platform name. Default is ``'CPU'``.
+    platform_name : str or None, optional
+        OpenMM platform name. Default is None, which auto-detects via
+        ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
+        is active.
     deuterate : bool, optional
         If True, deuterate the system before simulation. Default is False.
     deuterate_option : str, optional
@@ -1902,92 +1338,22 @@ def run_openmm_adqtb_prod(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Returns
     -------
     None
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
-        platform_name = 'CUDA'
-    else:
-        run_mixed = False
+    system, platform = _build_system(modeller, forcefield, platform_name,
+                                     potential, ml_idx, calculator)
 
-    if calculator is not None:
-        potential = MLPotential('ase')
-
-    platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-
-    if deuterate:
-        print("Deuterating system...", flush=True)
-        deuterate_system(modeller, system, option=deuterate_option)
+    _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
         system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
 
-    if plumed_script_path is not None:
-        print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
-
-        with open(plumed_script_path, 'r') as f:
-            script_content = f.read()
-
-        plumed_force = PlumedForce(script_content)
-        system.addForce(plumed_force)
+    _load_plumed(system, plumed_script_path)
 
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
@@ -1997,29 +1363,10 @@ def run_openmm_adqtb_prod(modeller,
     simulation.context.setPositions(modeller.positions)
     simulation.context.setVelocitiesToTemperature(temperature)
 
-    simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
-    simulation.reporters.append(app.StateDataReporter(sys.stdout,
-                                                      n_report,
-                                                      step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
-                                                      speed=True))
-    simulation.reporters.append(app.StateDataReporter(f'{output_prefix}.log',
-                                                      n_report,
-                                                      step=True,
-                                                      time=True,
-                                                      potentialEnergy=True,
-                                                      kineticEnergy=True,
-                                                      totalEnergy=True,
-                                                      temperature=True,
-                                                      volume=True))
-
-    simulation.reporters.append(app.CheckpointReporter(f'{output_prefix}.chk', n_report * 10))
+    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
+                            checkpoint_interval=n_report * 10)
     print(f"Starting production run for {steps} steps...", flush=True)
     simulation.step(steps)
     print("Production run complete.", flush=True)
 
-    simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
-    with open(f'{output_prefix}.pdb', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+    _save_final_state(simulation, output_prefix)

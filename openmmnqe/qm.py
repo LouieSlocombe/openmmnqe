@@ -99,17 +99,17 @@ def orca_calc_preset(orca_path=None,
 
     profile = OrcaProfile(command=orca_path)
     if n_procs > 1:
-        inpt_procs = '%pal nprocs {} end'.format(n_procs)
+        inpt_procs = f'%pal nprocs {n_procs} end'
     else:
         inpt_procs = ''
 
     if f_solv is not None and f_solv is not False:
         if f_solv:
             f_solv = 'WATER'
-        inpt_solv = '''
+        inpt_solv = f'''
                                               %CPCM SMD TRUE
-                                                  SMDSOLVENT "{}"
-                                              END'''.format(f_solv)
+                                                  SMDSOLVENT "{f_solv}"
+                                              END'''
     else:
         inpt_solv = ''
 
@@ -134,21 +134,21 @@ def orca_calc_preset(orca_path=None,
     inpt_blocks = inpt_procs + inpt_solv + blocks_extra
 
     if calc_type == 'DFT':
-        inpt_simple = '{} {} {}'.format(xc, inpt_disp, basis_set)
+        inpt_simple = f'{xc} {inpt_disp} {basis_set}'
     elif calc_type == 'MP2':
-        inpt_simple = 'DLPNO-{} {} {}/C'.format(calc_type, basis_set, basis_set)
+        inpt_simple = f'DLPNO-{calc_type} {basis_set} {basis_set}/C'
     elif calc_type == 'CCSD':
-        inpt_simple = 'DLPNO-{}(T) {} {}/C'.format(calc_type, basis_set, basis_set)
+        inpt_simple = f'DLPNO-{calc_type}(T) {basis_set} {basis_set}/C'
     elif calc_type == 'QM/XTB2':
-        inpt_simple = '{} {} {} {}'.format(calc_type, xc, inpt_disp, basis_set)
+        inpt_simple = f'{calc_type} {xc} {inpt_disp} {basis_set}'
         inpt_blocks = inpt_procs + inpt_solv + inpt_xtb
     else:
-        inpt_simple = '{} {}'.format(calc_type, basis_set)
+        inpt_simple = f'{calc_type} {basis_set}'
 
     if multiplicity > 1:
-        if calc_type == 'DFT' or calc_type == 'QM/XTB2':
-            inpt_simple = 'UKS  ' + inpt_simple
-        elif calc_type == 'MP2' or calc_type == 'CCSD':
+        # NOTE: open-shell MP2/CCSD conventionally use a UHF reference;
+        # UKS is kept for all methods to preserve existing behaviour.
+        if calc_type in ('DFT', 'QM/XTB2', 'MP2', 'CCSD'):
             inpt_simple = 'UKS ' + inpt_simple
 
     if scf_option is not None:
@@ -350,7 +350,7 @@ def orca_calculate_goat(atoms,
         orca_path = os.path.abspath(orca_path)
     profile = OrcaProfile(command=orca_path)
     if n_procs > 1:
-        inpt_procs = '%pal nprocs {} end'.format(n_procs)
+        inpt_procs = f'%pal nprocs {n_procs} end'
     else:
         inpt_procs = ''
 

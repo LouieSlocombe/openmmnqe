@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openmmnqe"
 version = "0.1.0"
-description = "Template"
+description = "OpenMM workflows for nuclear quantum effects: RPMD and adaptive QTB simulations with PLUMED enhanced sampling"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -28,7 +28,10 @@ dependencies = [
     "pdbfixer",
     "rdkit",
     "mace-torch",
+    "openff-toolkit",  # openmmnqe/io.py
 ]
+# Required at runtime but not installable from PyPI (install via conda, see
+# build_tools/environment.yml): openmm-ml, openmm-plumed, geodesic_interpolate.
 
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -56,6 +59,3 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["openmmnqe", "openmmnqe.*"]
-
-[tool.setuptools.package-data]
-"openmmnqe" = ["data/*"]

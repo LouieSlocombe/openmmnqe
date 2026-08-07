@@ -1,4 +1,6 @@
 #! /usr/bin/env python3
+# Adapted from the OPES post-processing scripts by Michele Invernizzi:
+# https://github.com/invemichele/opes/tree/master/postprocessing
 """
 Get the FES estimate from reweighting. 1-D or 2-D only.
 

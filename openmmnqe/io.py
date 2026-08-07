@@ -205,9 +205,6 @@ def remove_directory(directory):
     """
     if os.path.exists(directory):
         shutil.rmtree(directory)
-    else:
-        pass
-    return None
 
 
 def copy_and_rename_file(src, dst_dir, new_name):
@@ -875,7 +872,8 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(ph)
-    app.PDBFile.writeFile(fixer.topology, fixer.positions, open(file_out, 'w'))
+    with open(file_out, 'w') as f:
+        app.PDBFile.writeFile(fixer.topology, fixer.positions, f)
     return None
 
 
@@ -998,11 +996,11 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
         suppl = Chem.SDMolSupplier(sdf_path, removeHs=False, sanitize=True)
         for mol in suppl:
             if mol is not None:
-                all_mols.append(mol)
+                all_mols.append((mol, sdf_path))
     combined_topology = Topology()
     combined_positions = []
-    for i, mol in enumerate(all_mols):
-        res_name = input_files[i].split('.')[0]
+    for mol, sdf_path in all_mols:
+        res_name = os.path.splitext(os.path.basename(sdf_path))[0]
         residue = combined_topology.addResidue(res_name, combined_topology.addChain())
         rdkit_idx_to_atom = {}
         for atom in mol.GetAtoms():
