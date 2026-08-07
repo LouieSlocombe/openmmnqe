@@ -1,0 +1,941 @@
+% CITATIONS.bib -- references for the methods openmmnqe implements or drives.
+%
+% Grouped by the part of the package each method belongs to. Cite the entries
+% for the code path you actually ran: a plain MM production run needs far less
+% than an RPMD + OPES + PATHMSD study on a MACE-OFF potential.
+%
+%   openmmnqe/openmm.py    simulation stages, integrators, barostats, ML/MM
+%   openmmnqe/plumed.py    collective variables and enhanced sampling
+%   openmmnqe/opes/        FES reconstruction from OPES states / reweighting
+%   openmmnqe/path.py      reference paths for path collective variables
+%   openmmnqe/qm.py        ORCA, NEB and path interpolation
+%   openmmnqe/io.py        system preparation and ligand parameterisation
+%   openmmnqe/tools.py     setup utilities (isotope substitution, bead init)
+%   openmmnqe/plotting.py  free-energy-surface plotting
+
+
+% =====================================================================
+% Simulation engine
+% =====================================================================
+
+@article{eastman2017openmm,
+  author  = {Eastman, Peter and Swails, Jason and Chodera, John D. and McGibbon, Robert T. and Zhao, Yutong and Beauchamp, Kyle A. and Wang, Lee-Ping and Simmonett, Andrew C. and Harrigan, Matthew P. and Stern, Chaya D. and Wiewiora, Rafal P. and Brooks, Bernard R. and Pande, Vijay S.},
+  title   = {{OpenMM} 7: Rapid Development of High Performance Algorithms for Molecular Dynamics},
+  journal = {PLOS Computational Biology},
+  volume  = {13},
+  number  = {7},
+  pages   = {e1005659},
+  year    = {2017},
+  doi     = {10.1371/journal.pcbi.1005659}
+}
+
+@article{eastman2024openmm8,
+  author  = {Eastman, Peter and Galvelis, Raimondas and Pel{\'a}ez, Ra{\'u}l P. and Abreu, Charlles R. A. and Farr, Stephen E. and Gallicchio, Emilio and Gorenko, Anton and Henry, Michael M. and Hu, Frank and Huang, Jing and Kr{\"a}mer, Andreas and Michel, Julien and Mitchell, Joshua A. and Pande, Vijay S. and Rodrigues, Jo{\~a}o PGLM and Rodriguez-Guerra, Jaime and Simmonett, Andrew C. and Singh, Sukrit and Swails, Jason and Turner, Philip and Wang, Yuanqing and Zhang, Ivy and Chodera, John D. and De Fabritiis, Gianni and Markland, Thomas E.},
+  title   = {{OpenMM} 8: Molecular Dynamics Simulation with Machine Learning Potentials},
+  journal = {The Journal of Physical Chemistry B},
+  volume  = {128},
+  number  = {1},
+  pages   = {109--116},
+  year    = {2024},
+  doi     = {10.1021/acs.jpcb.3c06662},
+  note    = {Describes the mixed ML/MM systems used by \texttt{MLPotential.createMixedSystem}}
+}
+
+@misc{openmmml,
+  author       = {Eastman, Peter and Galvelis, Raimondas and others},
+  title        = {{OpenMM-ML}: High Level {API} for Using Machine Learning Models in {OpenMM} Simulations},
+  howpublished = {\url{https://github.com/openmm/openmm-ml}},
+  note         = {Software; provides \texttt{openmmml.MLPotential}}
+}
+
+@misc{openmmplumed,
+  author       = {Eastman, Peter and others},
+  title        = {{OpenMM} {PLUMED} Plugin},
+  howpublished = {\url{https://github.com/openmm/openmm-plumed}},
+  note         = {Software; provides the \texttt{PlumedForce} used for all biased runs}
+}
+
+
+% =====================================================================
+% Integrators, thermostats and barostats (openmmnqe/openmm.py)
+% =====================================================================
+
+@article{leimkuhler2013rational,
+  author  = {Leimkuhler, Benedict and Matthews, Charles},
+  title   = {Rational Construction of Stochastic Numerical Methods for Molecular Sampling},
+  journal = {Applied Mathematics Research eXpress},
+  volume  = {2013},
+  number  = {1},
+  pages   = {34--56},
+  year    = {2013},
+  doi     = {10.1093/amrx/abs010},
+  note    = {BAOAB splitting underlying \texttt{LangevinMiddleIntegrator}}
+}
+
+@article{zhang2019unified,
+  author  = {Zhang, Zhijun and Liu, Xinzijian and Yan, Kangyu and Tuckerman, Mark E. and Liu, Jian},
+  title   = {Unified Efficient Thermostat Scheme for the Canonical Ensemble with Holonomic or Isokinetic Constraints via Molecular Dynamics},
+  journal = {The Journal of Physical Chemistry A},
+  volume  = {123},
+  number  = {28},
+  pages   = {6056--6079},
+  year    = {2019},
+  doi     = {10.1021/acs.jpca.9b02771},
+  note    = {The ``middle'' Langevin scheme implemented by \texttt{LangevinMiddleIntegrator}}
+}
+
+@article{chow1995isothermal,
+  author  = {Chow, Kai-Hang and Ferguson, David M.},
+  title   = {Isothermal-isobaric molecular dynamics simulations with {Monte} {Carlo} volume sampling},
+  journal = {Computer Physics Communications},
+  volume  = {91},
+  number  = {1--3},
+  pages   = {283--289},
+  year    = {1995},
+  doi     = {10.1016/0010-4655(95)00059-O},
+  note    = {\texttt{MonteCarloBarostat}}
+}
+
+@article{aqvist2004molecular,
+  author  = {{\AA}qvist, Johan and Wennerstr{\"o}m, Petra and Nervall, Martin and Bjelic, Sinisa and Brandsdal, Bj{\o}rn O.},
+  title   = {Molecular dynamics simulations of water and biomolecules with a {Monte} {Carlo} constant pressure algorithm},
+  journal = {Chemical Physics Letters},
+  volume  = {384},
+  number  = {4--6},
+  pages   = {288--294},
+  year    = {2004},
+  doi     = {10.1016/j.cplett.2003.12.039},
+  note    = {\texttt{MonteCarloBarostat}}
+}
+
+@article{darden1993particle,
+  author  = {Darden, Tom and York, Darrin and Pedersen, Lee},
+  title   = {Particle mesh {Ewald}: An {$N\cdot\log(N)$} method for {Ewald} sums in large systems},
+  journal = {The Journal of Chemical Physics},
+  volume  = {98},
+  number  = {12},
+  pages   = {10089--10092},
+  year    = {1993},
+  doi     = {10.1063/1.464397},
+  note    = {\texttt{nonbondedMethod=PME}}
+}
+
+@article{essmann1995smooth,
+  author  = {Essmann, Ulrich and Perera, Lalith and Berkowitz, Max L. and Darden, Tom and Lee, Hsing and Pedersen, Lee G.},
+  title   = {A smooth particle mesh {Ewald} method},
+  journal = {The Journal of Chemical Physics},
+  volume  = {103},
+  number  = {19},
+  pages   = {8577--8593},
+  year    = {1995},
+  doi     = {10.1063/1.470117}
+}
+
+
+% =====================================================================
+% Nuclear quantum effects: path integrals and RPMD
+% (run_openmm_rpmd_*, openmmnqe/reporters.py, tools.init_beads*)
+% =====================================================================
+
+@article{chandler1981exploiting,
+  author  = {Chandler, David and Wolynes, Peter G.},
+  title   = {Exploiting the isomorphism between quantum theory and classical statistical mechanics of polyatomic fluids},
+  journal = {The Journal of Chemical Physics},
+  volume  = {74},
+  number  = {7},
+  pages   = {4078--4095},
+  year    = {1981},
+  doi     = {10.1063/1.441588},
+  note    = {The classical ring-polymer isomorphism}
+}
+
+@article{parrinello1984study,
+  author  = {Parrinello, M. and Rahman, A.},
+  title   = {Study of an {F} center in molten {KCl}},
+  journal = {The Journal of Chemical Physics},
+  volume  = {80},
+  number  = {2},
+  pages   = {860--867},
+  year    = {1984},
+  doi     = {10.1063/1.446740},
+  note    = {Path integral molecular dynamics}
+}
+
+@article{craig2004quantum,
+  author  = {Craig, Ian R. and Manolopoulos, David E.},
+  title   = {Quantum statistics and classical mechanics: Real time correlation functions from ring polymer molecular dynamics},
+  journal = {The Journal of Chemical Physics},
+  volume  = {121},
+  number  = {8},
+  pages   = {3368--3373},
+  year    = {2004},
+  doi     = {10.1063/1.1777575},
+  note    = {RPMD; the method behind \texttt{RPMDIntegrator}}
+}
+
+@article{habershon2013ring,
+  author  = {Habershon, Scott and Manolopoulos, David E. and Markland, Thomas E. and Miller, Thomas F., III},
+  title   = {Ring-Polymer Molecular Dynamics: Quantum Effects in Chemical Dynamics from Classical Trajectories in an Extended Phase Space},
+  journal = {Annual Review of Physical Chemistry},
+  volume  = {64},
+  pages   = {387--413},
+  year    = {2013},
+  doi     = {10.1146/annurev-physchem-040412-110122},
+  note    = {Review; a good general citation for RPMD practice}
+}
+
+@article{ceriotti2010efficient,
+  author  = {Ceriotti, Michele and Parrinello, Michele and Markland, Thomas E. and Manolopoulos, David E.},
+  title   = {Efficient stochastic thermostatting of path integral molecular dynamics},
+  journal = {The Journal of Chemical Physics},
+  volume  = {133},
+  number  = {12},
+  pages   = {124104},
+  year    = {2010},
+  doi     = {10.1063/1.3489925},
+  note    = {PILE thermostat used by OpenMM's \texttt{RPMDIntegrator}}
+}
+
+@article{markland2008efficient,
+  author  = {Markland, Thomas E. and Manolopoulos, David E.},
+  title   = {An efficient ring polymer contraction scheme for imaginary time path integral simulations},
+  journal = {The Journal of Chemical Physics},
+  volume  = {129},
+  number  = {2},
+  pages   = {024105},
+  year    = {2008},
+  doi     = {10.1063/1.2953308},
+  note    = {Ring-polymer contraction; \texttt{run\_openmm\_rpmd\_contracted}}
+}
+
+
+% =====================================================================
+% Nuclear quantum effects: quantum thermal bath
+% (run_openmm_adqtb_eq / run_openmm_adqtb_prod, tools.set_adqtb_particle_types_by_element)
+% =====================================================================
+
+@article{dammak2009quantum,
+  author  = {Dammak, Hichem and Chalopin, Yann and Laroche, Marine and Hayoun, Marc and Greffet, Jean-Jacques},
+  title   = {Quantum Thermal Bath for Molecular Dynamics Simulation},
+  journal = {Physical Review Letters},
+  volume  = {103},
+  number  = {19},
+  pages   = {190601},
+  year    = {2009},
+  doi     = {10.1103/PhysRevLett.103.190601},
+  note    = {The original QTB}
+}
+
+@article{mangaud2019fluctuation,
+  author  = {Mangaud, Etienne and Huppert, Simon and Pl{\'e}, Thomas and Depondt, Philippe and Bonella, Sara and Finocchi, Fabio},
+  title   = {The Fluctuation--Dissipation Theorem as a Diagnosis and Cure for Zero-Point Energy Leakage in Quantum Thermal Bath Simulations},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {15},
+  number  = {5},
+  pages   = {2863--2880},
+  year    = {2019},
+  doi     = {10.1021/acs.jctc.8b01164},
+  note    = {adQTB; the reference implementation for OpenMM's \texttt{QTBIntegrator}}
+}
+
+@article{ple2023routine,
+  author  = {Pl{\'e}, Thomas and Mauger, Nastasia and Adjoua, Olivier and Inizan, Th{\'e}o Jaffrelot and Lagard{\`e}re, Louis and Huppert, Simon and Piquemal, Jean-Philip},
+  title   = {Routine Molecular Dynamics Simulations Including Nuclear Quantum Effects: From Force Fields to Machine Learning Potentials},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {19},
+  number  = {5},
+  pages   = {1432--1445},
+  year    = {2023},
+  doi     = {10.1021/acs.jctc.2c01233},
+  note    = {adQTB with ML potentials, the regime this package targets}
+}
+
+@book{bell1980tunnel,
+  author    = {Bell, Ronald P.},
+  title     = {The Tunnel Effect in Chemistry},
+  publisher = {Chapman and Hall},
+  address   = {London},
+  year      = {1980},
+  note      = {Background for H/D substitution and kinetic isotope effects; \texttt{tools.deuterate\_system}}
+}
+
+
+% =====================================================================
+% Machine-learned potentials
+% =====================================================================
+
+@inproceedings{batatia2022mace,
+  author    = {Batatia, Ilyes and Kov{\'a}cs, D{\'a}vid P{\'e}ter and Simm, Gregor N. C. and Ortner, Christoph and Cs{\'a}nyi, G{\'a}bor},
+  title     = {{MACE}: Higher Order Equivariant Message Passing Neural Networks for Fast and Accurate Force Fields},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume    = {35},
+  pages     = {11423--11436},
+  year      = {2022}
+}
+
+@article{kovacs2025maceoff,
+  author  = {Kov{\'a}cs, D{\'a}vid P{\'e}ter and Moore, J. Harry and Browning, Nicholas J. and Batatia, Ilyes and Horton, Joshua T. and Pu, Yixuan and Kapil, Venkat and Witt, William C. and Magd{\u{a}}u, Ioan-Bogdan and Cole, Daniel J. and Cs{\'a}nyi, G{\'a}bor},
+  title   = {{MACE-OFF}: Short-Range Transferable Machine Learning Force Fields for Organic Molecules},
+  journal = {Journal of the American Chemical Society},
+  volume  = {147},
+  number  = {21},
+  pages   = {17598--17611},
+  year    = {2025},
+  doi     = {10.1021/jacs.4c07099},
+  note    = {The \texttt{mace-off23-*} models used throughout \texttt{examples/}}
+}
+
+@inproceedings{paszke2019pytorch,
+  author    = {Paszke, Adam and Gross, Sam and Massa, Francisco and Lerer, Adam and Bradbury, James and Chanan, Gregory and Killeen, Trevor and Lin, Zeming and Gimelshein, Natalia and Antiga, Luca and Desmaison, Alban and K{\"o}pf, Andreas and Yang, Edward and DeVito, Zachary and Raison, Martin and Tejani, Alykhan and Chilamkurthy, Sasank and Steiner, Benoit and Fang, Lu and Bai, Junjie and Chintala, Soumith},
+  title     = {{PyTorch}: An Imperative Style, High-Performance Deep Learning Library},
+  booktitle = {Advances in Neural Information Processing Systems},
+  volume    = {32},
+  pages     = {8024--8035},
+  year      = {2019}
+}
+
+
+% =====================================================================
+% Force fields and system preparation (openmmnqe/io.py)
+% =====================================================================
+
+@article{maier2015ff14sb,
+  author  = {Maier, James A. and Martinez, Carmenza and Kasavajhala, Koushik and Wickstrom, Lauren and Hauser, Kevin E. and Simmerling, Carlos},
+  title   = {{ff14SB}: Improving the Accuracy of Protein Side Chain and Backbone Parameters from {ff99SB}},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {11},
+  number  = {8},
+  pages   = {3696--3713},
+  year    = {2015},
+  doi     = {10.1021/acs.jctc.5b00255},
+  note    = {Protein parameters in \texttt{amber14-all.xml}}
+}
+
+@article{zgarbova2015ol15,
+  author  = {Zgarbov{\'a}, Marie and {\v{S}}poner, Ji{\v{r}}{\'i} and Otyepka, Michal and Cheatham, Thomas E., III and Galindo-Murillo, Rodrigo and Jure{\v{c}}ka, Petr},
+  title   = {Refinement of the Sugar--Phosphate Backbone Torsion Beta for {AMBER} Force Fields Improves the Description of {Z}- and {B}-{DNA}},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {11},
+  number  = {12},
+  pages   = {5723--5736},
+  year    = {2015},
+  doi     = {10.1021/acs.jctc.5b00716},
+  note    = {OL15 DNA parameters in \texttt{amber14-all.xml}}
+}
+
+@article{zgarbova2011ol3,
+  author  = {Zgarbov{\'a}, Marie and Otyepka, Michal and {\v{S}}poner, Ji{\v{r}}{\'i} and Ml{\'a}dek, Arno{\v{s}}t and Ban{\'a}{\v{s}}, Pavel and Cheatham, Thomas E., III and Jure{\v{c}}ka, Petr},
+  title   = {Refinement of the {Cornell} et al. Nucleic Acids Force Field Based on Reference Quantum Chemical Calculations of Glycosidic Torsion Profiles},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {7},
+  number  = {9},
+  pages   = {2886--2902},
+  year    = {2011},
+  doi     = {10.1021/ct200162x},
+  note    = {OL3 RNA parameters in \texttt{amber14-all.xml}}
+}
+
+@article{jorgensen1983comparison,
+  author  = {Jorgensen, William L. and Chandrasekhar, Jayaraman and Madura, Jeffry D. and Impey, Roger W. and Klein, Michael L.},
+  title   = {Comparison of simple potential functions for simulating liquid water},
+  journal = {The Journal of Chemical Physics},
+  volume  = {79},
+  number  = {2},
+  pages   = {926--935},
+  year    = {1983},
+  doi     = {10.1063/1.445869},
+  note    = {TIP3P}
+}
+
+@article{wang2014building,
+  author  = {Wang, Lee-Ping and Martinez, Todd J. and Pande, Vijay S.},
+  title   = {Building Force Fields: An Automatic, Systematic, and Reproducible Approach},
+  journal = {The Journal of Physical Chemistry Letters},
+  volume  = {5},
+  number  = {11},
+  pages   = {1885--1891},
+  year    = {2014},
+  doi     = {10.1021/jz500737m},
+  note    = {TIP3P-FB, i.e. \texttt{amber14/tip3pfb.xml}}
+}
+
+@article{wang2004development,
+  author  = {Wang, Junmei and Wolf, Romain M. and Caldwell, James W. and Kollman, Peter A. and Case, David A.},
+  title   = {Development and testing of a general amber force field},
+  journal = {Journal of Computational Chemistry},
+  volume  = {25},
+  number  = {9},
+  pages   = {1157--1174},
+  year    = {2004},
+  doi     = {10.1002/jcc.20035},
+  note    = {GAFF; \texttt{prepare\_ligand\_ff} defaults to \texttt{gaff-2.11}}
+}
+
+@article{jakalian2000fast,
+  author  = {Jakalian, Araz and Bush, Bruce L. and Jack, David B. and Bayly, Christopher I.},
+  title   = {Fast, efficient generation of high-quality atomic charges. {AM1-BCC} model: {I}. Method},
+  journal = {Journal of Computational Chemistry},
+  volume  = {21},
+  number  = {2},
+  pages   = {132--146},
+  year    = {2000},
+  doi     = {10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P},
+  note    = {\texttt{pc\_method='am1bcc'}}
+}
+
+@article{jakalian2002fast,
+  author  = {Jakalian, Araz and Jack, David B. and Bayly, Christopher I.},
+  title   = {Fast, efficient generation of high-quality atomic charges. {AM1-BCC} model: {II}. Parameterization and validation},
+  journal = {Journal of Computational Chemistry},
+  volume  = {23},
+  number  = {16},
+  pages   = {1623--1641},
+  year    = {2002},
+  doi     = {10.1002/jcc.10128}
+}
+
+@article{halgren1996mmff94,
+  author  = {Halgren, Thomas A.},
+  title   = {Merck molecular force field. {I}. Basis, form, scope, parameterization, and performance of {MMFF94}},
+  journal = {Journal of Computational Chemistry},
+  volume  = {17},
+  number  = {5--6},
+  pages   = {490--519},
+  year    = {1996},
+  doi     = {10.1002/(SICI)1096-987X(199604)17:5/6<490::AID-JCC1>3.0.CO;2-P},
+  note    = {Default \texttt{pc\_method='mmff94'} in \texttt{prepare\_ligand\_ff}}
+}
+
+@misc{openmmforcefields,
+  author       = {Chodera, John D. and Rodr{\'i}guez-Guerra, Jaime and Wang, Yuanqing and Eastman, Peter and others},
+  title        = {{openmmforcefields}: Additional Force Fields for {OpenMM}},
+  howpublished = {\url{https://github.com/openmm/openmmforcefields}},
+  note         = {Software; provides \texttt{GAFFTemplateGenerator}}
+}
+
+@misc{openfftoolkit,
+  author       = {Wagner, Jeffrey and Thompson, Matthew W. and Dotson, David L. and Mitchell, Josh A. and others},
+  title        = {The {Open} {Force} {Field} Toolkit},
+  howpublished = {\url{https://github.com/openforcefield/openff-toolkit}},
+  note         = {Software; \texttt{openff.toolkit.Molecule} and partial-charge assignment}
+}
+
+@misc{pdbfixer,
+  author       = {Eastman, Peter and others},
+  title        = {{PDBFixer}},
+  howpublished = {\url{https://github.com/openmm/pdbfixer}},
+  note         = {Software; \texttt{io.fix\_pdb}}
+}
+
+@misc{rdkit,
+  author       = {Landrum, Greg and others},
+  title        = {{RDKit}: Open-Source Cheminformatics},
+  howpublished = {\url{https://www.rdkit.org}},
+  note         = {Software; bond perception and SDF writing in \texttt{io.xyz\_to\_sdf}}
+}
+
+
+% =====================================================================
+% Enhanced sampling: PLUMED (openmmnqe/plumed.py)
+% =====================================================================
+
+@article{tribello2014plumed2,
+  author  = {Tribello, Gareth A. and Bonomi, Massimiliano and Branduardi, Davide and Camilloni, Carlo and Bussi, Giovanni},
+  title   = {{PLUMED} 2: New feathers for an old bird},
+  journal = {Computer Physics Communications},
+  volume  = {185},
+  number  = {2},
+  pages   = {604--613},
+  year    = {2014},
+  doi     = {10.1016/j.cpc.2013.09.018}
+}
+
+@article{plumed2019promoting,
+  author  = {{The PLUMED consortium}},
+  title   = {Promoting transparency and reproducibility in enhanced molecular simulations},
+  journal = {Nature Methods},
+  volume  = {16},
+  pages   = {670--673},
+  year    = {2019},
+  doi     = {10.1038/s41592-019-0506-8}
+}
+
+@article{laio2002escaping,
+  author  = {Laio, Alessandro and Parrinello, Michele},
+  title   = {Escaping free-energy minima},
+  journal = {Proceedings of the National Academy of Sciences},
+  volume  = {99},
+  number  = {20},
+  pages   = {12562--12566},
+  year    = {2002},
+  doi     = {10.1073/pnas.202427399},
+  note    = {Metadynamics; the \texttt{METAD} action}
+}
+
+@article{barducci2008welltempered,
+  author  = {Barducci, Alessandro and Bussi, Giovanni and Parrinello, Michele},
+  title   = {Well-Tempered Metadynamics: A Smoothly Converging and Tunable Free-Energy Method},
+  journal = {Physical Review Letters},
+  volume  = {100},
+  number  = {2},
+  pages   = {020603},
+  year    = {2008},
+  doi     = {10.1103/PhysRevLett.100.020603},
+  note    = {The \texttt{BIASFACTOR} option used by every \texttt{METAD} input here}
+}
+
+@article{invernizzi2020rethinking,
+  author  = {Invernizzi, Michele and Parrinello, Michele},
+  title   = {Rethinking Metadynamics: From Bias Potentials to Probability Distributions},
+  journal = {The Journal of Physical Chemistry Letters},
+  volume  = {11},
+  number  = {7},
+  pages   = {2731--2736},
+  year    = {2020},
+  doi     = {10.1021/acs.jpclett.0c00497},
+  note    = {OPES; the \texttt{OPES\_METAD} action selected by \texttt{f\_opes=True}}
+}
+
+@article{invernizzi2020unified,
+  author  = {Invernizzi, Michele and Piaggi, Pablo M. and Parrinello, Michele},
+  title   = {Unified Approach to Enhanced Sampling},
+  journal = {Physical Review X},
+  volume  = {10},
+  number  = {4},
+  pages   = {041034},
+  year    = {2020},
+  doi     = {10.1103/PhysRevX.10.041034}
+}
+
+@article{invernizzi2022exploration,
+  author  = {Invernizzi, Michele and Parrinello, Michele},
+  title   = {Exploration vs Convergence Speed in Adaptive-Bias Enhanced Sampling},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {18},
+  number  = {6},
+  pages   = {3988--3996},
+  year    = {2022},
+  doi     = {10.1021/acs.jctc.2c00152},
+  note    = {OPES explore}
+}
+
+@misc{opes_postprocessing,
+  author       = {Invernizzi, Michele},
+  title        = {{OPES} Post-Processing Scripts},
+  howpublished = {\url{https://github.com/invemichele/opes}},
+  note         = {Origin of \texttt{openmmnqe/opes/FES\_from\_State.py}, \texttt{FES\_from\_Reweighting.py} and \texttt{State\_from\_Kernels.py}}
+}
+
+@article{branduardi2007atob,
+  author  = {Branduardi, Davide and Gervasio, Francesco Luigi and Parrinello, Michele},
+  title   = {From {A} to {B} in free energy space},
+  journal = {The Journal of Chemical Physics},
+  volume  = {126},
+  number  = {5},
+  pages   = {054103},
+  year    = {2007},
+  doi     = {10.1063/1.2432340},
+  note    = {Path collective variables $s$ and $z$; the \texttt{PATHMSD} action and \texttt{LAMBDA} parameter}
+}
+
+@article{iannuzzi2003efficient,
+  author  = {Iannuzzi, Marcella and Laio, Alessandro and Parrinello, Michele},
+  title   = {Efficient Exploration of Reactive Potential Energy Surfaces Using {Car}-{Parrinello} Molecular Dynamics},
+  journal = {Physical Review Letters},
+  volume  = {90},
+  number  = {23},
+  pages   = {238302},
+  year    = {2003},
+  doi     = {10.1103/PhysRevLett.90.238302},
+  note    = {Coordination-number CVs for bond making/breaking, as used by the proton-transfer CVs here}
+}
+
+@article{torrie1977nonphysical,
+  author  = {Torrie, G. M. and Valleau, J. P.},
+  title   = {Nonphysical sampling distributions in {Monte} {Carlo} free-energy estimation: Umbrella sampling},
+  journal = {Journal of Computational Physics},
+  volume  = {23},
+  number  = {2},
+  pages   = {187--199},
+  year    = {1977},
+  doi     = {10.1016/0021-9991(77)90121-8},
+  note    = {Harmonic restraints and walls (\texttt{RESTRAINT}, \texttt{UPPER\_WALLS}, \texttt{LOWER\_WALLS})}
+}
+
+@article{tiwary2015timeindependent,
+  author  = {Tiwary, Pratyush and Parrinello, Michele},
+  title   = {A Time-Independent Free Energy Estimator for Metadynamics},
+  journal = {The Journal of Physical Chemistry B},
+  volume  = {119},
+  number  = {3},
+  pages   = {736--742},
+  year    = {2015},
+  doi     = {10.1021/jp504920s},
+  note    = {Reweighting scheme behind \texttt{FES\_from\_Reweighting.py}}
+}
+
+
+% =====================================================================
+% Steered MD and reference paths (openmmnqe/path.py, run_openmm_steered)
+% =====================================================================
+
+@article{grubmuller1996ligand,
+  author  = {Grubm{\"u}ller, Helmut and Heymann, Berthold and Tavan, Paul},
+  title   = {Ligand Binding: Molecular Mechanics Calculation of the Streptavidin-Biotin Rupture Force},
+  journal = {Science},
+  volume  = {271},
+  number  = {5251},
+  pages   = {997--999},
+  year    = {1996},
+  doi     = {10.1126/science.271.5251.997},
+  note    = {Steered MD with a moving harmonic restraint (\texttt{MOVINGRESTRAINT})}
+}
+
+@article{izrailev1997molecular,
+  author  = {Izrailev, Sergei and Stepaniants, Sergey and Balsera, Monica and Oono, Yoshi and Schulten, Klaus},
+  title   = {Molecular dynamics study of unbinding of the avidin-biotin complex},
+  journal = {Biophysical Journal},
+  volume  = {72},
+  number  = {4},
+  pages   = {1568--1581},
+  year    = {1997},
+  doi     = {10.1016/S0006-3495(97)78804-0}
+}
+
+@article{jarzynski1997nonequilibrium,
+  author  = {Jarzynski, C.},
+  title   = {Nonequilibrium Equality for Free Energy Differences},
+  journal = {Physical Review Letters},
+  volume  = {78},
+  number  = {14},
+  pages   = {2690--2693},
+  year    = {1997},
+  doi     = {10.1103/PhysRevLett.78.2690},
+  note    = {Cite if free energies are extracted from the steered pulls themselves}
+}
+
+
+% =====================================================================
+% Quantum chemistry and reaction paths (openmmnqe/qm.py)
+% =====================================================================
+
+@article{larsen2017ase,
+  author  = {Larsen, Ask Hjorth and Mortensen, Jens J{\o}rgen and Blomqvist, Jakob and Castelli, Ivano E. and Christensen, Rune and Du{\l}ak, Marcin and Friis, Jesper and Groves, Michael N. and Hammer, Bj{\o}rk and Hargus, Cory and Hermes, Eric D. and Jennings, Paul C. and Jensen, Peter Bjerre and Kermode, James and Kitchin, John R. and Kolsbjerg, Esben Leonhard and Kubal, Joseph and Kaasbjerg, Kristen and Lysgaard, Steen and Maronsson, J{\'o}n Bergmann and Maxson, Tristan and Olsen, Thomas and Pastewka, Lars and Peterson, Andrew and Rostgaard, Carsten and Schi{\o}tz, Jakob and Sch{\"u}tt, Ole and Strange, Mikkel and Thygesen, Kristian S. and Vegge, Tejs and Vilhelmsen, Lasse and Walter, Michael and Zeng, Zhenhua and Jacobsen, Karsten W.},
+  title   = {The atomic simulation environment---a {Python} library for working with atoms},
+  journal = {Journal of Physics: Condensed Matter},
+  volume  = {29},
+  number  = {27},
+  pages   = {273002},
+  year    = {2017},
+  doi     = {10.1088/1361-648X/aa680e},
+  note    = {ASE; \texttt{NEB}, \texttt{BFGS} and the ORCA calculator interface}
+}
+
+@article{neese2012orca,
+  author  = {Neese, Frank},
+  title   = {The {ORCA} program system},
+  journal = {WIREs Computational Molecular Science},
+  volume  = {2},
+  number  = {1},
+  pages   = {73--78},
+  year    = {2012},
+  doi     = {10.1002/wcms.81}
+}
+
+@article{neese2022orca5,
+  author  = {Neese, Frank},
+  title   = {Software update: The {ORCA} program system---Version 5.0},
+  journal = {WIREs Computational Molecular Science},
+  volume  = {12},
+  number  = {5},
+  pages   = {e1606},
+  year    = {2022},
+  doi     = {10.1002/wcms.1606}
+}
+
+@article{neese2025orca6,
+  author  = {Neese, Frank},
+  title   = {Software Update: The {ORCA} Program System---Version 6.0},
+  journal = {WIREs Computational Molecular Science},
+  volume  = {15},
+  number  = {2},
+  pages   = {e70019},
+  year    = {2025},
+  doi     = {10.1002/wcms.70019},
+  note    = {Cite the version actually run; GOAT requires ORCA 6}
+}
+
+@article{desouza2025goat,
+  author  = {de Souza, Bernardo},
+  title   = {{GOAT}: A Global Optimization Algorithm for Molecules and Atomic Clusters},
+  journal = {Angewandte Chemie International Edition},
+  volume  = {64},
+  number  = {18},
+  pages   = {e202500393},
+  year    = {2025},
+  doi     = {10.1002/anie.202500393},
+  note    = {\texttt{qm.orca\_calculate\_goat} conformer search}
+}
+
+@article{furness2020r2scan,
+  author  = {Furness, James W. and Kaplan, Aaron D. and Ning, Jinliang and Perdew, John P. and Sun, Jianwei},
+  title   = {Accurate and Numerically Efficient {r$^2$SCAN} Meta-Generalized Gradient Approximation},
+  journal = {The Journal of Physical Chemistry Letters},
+  volume  = {11},
+  number  = {19},
+  pages   = {8208--8215},
+  year    = {2020},
+  doi     = {10.1021/acs.jpclett.0c02405}
+}
+
+@article{grimme2021r2scan3c,
+  author  = {Grimme, Stefan and Hansen, Andreas and Ehlert, Sebastian and Mewes, Jan-Michael},
+  title   = {{r$^2$SCAN-3c}: A ``Swiss army knife'' composite electronic-structure method},
+  journal = {The Journal of Chemical Physics},
+  volume  = {154},
+  number  = {6},
+  pages   = {064103},
+  year    = {2021},
+  doi     = {10.1063/5.0040021},
+  note    = {Default \texttt{xc} in \texttt{qm.orca\_calc\_preset}}
+}
+
+@article{caldeweyher2019d4,
+  author  = {Caldeweyher, Eike and Ehlert, Sebastian and Hansen, Andreas and Neugebauer, Hagen and Spicher, Sebastian and Bannwarth, Christoph and Grimme, Stefan},
+  title   = {A generally applicable atomic-charge dependent {London} dispersion correction},
+  journal = {The Journal of Chemical Physics},
+  volume  = {150},
+  number  = {15},
+  pages   = {154122},
+  year    = {2019},
+  doi     = {10.1063/1.5090222},
+  note    = {\texttt{f\_disp=True} requests D4}
+}
+
+@article{barone1998cpcm,
+  author  = {Barone, Vincenzo and Cossi, Maurizio},
+  title   = {Quantum Calculation of Molecular Energies and Energy Gradients in Solution by a Conductor Solvent Model},
+  journal = {The Journal of Physical Chemistry A},
+  volume  = {102},
+  number  = {11},
+  pages   = {1995--2001},
+  year    = {1998},
+  doi     = {10.1021/jp9716997},
+  note    = {CPCM, the \texttt{\%CPCM} block written by \texttt{orca\_calc\_preset}}
+}
+
+@article{marenich2009smd,
+  author  = {Marenich, Aleksandr V. and Cramer, Christopher J. and Truhlar, Donald G.},
+  title   = {Universal Solvation Model Based on Solute Electron Density and on a Continuum Model of the Solvent Defined by the Bulk Dielectric Constant and Atomic Surface Tensions},
+  journal = {The Journal of Physical Chemistry B},
+  volume  = {113},
+  number  = {18},
+  pages   = {6378--6396},
+  year    = {2009},
+  doi     = {10.1021/jp810292n},
+  note    = {\texttt{SMD TRUE} solvation}
+}
+
+@article{riplinger2013efficient,
+  author  = {Riplinger, Christoph and Neese, Frank},
+  title   = {An efficient and near linear scaling pair natural orbital based local coupled cluster method},
+  journal = {The Journal of Chemical Physics},
+  volume  = {138},
+  number  = {3},
+  pages   = {034106},
+  year    = {2013},
+  doi     = {10.1063/1.4773581},
+  note    = {DLPNO-CCSD(T); \texttt{calc\_type='CCSD'}}
+}
+
+@article{riplinger2013natural,
+  author  = {Riplinger, Christoph and Sandhoefer, Barbara and Hansen, Andreas and Neese, Frank},
+  title   = {Natural triple excitations in local coupled cluster calculations with pair natural orbitals},
+  journal = {The Journal of Chemical Physics},
+  volume  = {139},
+  number  = {13},
+  pages   = {134101},
+  year    = {2013},
+  doi     = {10.1063/1.4821834}
+}
+
+@article{pinski2015sparse,
+  author  = {Pinski, Peter and Riplinger, Christoph and Valeev, Edward F. and Neese, Frank},
+  title   = {Sparse maps---A systematic infrastructure for reduced-scaling electronic structure methods. {I}. An efficient and simple linear scaling local {MP2} method that uses an intermediate basis of pair natural orbitals},
+  journal = {The Journal of Chemical Physics},
+  volume  = {143},
+  number  = {3},
+  pages   = {034108},
+  year    = {2015},
+  doi     = {10.1063/1.4926879},
+  note    = {DLPNO-MP2; \texttt{calc\_type='MP2'}}
+}
+
+@article{bannwarth2019gfn2,
+  author  = {Bannwarth, Christoph and Ehlert, Sebastian and Grimme, Stefan},
+  title   = {{GFN2-xTB}---An Accurate and Broadly Parametrized Self-Consistent Tight-Binding Quantum Chemical Method with Multipole Electrostatics and Density-Dependent Dispersion Contributions},
+  journal = {Journal of Chemical Theory and Computation},
+  volume  = {15},
+  number  = {3},
+  pages   = {1652--1671},
+  year    = {2019},
+  doi     = {10.1021/acs.jctc.8b01176},
+  note    = {The low level of \texttt{calc\_type='QM/XTB2'}}
+}
+
+@incollection{jonsson1998nudged,
+  author    = {J{\'o}nsson, Hannes and Mills, Greg and Jacobsen, Karsten W.},
+  title     = {Nudged Elastic Band Method for Finding Minimum Energy Paths of Transitions},
+  booktitle = {Classical and Quantum Dynamics in Condensed Phase Simulations},
+  editor    = {Berne, Bruce J. and Ciccotti, Giovanni and Coker, David F.},
+  publisher = {World Scientific},
+  pages     = {385--404},
+  year      = {1998},
+  doi       = {10.1142/9789812839664_0016}
+}
+
+@article{henkelman2000improved,
+  author  = {Henkelman, Graeme and J{\'o}nsson, Hannes},
+  title   = {Improved tangent estimate in the nudged elastic band method for finding minimum energy paths and saddle points},
+  journal = {The Journal of Chemical Physics},
+  volume  = {113},
+  number  = {22},
+  pages   = {9978--9985},
+  year    = {2000},
+  doi     = {10.1063/1.1323224}
+}
+
+@article{henkelman2000climbing,
+  author  = {Henkelman, Graeme and Uberuaga, Blas P. and J{\'o}nsson, Hannes},
+  title   = {A climbing image nudged elastic band method for finding saddle points and minimum energy paths},
+  journal = {The Journal of Chemical Physics},
+  volume  = {113},
+  number  = {22},
+  pages   = {9901--9904},
+  year    = {2000},
+  doi     = {10.1063/1.1329672},
+  note    = {\texttt{climb=True} in \texttt{qm.prepare\_neb}}
+}
+
+@article{smidstrup2014improved,
+  author  = {Smidstrup, S{\o}ren and Pedersen, Andreas and Stokbro, Kurt and J{\'o}nsson, Hannes},
+  title   = {Improved initial guess for minimum energy path calculations},
+  journal = {The Journal of Chemical Physics},
+  volume  = {140},
+  number  = {21},
+  pages   = {214106},
+  year    = {2014},
+  doi     = {10.1063/1.4878664},
+  note    = {IDPP interpolation; the \texttt{geo\_int=False} branch of \texttt{qm.prepare\_neb}}
+}
+
+@article{zhu2019geodesic,
+  author  = {Zhu, Xiaolei and Thompson, Keiran C. and Mart{\'i}nez, Todd J.},
+  title   = {Geodesic interpolation for reaction pathways},
+  journal = {The Journal of Chemical Physics},
+  volume  = {150},
+  number  = {16},
+  pages   = {164103},
+  year    = {2019},
+  doi     = {10.1063/1.5090303},
+  note    = {Default path interpolation in \texttt{qm.prepare\_neb} and \texttt{qm.quick\_guess\_path}}
+}
+
+@book{nocedal2006numerical,
+  author    = {Nocedal, Jorge and Wright, Stephen J.},
+  title     = {Numerical Optimization},
+  edition   = {2},
+  publisher = {Springer},
+  address   = {New York},
+  year      = {2006},
+  doi       = {10.1007/978-0-387-40065-5},
+  note      = {BFGS, the optimiser used for geometry and NEB relaxation}
+}
+
+
+% =====================================================================
+% Analysis, trajectory handling and plotting
+% =====================================================================
+
+@article{mcgibbon2015mdtraj,
+  author  = {McGibbon, Robert T. and Beauchamp, Kyle A. and Harrigan, Matthew P. and Klein, Christoph and Swails, Jason M. and Hern{\'a}ndez, Carlos X. and Schwantes, Christian R. and Wang, Lee-Ping and Lane, Thomas J. and Pande, Vijay S.},
+  title   = {{MDTraj}: A Modern Open Library for the Analysis of Molecular Dynamics Trajectories},
+  journal = {Biophysical Journal},
+  volume  = {109},
+  number  = {8},
+  pages   = {1528--1532},
+  year    = {2015},
+  doi     = {10.1016/j.bpj.2015.08.015},
+  note    = {Trajectory loading, superposition and MSD in \texttt{path.py} and \texttt{plumed.estimate\_path\_lambda}}
+}
+
+@article{michaudagrawal2011mdanalysis,
+  author  = {Michaud-Agrawal, Naveen and Denning, Elizabeth J. and Woolf, Thomas B. and Beckstein, Oliver},
+  title   = {{MDAnalysis}: A toolkit for the analysis of molecular dynamics simulations},
+  journal = {Journal of Computational Chemistry},
+  volume  = {32},
+  number  = {10},
+  pages   = {2319--2327},
+  year    = {2011},
+  doi     = {10.1002/jcc.21787}
+}
+
+@inproceedings{gowers2016mdanalysis,
+  author    = {Gowers, Richard J. and Linke, Max and Barnoud, Jonathan and Reddy, Tyler J. E. and Melo, Manuel N. and Seyler, Sean L. and Domanski, Jan and Dotson, David L. and Buchoux, S{\'e}bastien and Kenney, Ian M. and Beckstein, Oliver},
+  title     = {{MDAnalysis}: A {Python} Package for the Rapid Analysis of Molecular Dynamics Simulations},
+  booktitle = {Proceedings of the 15th Python in Science Conference},
+  pages     = {98--105},
+  year      = {2016},
+  doi       = {10.25080/Majora-629e541a-00e}
+}
+
+@article{harris2020numpy,
+  author  = {Harris, Charles R. and Millman, K. Jarrod and van der Walt, St{\'e}fan J. and Gommers, Ralf and Virtanen, Pauli and Cournapeau, David and Wieser, Eric and Taylor, Julian and Berg, Sebastian and Smith, Nathaniel J. and Kern, Robert and Picus, Matti and Hoyer, Stephan and van Kerkwijk, Marten H. and Brett, Matthew and Haldane, Allan and del R{\'i}o, Jaime Fern{\'a}ndez and Wiebe, Mark and Peterson, Pearu and G{\'e}rard-Marchant, Pierre and Sheppard, Kevin and Reddy, Tyler and Weckesser, Warren and Abbasi, Hameer and Gohlke, Christoph and Oliphant, Travis E.},
+  title   = {Array programming with {NumPy}},
+  journal = {Nature},
+  volume  = {585},
+  pages   = {357--362},
+  year    = {2020},
+  doi     = {10.1038/s41586-020-2649-2}
+}
+
+@article{virtanen2020scipy,
+  author  = {Virtanen, Pauli and Gommers, Ralf and Oliphant, Travis E. and Haberland, Matt and Reddy, Tyler and Cournapeau, David and Burovski, Evgeni and Peterson, Pearu and Weckesser, Warren and Bright, Jonathan and van der Walt, St{\'e}fan J. and Brett, Matthew and Wilson, Joshua and Millman, K. Jarrod and Mayorov, Nikolay and Nelson, Andrew R. J. and Jones, Eric and Kern, Robert and Larson, Eric and Carey, C J and Polat, {\.I}lhan and Feng, Yu and Moore, Eric W. and VanderPlas, Jake and Laxalde, Denis and Perktold, Josef and Cimrman, Robert and Henriksen, Ian and Quintero, E. A. and Harris, Charles R. and Archibald, Anne M. and Ribeiro, Ant{\^o}nio H. and Pedregosa, Fabian and van Mulbregt, Paul},
+  title   = {{SciPy} 1.0: fundamental algorithms for scientific computing in {Python}},
+  journal = {Nature Methods},
+  volume  = {17},
+  pages   = {261--272},
+  year    = {2020},
+  doi     = {10.1038/s41592-019-0686-2},
+  note    = {Physical constants and cubic-spline path resampling}
+}
+
+@article{hunter2007matplotlib,
+  author  = {Hunter, John D.},
+  title   = {Matplotlib: A 2{D} Graphics Environment},
+  journal = {Computing in Science \& Engineering},
+  volume  = {9},
+  number  = {3},
+  pages   = {90--95},
+  year    = {2007},
+  doi     = {10.1109/MCSE.2007.55}
+}
+
+@inproceedings{mckinney2010pandas,
+  author    = {McKinney, Wes},
+  title     = {Data Structures for Statistical Computing in {Python}},
+  booktitle = {Proceedings of the 9th Python in Science Conference},
+  pages     = {56--61},
+  year      = {2010},
+  doi       = {10.25080/Majora-92bf1922-00a}
+}
+
+@article{pedregosa2011scikitlearn,
+  author  = {Pedregosa, Fabian and Varoquaux, Ga{\"e}l and Gramfort, Alexandre and Michel, Vincent and Thirion, Bertrand and Grisel, Olivier and Blondel, Mathieu and Prettenhofer, Peter and Weiss, Ron and Dubourg, Vincent and Vanderplas, Jake and Passos, Alexandre and Cournapeau, David and Brucher, Matthieu and Perrot, Matthieu and Duchesnay, {\'E}douard},
+  title   = {Scikit-learn: Machine Learning in {Python}},
+  journal = {Journal of Machine Learning Research},
+  volume  = {12},
+  pages   = {2825--2830},
+  year    = {2011},
+  note    = {PCA-based reaction-coordinate analysis in the test suite}
+}
