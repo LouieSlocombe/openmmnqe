@@ -17,7 +17,6 @@ authors = [
 dependencies = [
     "numpy",
     "scipy",
-    "pandas",
     "matplotlib",
     "torch",
     "openmm",
@@ -29,9 +28,12 @@ dependencies = [
     "rdkit",
     "mace-torch",
     "openff-toolkit",  # openmmnqe/io.py
+    # Reaction paths, ORCA and free-energy-surface plotting live here; it also
+    # brings in geodesic_interpolate.
+    "reactiontools @ git+https://github.com/LouieSlocombe/reactiontools.git",
 ]
 # Required at runtime but not installable from PyPI (install via conda, see
-# build_tools/environment.yml): openmm-ml, openmm-plumed, geodesic_interpolate.
+# build_tools/environment.yml): openmm-ml, openmm-plumed.
 
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -43,6 +45,7 @@ classifiers = [
 dev = [
     "pytest",
     "pytest-cov",
+    "pandas",  # tests/test_openmm.py bias-weight tables
     "scikit-learn",  # tests/test_openmm.py PCA reaction-coordinate analysis
 ]
 

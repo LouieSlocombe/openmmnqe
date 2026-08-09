@@ -7,6 +7,7 @@ import openmm.unit as unit
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+import reactiontools as rt
 
 if __name__ == "__main__":
     print(flush=True)
@@ -55,8 +56,8 @@ if __name__ == "__main__":
     os.system(sum_hills_input)
     shutil.copy('fes.dat', 'md_fes.dat')
 
-    nqe.plot_plumed_fes("md_fes.dat", filename="md_fes")
+    rt.plot_plumed_fes("md_fes.dat", filename="md_fes")
     plt.close()
 
-    nqe.plot_plumed_colvar("COLVAR", filename="colvar")
+    rt.plot_plumed_colvar("COLVAR", filename="colvar")
     plt.close()

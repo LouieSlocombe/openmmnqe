@@ -17,6 +17,7 @@ import pytest
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+import reactiontools as rt
 
 MALONALDEHYDE = 'tests/data/pdb/malonaldehyde.pdb'
 
@@ -303,8 +304,8 @@ def test_malonaldehyde_steered_path():
                         steps=steps_prod)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('smd*')

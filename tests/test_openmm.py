@@ -309,9 +309,32 @@ def test_distance_between_atoms():
     modeller = app.Modeller(pdb.topology, pdb.positions)
     indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:H3', 'DGN1:O6'])
     distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
-    print(f"Distance between atoms: {distance:.4f} nm", flush=True)
+    nm = distance.value_in_unit(unit.nanometer)
+    print(f"Distance between atoms: {nm:.4f} nm", flush=True)
     ref_distance = 0.179  # in nm
-    assert abs(distance - ref_distance) < 0.01
+    assert abs(nm - ref_distance) < 0.01
+
+
+def test_distance_between_atoms_carries_its_units():
+    """Guards against the unit being stripped off the return value.
+
+    Building the norm out of ``dr.x`` and friends silently loses it, because
+    indexing a Quantity that wraps a Vec3 hands back the bare component. The
+    result then reads as a plain number of nanometres, which is right up until
+    someone asks it for another unit -- or calls ``value_in_unit`` and gets an
+    AttributeError, as every caller in ``openmmnqe.plumed`` does.
+    """
+    pdb = app.PDBFile('tests/data/pdb/gt_wob_solv_clean.pdb')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:H3', 'DGN1:O6'])
+
+    distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
+
+    assert unit.is_quantity(distance)
+    assert distance.unit.is_compatible(unit.nanometer)
+    # The same length, asked for two ways.
+    assert distance.value_in_unit(unit.angstrom) == pytest.approx(
+        distance.value_in_unit(unit.nanometer) * 10.0)
 
 
 def test_angle_between_atoms():

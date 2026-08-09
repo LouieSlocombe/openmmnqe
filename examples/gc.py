@@ -6,6 +6,7 @@ import openmm.unit as unit
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+import reactiontools as rt
 
 if __name__ == "__main__":
     print(flush=True)
@@ -64,10 +65,10 @@ if __name__ == "__main__":
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", filename="fes", show=True)
+    rt.plot_plumed_fes("fes.dat", filename="fes", show=True)
     plt.close()
 
-    nqe.plot_plumed_colvar("COLVAR", filename="colvar", show=True)
+    rt.plot_plumed_colvar("COLVAR", filename="colvar", show=True)
     plt.close()
 
     nqe.remove_file_pattern('minimized*')

@@ -24,8 +24,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
 from openmm import app, Vec3
-
-from .plotting import as_fes
+from reactiontools import as_fes
 
 # Conversion factor from Bohr to Angstrom
 bohr_to_angstrom = const["Bohr radius"][0] * 1e10
@@ -298,10 +297,10 @@ def load_fes_data(directory: str,
     """
     Find the numbered FES files in a directory and load them in order.
 
-    Each file is parsed with :func:`openmmnqe.plotting.as_fes`, so 1-D and 2-D
+    Each file is parsed with :func:`reactiontools.as_fes`, so 1-D and 2-D
     surfaces are both handled and the result can be handed straight to
-    :func:`openmmnqe.plotting.plot_fes_1d` or
-    :func:`openmmnqe.plotting.plot_fes_2d` to show how a surface converges.
+    :func:`reactiontools.plot_fes_1d` or
+    :func:`reactiontools.plot_fes_2d` to show how a surface converges.
 
     Parameters
     ----------
@@ -322,7 +321,7 @@ def load_fes_data(directory: str,
     Returns
     -------
     list
-        One :class:`openmmnqe.plotting.FES` per file, ordered by file index.
+        One :class:`reactiontools.FES` per file, ordered by file index.
     """
     fes_files = search_fes_files(directory, pattern=pattern)
     fes_arrays = []

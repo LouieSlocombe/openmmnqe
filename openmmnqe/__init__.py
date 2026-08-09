@@ -5,10 +5,22 @@ Bundles system preparation (:mod:`openmmnqe.io`), OpenMM simulation stages
 including RPMD and adQTB nuclear-quantum-effect integrators and ML/MM
 potentials (:mod:`openmmnqe.openmm`), PLUMED-based collective variables and
 enhanced sampling (:mod:`openmmnqe.plumed`), reference-path estimation
-(:mod:`openmmnqe.path`), ORCA/NEB quantum-chemistry helpers
-(:mod:`openmmnqe.qm`), RPMD reporters (:mod:`openmmnqe.reporters`),
-free-energy-surface plotting (:mod:`openmmnqe.plotting`) and assorted
-simulation-setup utilities (:mod:`openmmnqe.tools`).
+(:mod:`openmmnqe.path`), RPMD reporters (:mod:`openmmnqe.reporters`) and
+assorted simulation-setup utilities (:mod:`openmmnqe.tools`).
+
+Everything upstream of the simulation -- building a reaction path with NEB,
+refining a transition state, running ORCA -- and everything downstream of it
+that plots a free-energy surface lives in `reactiontools
+<https://github.com/LouieSlocombe/reactiontools>`_, which is a dependency.
+Import those from there rather than from here::
+
+    import openmmnqe as nqe
+    import reactiontools as rt
+
+    product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
+    neb_path = rt.quick_guess_path(reactant, product)
+    ...
+    rt.plot_plumed_fes("fes.dat", filename="fes")
 """
 
 __version__ = "0.1.0"
@@ -64,22 +76,6 @@ from .path import (cv_from_colvar,
                    select_frames_by_cv,
                    select_frames_by_msd,
                    )
-from .plotting import (n_plot,
-                       ax_plot,
-                       FES,
-                       PlumedData,
-                       ENERGY_UNITS,
-                       as_fes,
-                       convert_energy,
-                       read_plumed_file,
-                       plot_fes,
-                       plot_fes_1d,
-                       plot_fes_2d,
-                       plot_fes_2d_overlay,
-                       plot_fes_slices,
-                       plot_plumed_fes,
-                       plot_plumed_colvar,
-                       )
 from .plumed import (estimate_path_lambda,
                      plumed_input_1pt,
                      plumed_input_2pt_1d,
@@ -93,20 +89,6 @@ from .plumed import (estimate_path_lambda,
                      plumed_input_steered,
                      plumed_input_steered_pt,
                      )
-from .qm import (orca_calc_preset,
-                 orca_optimise_atoms,
-                 orca_calculate_goat,
-                 get_neb_path,
-                 stitch_path,
-                 resample_path,
-                 optimise_geom,
-                 optimise_reactant_product,
-                 prepare_neb,
-                 optimise_neb,
-                 get_ts_image,
-                 quick_guess_path,
-                 quick_guess_ts,
-                 )
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
@@ -127,7 +109,6 @@ from .tools import (zero_velocities,
                     angle_between_atoms,
                     check_platform,
                     temperature_to_kbt,
-                    swap_bonding_configuration,
                     )
 
 import os

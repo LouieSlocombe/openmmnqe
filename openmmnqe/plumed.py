@@ -432,9 +432,11 @@ def plumed_input_1pt(modeller,
         bias written by *plumed_input*: ``plumed sum_hills``, or the bundled
         OPES ``FES_from_State.py`` when *f_opes* is True.
     """
-    r_01 = distance_between_atoms(modeller, idx[0], idx[1])
-    r_21 = distance_between_atoms(modeller, idx[2], idx[1])
-    r_02 = distance_between_atoms(modeller, idx[0], idx[2])
+    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
+    # here rather than carried as Quantities into the input string.
+    r_01 = distance_between_atoms(modeller, idx[0], idx[1]).value_in_unit(unit.nanometer)
+    r_21 = distance_between_atoms(modeller, idx[2], idx[1]).value_in_unit(unit.nanometer)
+    r_02 = distance_between_atoms(modeller, idx[0], idx[2]).value_in_unit(unit.nanometer)
     r_0 = np.round(min(r_01, r_21) * r_0, decimals=2)
 
     wall = np.round(r_02 * wall, decimals=2)
@@ -545,14 +547,16 @@ def plumed_input_2pt_1d(modeller,
         Shell command that reconstructs the free-energy surface from the
         bias written by *plumed_input*.
     """
-    r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
-    r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
-    r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
+    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
+    # here rather than carried as Quantities into the input string.
+    r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1]).value_in_unit(unit.nanometer)
+    r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1]).value_in_unit(unit.nanometer)
+    r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2]).value_in_unit(unit.nanometer)
     r1_0 = np.round(min(r1_01, r1_21) * r_0, decimals=2)
 
-    r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1])
-    r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1])
-    r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2])
+    r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1]).value_in_unit(unit.nanometer)
+    r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1]).value_in_unit(unit.nanometer)
+    r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2]).value_in_unit(unit.nanometer)
     r2_0 = np.round(min(r2_01, r2_21) * r_0, decimals=2)
 
     wall = np.round(max(r1_02, r2_02) * wall, decimals=2)
@@ -679,14 +683,16 @@ def plumed_input_2pt_2d(modeller,
         Shell command that reconstructs the free-energy surface from the
         bias written by *plumed_input*.
     """
-    r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1])
-    r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1])
-    r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2])
+    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
+    # here rather than carried as Quantities into the input string.
+    r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1]).value_in_unit(unit.nanometer)
+    r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1]).value_in_unit(unit.nanometer)
+    r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2]).value_in_unit(unit.nanometer)
     r1_0 = np.round(min(r1_01, r1_21) * r_0, decimals=2)
 
-    r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1])
-    r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1])
-    r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2])
+    r2_01 = distance_between_atoms(modeller, idx2[0], idx2[1]).value_in_unit(unit.nanometer)
+    r2_21 = distance_between_atoms(modeller, idx2[2], idx2[1]).value_in_unit(unit.nanometer)
+    r2_02 = distance_between_atoms(modeller, idx2[0], idx2[2]).value_in_unit(unit.nanometer)
     r2_0 = np.round(min(r2_01, r2_21) * r_0, decimals=2)
 
     wall = np.round(max(r1_02, r2_02) * wall, decimals=2)
@@ -896,16 +902,22 @@ def plumed_input_wob_2(modeller,
     """
     idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
 
-    r_1 = np.round(distance_between_atoms(modeller, idx_n3, idx_h3) * r_0, decimals=2)
-    r_2 = np.round(distance_between_atoms(modeller, idx_o6, idx_h3) * r_0, decimals=2)
-    r_3 = np.round(distance_between_atoms(modeller, idx_o6, idx_h3) * r_0, decimals=2)
-    r_4 = np.round(distance_between_atoms(modeller, idx_o4, idx_h3) * r_0, decimals=2)
-    r_5 = np.round(distance_between_atoms(modeller, idx_n1, idx_h1) * r_0, decimals=2)
-    r_6 = np.round(distance_between_atoms(modeller, idx_n3, idx_h1) * r_0, decimals=2)
-    r_7 = np.round(distance_between_atoms(modeller, idx_n1, idx_o2) * r_0, decimals=2)
-    r_8 = np.round(distance_between_atoms(modeller, idx_n2, idx_o2) * r_0, decimals=2)
-    r_9 = np.round(distance_between_atoms(modeller, idx_n2, idx_o2) * r_0, decimals=2)
-    r_10 = np.round(distance_between_atoms(modeller, idx_n1, idx_n3) * r_0, decimals=2)
+    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
+    # here rather than carried as Quantities into the input string.
+    def _r(a, b):
+        d = distance_between_atoms(modeller, a, b).value_in_unit(unit.nanometer)
+        return np.round(d * r_0, decimals=2)
+
+    r_1 = _r(idx_n3, idx_h3)
+    r_2 = _r(idx_o6, idx_h3)
+    r_3 = _r(idx_o6, idx_h3)
+    r_4 = _r(idx_o4, idx_h3)
+    r_5 = _r(idx_n1, idx_h1)
+    r_6 = _r(idx_n3, idx_h1)
+    r_7 = _r(idx_n1, idx_o2)
+    r_8 = _r(idx_n2, idx_o2)
+    r_9 = _r(idx_n2, idx_o2)
+    r_10 = _r(idx_n1, idx_n3)
 
     idx_n3 += 1
     idx_h3 += 1
@@ -1041,11 +1053,16 @@ def plumed_input_wob_3(modeller,
         Shell command (``plumed sum_hills``) that reconstructs the
         free-energy surface from the bias written by *plumed_input*.
     """
-    wall_u = np.round(distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]) * wall, decimals=2)
-    wall_l = np.round(distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]) * (2.0 - wall), decimals=2)
+    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
+    # here rather than carried as Quantities into the input string.
+    d_nr = distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]).value_in_unit(unit.nanometer)
+    wall_u = np.round(d_nr * wall, decimals=2)
+    wall_l = np.round(d_nr * (2.0 - wall), decimals=2)
 
-    wall_1 = np.round(distance_between_atoms(modeller, idx_o6[0], idx_o4[0]) * wall, decimals=2)
-    wall_2 = np.round(distance_between_atoms(modeller, idx_n2[0], idx_o2[0]) * wall, decimals=2)
+    d_o6_o4 = distance_between_atoms(modeller, idx_o6[0], idx_o4[0]).value_in_unit(unit.nanometer)
+    d_n2_o2 = distance_between_atoms(modeller, idx_n2[0], idx_o2[0]).value_in_unit(unit.nanometer)
+    wall_1 = np.round(d_o6_o4 * wall, decimals=2)
+    wall_2 = np.round(d_n2_o2 * wall, decimals=2)
 
     idx_o4 = atom_indices_to_plumed(idx_o4)[0]
     idx_h3 = atom_indices_to_plumed(idx_h3)[0]
@@ -1244,8 +1261,8 @@ def plumed_input_neb_path(temperature,
     Build a PLUMED input that biases progress along a NEB-derived path.
 
     Uses PLUMED's ``PATHMSD`` collective variable against a reference path
-    (``neb_path.pdb``, as produced by :func:`openmmnqe.qm.get_neb_path` /
-    :func:`openmmnqe.qm.stitch_path`) to define the progress-along-path
+    (``neb_path.pdb``, as produced by :func:`reactiontools.get_neb_path` /
+    :func:`reactiontools.stitch_path`) to define the progress-along-path
     coordinate ``path.sss``, which metadynamics biases, and the
     distance-from-path coordinate ``path.zzz``, which is kept small by an
     upper wall so sampling stays near the path. ``FIT_TO_TEMPLATE`` aligns

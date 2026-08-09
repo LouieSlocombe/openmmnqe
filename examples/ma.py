@@ -8,6 +8,7 @@ from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+import reactiontools as rt
 
 if __name__ == "__main__":
     print(flush=True)
@@ -44,10 +45,10 @@ if __name__ == "__main__":
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
     calc = mace_off(model_name=ml_model, device='cuda')
-    product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product)
+    product = rt.optimise_geom(product, calc, fmax=0.01)
+    neb_path = rt.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
@@ -85,10 +86,10 @@ if __name__ == "__main__":
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", filename="fes", show=True)
+    rt.plot_plumed_fes("fes.dat", filename="fes", show=True)
     plt.close()
 
-    nqe.plot_plumed_colvar("COLVAR", filename="colvar", show=True)
+    rt.plot_plumed_colvar("COLVAR", filename="colvar", show=True)
     plt.close()
 
     nqe.remove_file_pattern('minimized*')

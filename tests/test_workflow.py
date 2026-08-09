@@ -7,6 +7,7 @@ from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+import reactiontools as rt
 
 
 def test_run_openmm_relaxation():
@@ -196,9 +197,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         steps=50_000)
 
     os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     n_beads = 4
     pdb = app.PDBFile("npt_equilibrate.pdb")
@@ -220,9 +221,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                              checkpoint_file='rpmd_ready.chk')
 
     os.system('plumed sum_hills --hills HILLS --outfile fes.dat --min -pi --max pi --bin 300 --kt 2.494')
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
@@ -293,9 +294,9 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 
     fes_cmd = os.path.join(nqe.openmm_nqe_dir, "opes", "FES_from_State.py")
     os.system(f'python3 {fes_cmd} --state STATE --min 0 --max 4.0 --bin 100 --kt {kbt}')
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
@@ -346,9 +347,9 @@ def test_malonaldehyde_pt():
                         steps=steps_prod)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -411,9 +412,9 @@ def test_malonaldehyde_pt_solvated():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -486,9 +487,9 @@ def test_malonaldehyde_pt_quantum_solvated():
                              ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('rpmd_ready*')
@@ -563,9 +564,9 @@ def test_malonaldehyde_pt_adqtb_solvated():
                               ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
 
@@ -646,9 +647,9 @@ def test_malonaldehyde_pt_solvated_full():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('equilibrate*')
@@ -719,9 +720,9 @@ def test_fad_pt_solvated():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -790,9 +791,9 @@ def test_gc_pt_solvated():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
@@ -870,9 +871,9 @@ def test_gc_pt_quantum_solvated():
                              ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('rpmd_ready*')
@@ -944,9 +945,9 @@ def test_g_enol_t_pt_solvated():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
 
@@ -1026,9 +1027,9 @@ def test_gt_wob_pt_solvated():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file('STATE')
     nqe.remove_file('KERNELS')
@@ -1074,10 +1075,10 @@ def test_malonaldehyde_pathmsd():
 
     reactant = read('index_atoms.pdb')
 
-    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
     calc = mace_off(model_name=ml_model, device='cuda')
-    product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product, n_images=n_images)
+    product = rt.optimise_geom(product, calc, fmax=0.01)
+    neb_path = rt.quick_guess_path(reactant, product, n_images=n_images)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
     lambda_val = nqe.estimate_path_lambda("neb_path.pdb") * 0.5
@@ -1112,9 +1113,9 @@ def test_malonaldehyde_pathmsd():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file('COLVAR')
@@ -1162,10 +1163,10 @@ def test_gt_wob_pathmsd():
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
+    product = rt.swap_bonding_configuration(reactant, 28, 26, 30)
     calc = mace_off(model_name=ml_model, device='cuda')
-    product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product)
+    product = rt.optimise_geom(product, calc, fmax=0.01)
+    neb_path = rt.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
@@ -1199,9 +1200,9 @@ def test_gt_wob_pathmsd():
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    nqe.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", show=True)
 
-    nqe.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file('COLVAR')
@@ -1249,10 +1250,10 @@ def test_estimate_path_lambda():
 
     reactant = read('index_atoms.pdb')
 
-    product = nqe.swap_bonding_configuration(reactant, 0, 8, 1)
+    product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
     calc = mace_off(model_name=ml_model, device='cuda')
-    product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product, n_images=5)
+    product = rt.optimise_geom(product, calc, fmax=0.01)
+    neb_path = rt.quick_guess_path(reactant, product, n_images=5)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
@@ -1291,10 +1292,10 @@ def test_strip_hydrogens_keep_indices():
     nqe.save_only_index_atoms(modeller, ml_atoms, file_idx='index_atoms.pdb')
 
     reactant = read('index_atoms.pdb')
-    product = nqe.swap_bonding_configuration(reactant, 28, 26, 30)
+    product = rt.swap_bonding_configuration(reactant, 28, 26, 30)
     calc = mace_off(model_name=ml_model, device='cuda')
-    product = nqe.optimise_geom(product, calc, fmax=0.01)
-    neb_path = nqe.quick_guess_path(reactant, product)
+    product = rt.optimise_geom(product, calc, fmax=0.01)
+    neb_path = rt.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
     nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:H6'])

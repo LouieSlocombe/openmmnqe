@@ -25,9 +25,9 @@ import os
 
 import mdtraj as md
 import numpy as np
+from reactiontools import read_plumed_file
 
 from .io import _write_xyz_frame, convert_xyz_to_plumed_ref
-from .plotting import read_plumed_file
 from .plumed import estimate_path_lambda
 
 

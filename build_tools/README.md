@@ -4,9 +4,15 @@ There are three ways to install `openmmnqe`, depending on what you need:
 
 | Route | Use when | Script |
 |---|---|---|
-| Conda environment | Normal use. Everything comes prebuilt from conda-forge. | `environment.yml` |
-| Sol cluster | Running on Sol. Compiles PLUMED for the `opes` module. | `custom_install_sol.sh` |
+| Conda environment | Normal use. Everything from conda-forge except PLUMED. | `environment.yml` + `build_plumed.sh` |
+| Sol cluster | Running on Sol. Same split, plus the module loads and SLURM wrapper. | `custom_install_sol.sh` |
 | Source build | You need an unreleased OpenMM, openmm-torch or NNPOps. | `custom_install.sh` |
+
+Every route compiles PLUMED and the `openmm-plumed` plugin, because there is no
+prebuilt combination that works: conda-forge's `openmm-plumed` requires
+`openmm <8.5`, while `openmm-ml >=1.6` — the first release with the `'ase'`
+potential that `openmmnqe.openmm` uses — requires `openmm >=8.5`. Building it also
+gets you PLUMED's `opes` module, which the conda-forge build omits.
 
 ## Prerequisites
 
@@ -14,7 +20,9 @@ There are three ways to install `openmmnqe`, depending on what you need:
 - Python 3.12 or higher.
 - Conda or Mamba.
 - A CUDA-capable GPU for the `pytorch=*=cuda*` builds pinned in the environment files.
-- ORCA, if you intend to use the QM helpers in `openmmnqe.qm` (see [ORCA](#orca) below).
+  Check the CUDA version in the top right of `nvidia-smi` and make sure the `cuda-version`
+  pin in `environment.yml` does not exceed it, or OpenMM will fail to create a `Context`
+  with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`.
 
 ## Conda environment
 
@@ -22,12 +30,26 @@ From this directory:
 
 ```bash
 conda env create -f environment.yml
-conda activate openmmnqe
-pip install -e ..
 ```
 
-The last step installs `openmmnqe` itself in editable mode; the environment files only
-cover its dependencies.
+```bash
+conda activate openmmnqe
+```
+
+Then build PLUMED and the `openmm-plumed` plugin into the environment. `build_plumed.sh`
+is a function library rather than a script, so source it and call it with a working
+directory for the sources:
+
+```bash
+source build_plumed.sh && build_plumed "$(mktemp -d)"
+```
+
+Finally install `openmmnqe` itself in editable mode; the environment file only covers its
+dependencies:
+
+```bash
+pip install -e ..
+```
 
 ## Sol cluster
 
@@ -74,21 +96,13 @@ a while.
 Both installers share `build_plumed.sh`, which is where the PLUMED and OpenMM-PLUMED
 versions are pinned.
 
-## ORCA
+## reactiontools
 
-The QM helpers in `openmmnqe.qm` shell out to ORCA, which is licensed separately and must
-be installed by hand:
-
-1. Download it from the [ORCA website](https://www.faccts.de/orca/).
-2. Extract it: `tar -xf orca-x.y.z.tar.gz`
-3. Point `ORCA_PATH` at the `orca` binary, adding this to your `~/.bashrc`:
-
-   ```bash
-   export ORCA_PATH="/path/to/orca_6_1_1/orca"
-   ```
-
-`orca_calc_preset()`, `orca_optimise_atoms()` and `orca_calculate_goat()` read `ORCA_PATH`
-when no explicit path is passed, as do the ORCA tests.
+Reaction paths (NEB, transition states, IRC), ORCA and free-energy-surface plotting live
+in [reactiontools](https://github.com/LouieSlocombe/reactiontools), which the environment
+files install from git. If you need ORCA, follow the install steps in that repository's
+`build_tools/README.md` — it is licensed separately and has to be put on the machine by
+hand.
 
 ## Next steps
 

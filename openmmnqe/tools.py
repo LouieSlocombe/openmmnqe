@@ -656,7 +656,10 @@ def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
         raise ValueError("modeller.positions is None. Make sure positions are set on the Modeller.")
 
     dr = positions[atom_index_1] - positions[atom_index_2]
-    return unit.sqrt(dr.x * dr.x + dr.y * dr.y + dr.z * dr.z)
+    # unit.norm, not unit.sqrt over the components: `dr` is a Quantity wrapping
+    # a Vec3, and `dr.x` hands back the bare component with the unit stripped,
+    # so summing the squares gives a plain float and the result loses its units.
+    return unit.norm(dr)
 
 
 def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
@@ -747,37 +750,3 @@ def temperature_to_kbt(temperature):
     """
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     return kt.value_in_unit(unit.kilojoule_per_mole)
-
-
-def swap_bonding_configuration(atoms, donor_index, hydrogen_index, acceptor_index):
-    """
-    Swap the bonding configuration from O-H...O to O...H-O in an Atoms object.
-
-    Parameters
-    ----------
-    atoms : ase.Atoms
-        The ASE Atoms object.
-    donor_index : int
-        The index of the donor oxygen atom.
-    hydrogen_index : int
-        The index of the hydrogen atom.
-    acceptor_index : int
-        The index of the acceptor oxygen atom.
-
-    Returns
-    -------
-    ase.Atoms
-        The updated Atoms object with the swapped bonding configuration.
-    """
-    atoms = atoms.copy()
-    donor_pos = atoms.positions[donor_index]
-    hydrogen_pos = atoms.positions[hydrogen_index]
-    acceptor_pos = atoms.positions[acceptor_index]
-
-    direction = acceptor_pos - donor_pos
-    direction /= np.linalg.norm(direction)
-    new_hydrogen_pos = acceptor_pos - direction * np.linalg.norm(hydrogen_pos - donor_pos)
-
-    atoms.positions[hydrogen_index] = new_hydrogen_pos
-
-    return atoms
