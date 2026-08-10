@@ -1,13 +1,11 @@
 import json
 import os
 import warnings
-from itertools import combinations
 
 import matplotlib.pyplot as plt
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
-import pandas as pd
 import pytest
 from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
@@ -407,104 +405,6 @@ def ase_angle_between_atoms(atoms, index1, index2, index3):
         angle = np.arccos(cos_angle) * 180.0 / np.pi
         angles.append(angle)
     return angles
-
-
-def test_pca_distances():
-    from sklearn.decomposition import PCA
-    images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
-    n_atoms = len(images[0])
-    n_frames = len(images)
-
-    # Upper-triangle indices, so dist(1,2) and dist(2,1) aren't counted twice.
-    triu_i, triu_j = np.triu_indices(n_atoms, k=1)
-
-    def get_all_distances(atoms):
-        pos = atoms.get_positions()
-        diff = pos[:, np.newaxis, :] - pos[np.newaxis, :, :]
-        dist_matrix = np.linalg.norm(diff, axis=-1)
-        return dist_matrix[triu_i, triu_j]
-
-    print(f"Processing {n_frames} frames with {len(triu_i)} distances each...")
-    feature_matrix = np.array([get_all_distances(img) for img in images])
-
-    pca = PCA(n_components=1)
-    pca.fit(feature_matrix)
-    pc1_weights = pca.components_[0]
-
-    results = []
-    for idx, weight in enumerate(pc1_weights):
-        results.append({
-            'atom_i': triu_i[idx],
-            'atom_j': triu_j[idx],
-            'symbol_i': images[0].get_chemical_symbols()[triu_i[idx]],
-            'symbol_j': images[0].get_chemical_symbols()[triu_j[idx]],
-            'weight': weight,
-            'abs_weight': abs(weight)
-        })
-
-    df = pd.DataFrame(results).sort_values(by='abs_weight', ascending=False)
-
-    print(f"\nPC1 Explained Variance: {pca.explained_variance_ratio_[0] * 100:.2f}%")
-    print("\n--- Top 10 Contributing Distances (The ones you should put in PLUMED) ---")
-    print(df[['atom_i', 'symbol_i', 'atom_j', 'symbol_j', 'weight']].head(10))
-
-
-def test_pca_angles():
-    from sklearn.decomposition import PCA
-    images = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
-    n_atoms = len(images[0])
-    n_frames = len(images)
-    symbols = images[0].get_chemical_symbols()
-
-    # Every 3-atom combination gives 3 distinct angles depending on which atom
-    # is the vertex, so each combo contributes all three (i-j-k, j-i-k, i-k-j).
-    triplets = []
-    for combo in combinations(range(n_atoms), 3):
-        i, j, k = combo
-        triplets.append((i, j, k))  # Angle i-j-k
-        triplets.append((j, i, k))  # Angle j-i-k
-        triplets.append((i, k, j))  # Angle i-k-j
-
-    def get_all_angles(atoms, triplet_list):
-        pos = atoms.get_positions()
-        angles = []
-        for i, j, k in triplet_list:
-            v_ji = pos[i] - pos[j]
-            v_jk = pos[k] - pos[j]
-
-            norm_product = np.linalg.norm(v_ji) * np.linalg.norm(v_jk)
-            if norm_product == 0:
-                angles.append(0.0)
-                continue
-
-            cosine_angle = np.dot(v_ji, v_jk) / norm_product
-            # Clip to guard against floating-point drift outside [-1, 1].
-            angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
-            angles.append(angle)
-        return np.array(angles)
-
-    print(f"Calculating {len(triplets)} angles for {n_frames} frames...")
-    feature_matrix = np.array([get_all_angles(img, triplets) for img in images])
-
-    pca = PCA(n_components=1)
-    pca.fit(feature_matrix)
-    pc1_weights = pca.components_[0]
-
-    results = []
-    for idx, weight in enumerate(pc1_weights):
-        i, j, k = triplets[idx]
-        results.append({
-            'triplet': f"{symbols[i]}{i}-{symbols[j]}{j}-{symbols[k]}{k}",
-            'indices': (i, j, k),
-            'weight': weight,
-            'abs_weight': abs(weight)
-        })
-
-    df = pd.DataFrame(results).sort_values(by='abs_weight', ascending=False)
-
-    print(f"\nPC1 (Angles) Explained Variance: {pca.explained_variance_ratio_[0] * 100:.2f}%")
-    print("\n--- Top 10 Contributing Angles ---")
-    print(df[['triplet', 'weight']].head(10))
 
 
 def check_linear_relationship(y, x=None, f_print=True):
