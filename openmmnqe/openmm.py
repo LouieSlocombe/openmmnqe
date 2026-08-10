@@ -17,24 +17,35 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
     """
     Construct the system and platform shared by every ``run_openmm_*`` driver.
 
-    When an ML potential (or ASE calculator) and ML atom indices are supplied,
-    the MM system is promoted to a mixed system via ``createMixedSystem`` and
-    the platform is forced to CUDA.
+    Three configurations are supported:
+
+    * **Pure MM** -- *forcefield* is a plain ``openmm.app.ForceField`` and no
+      ML arguments are given.
+    * **Pure ML** -- *forcefield* is an ``openmmml.MLPotential`` standing in
+      for a force field; *ml_idx* stays None because every atom is ML. An ASE
+      *calculator* may be supplied for ``MLPotential('ase')`` and is forwarded
+      to its ``createSystem``.
+    * **ML/MM mixed** -- *potential* (or *calculator*, which implies
+      ``MLPotential('ase')``) together with *ml_idx* promotes the MM system to
+      a mixed system via ``createMixedSystem``, and the platform is forced to
+      CUDA.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
         The OpenMM Modeller containing topology and positions.
-    forcefield : openmm.app.ForceField
-        The force field used to parameterise the system.
+    forcefield : openmm.app.ForceField or openmmml.MLPotential
+        The force field used to parameterise the system, or an ML potential
+        used in its place for a pure-ML system.
     platform_name : str or None
         OpenMM platform name. None auto-detects via ``check_platform``.
     potential : object or None
         ML potential object with a ``createMixedSystem`` method.
     ml_idx : list of int or None
-        Atom indices for the ML region.
+        Atom indices for the ML region of a mixed system.
     calculator : object or None
-        Optional calculator object to pass to the ML potential.
+        Optional ASE calculator. Only ``MLPotential('ase')`` consumes it;
+        other potentials silently ignore it.
 
     Returns
     -------
@@ -43,28 +54,37 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
     Raises
     ------
     ValueError
-        If *potential* or *calculator* is given without *ml_idx*. There is
-        nothing sensible to do with an ML potential and no ML region, and
-        ``ForceField.createSystem`` absorbs unknown keywords into ``**args``,
-        so passing one through would quietly run the whole simulation at pure
-        MM instead.
+        If *potential* is given without *ml_idx*, or if *calculator* is given
+        without *ml_idx* when *forcefield* is not an ``MLPotential``. In both
+        cases the ML region is undefined, and ``ForceField.createSystem``
+        absorbs unknown keywords into ``**args``, so passing a calculator
+        through would quietly run the whole simulation at pure MM instead.
     """
-    run_mixed = potential is not None or calculator is not None
+    if potential is not None and ml_idx is None:
+        raise ValueError(
+            "An ML potential was given but ml_idx is None, so the ML region is "
+            "undefined. Pass ml_idx with the indices of the atoms the ML potential "
+            "should cover, or pass the MLPotential as forcefield to run pure ML."
+        )
+    if (calculator is not None and ml_idx is None
+            and not isinstance(forcefield, MLPotential)):
+        raise ValueError(
+            "A calculator was given without ml_idx, and forcefield is not an "
+            "MLPotential, so ForceField.createSystem would silently ignore it. "
+            "Pass ml_idx to define an ML/MM region, or pass MLPotential('ase') "
+            "as forcefield to run pure ML."
+        )
+
+    run_mixed = ml_idx is not None and (potential is not None or calculator is not None)
     if run_mixed:
-        if ml_idx is None:
-            raise ValueError(
-                "An ML potential or calculator was given but ml_idx is None, so the ML "
-                "region is undefined. Pass ml_idx with the indices of the atoms the ML "
-                "potential should cover."
-            )
         print("Adding ML potential to the system...", flush=True)
         platform_name = 'CUDA'
         print("ML potential in use: forcing platform to CUDA.", flush=True)
 
-    # An explicit potential wins; 'ase' is only the fallback that wraps a bare
-    # calculator.
-    if calculator is not None and potential is None:
-        potential = MLPotential('ase')
+        # An explicit potential wins; 'ase' is only the fallback that wraps a
+        # bare calculator.
+        if calculator is not None and potential is None:
+            potential = MLPotential('ase')
 
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
@@ -77,13 +97,16 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
         'removeCMMotion': True,
     }
 
-    system = forcefield.createSystem(modeller.topology, **system_kwargs)
     if not run_mixed:
-        return system, platform
+        # Pure MM, or pure ML with the MLPotential standing in as forcefield.
+        if calculator is not None:
+            system_kwargs['calculator'] = calculator
+        return forcefield.createSystem(modeller.topology, **system_kwargs), platform
 
+    mm_system = forcefield.createSystem(modeller.topology, **system_kwargs)
     if calculator is not None:
         system_kwargs['calculator'] = calculator
-    system = potential.createMixedSystem(modeller.topology, system, ml_idx, **system_kwargs)
+    system = potential.createMixedSystem(modeller.topology, mm_system, ml_idx, **system_kwargs)
 
     return system, platform
 
@@ -1207,7 +1230,7 @@ def run_openmm_rpmd_prod(modeller,
     simulation.step(steps)
     print("Production run complete.", flush=True)
 
-    _save_final_state(simulation, output_prefix)
+    _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)
 
 
 def run_openmm_adqtb_eq(modeller,

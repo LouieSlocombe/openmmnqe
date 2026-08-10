@@ -1,0 +1,31 @@
+# CPU-only environment for CI (GitHub Actions), derived from environment.yml:
+# no CUDA pins, a CPU PyTorch build, no nnpops, and no PLUMED source-build
+# toolchain -- openmm-plumed comes prebuilt from conda-forge instead of
+# build_plumed.sh. Python is pinned to the oldest supported version.
+name: openmmnqe-ci
+
+channels:
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  - python=3.12
+  - pip
+  - pytest
+  - pandas
+  - matplotlib
+  - mdanalysis
+  - mdtraj
+  - pdbfixer
+  - "pytorch=*=cpu*"
+  - pymace>=0.3.16
+  - ase>=3.28.0
+  - openmm>=8.5.1
+  - openmm-ml>=1.6
+  - openmm-plumed
+  - openmmforcefields
+
+  - pip:
+      - torch-dftd
+      - git+https://github.com/LouieSlocombe/geodesic_interpolate.git
+      - git+https://github.com/LouieSlocombe/reactiontools.git

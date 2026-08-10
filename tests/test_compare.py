@@ -6,8 +6,12 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 
+import pytest
+
 import openmmnqe as nqe
 from openmm import openmm
+
+pytestmark = pytest.mark.pipeline
 
 # WHAM is built separately, see http://membrane.urmc.rochester.edu/sites/default/files/wham/
 WHAM = os.environ.get("WHAM_PATH", "/home/louie/skunkworks/wham/wham/wham/wham")

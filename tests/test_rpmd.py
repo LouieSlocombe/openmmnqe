@@ -6,8 +6,11 @@ import openmm.unit as unit
 from matplotlib import pyplot as plt
 from openmm import openmm
 from openmmml import MLPotential
+import pytest
 
 import openmmnqe as nqe
+
+pytestmark = pytest.mark.pipeline
 
 device = "CUDA"
 

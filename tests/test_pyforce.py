@@ -9,8 +9,11 @@ from ase.calculators.orca import ORCA, OrcaProfile
 from mace.calculators.foundations_models import mace_mp, mace_off
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
+import pytest
 
 from openmm import openmm
+
+pytestmark = pytest.mark.pipeline
 
 device = 'CUDA' if torch.cuda.is_available() else 'CPU'
 print(f"Using device: {device}", flush=True)
@@ -66,6 +69,9 @@ def test_openmm_mlp():
     assert np.isclose(-713468.6327560507, energy, rtol=1e-6)
 
 
+@pytest.mark.orca
+@pytest.mark.skipif("ORCA_PATH" not in os.environ,
+                    reason="needs an ORCA installation (ORCA_PATH unset)")
 def test_ase_orca():
     print(flush=True)
     pdb = app.PDBFile('tests/data/pdb/toluene.pdb')

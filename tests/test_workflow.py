@@ -5,9 +5,12 @@ import openmm.unit as unit
 from ase.io import read, write
 from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
+import pytest
 
 import openmmnqe as nqe
 import reactiontools as rt
+
+pytestmark = pytest.mark.pipeline
 
 
 def test_run_openmm_relaxation():

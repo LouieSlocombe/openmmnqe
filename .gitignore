@@ -164,3 +164,29 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 .vscode/
+
+# Simulation & test outputs (drivers write into the working directory,
+# and the test session runs from the repo root)
+minimized*
+equilibrate*
+npt_equilibrate*
+prod*
+smd*
+rpmd_ready*
+rpmd_prod*
+adqtb_ready*
+adqtb_prod*
+index_atoms.pdb
+neb_path.*
+*stripped_neb_path.pdb
+single_ligand.pdb
+centroid.pdb
+quantum_spread.txt
+COLVAR*
+HILLS*
+KERNELS*
+bck.*
+fes.dat
+plumed.dat
+py.out
+gaff-molecules.json

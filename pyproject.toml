@@ -19,8 +19,10 @@ dependencies = [
     "scipy",
     "pandas",  # openmmnqe/opes/, which openmmnqe/plumed.py builds commands for
     "openmm",
-    "mdtraj",  
-    "MDAnalysis",  
+    "openmmml",      # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
+    "openmmplumed",  # conda-forge: openmm-plumed (dist name OpenMMPlumed) -- same
+    "mdtraj",
+    "MDAnalysis",
     "ase",
     "openmmforcefields",
     "pdbfixer",
@@ -45,10 +47,20 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "pipeline: full MD/ML pipeline; needs a CUDA GPU, MACE model downloads, or long walltime",
+    "orca: needs an external ORCA installation (ORCA_PATH)",
+]
 
 [project.urls]
 Homepage = "https://github.com/LouieSlocombe/openmmnqe"
 Repository = "https://github.com/LouieSlocombe/openmmnqe"
+
+[tool.ruff.lint]
+select = ["F", "E9"]
+
+[tool.ruff.lint.per-file-ignores]
+"openmmnqe/__init__.py" = ["F401"]  # re-export module until __all__ lands
 
 [tool.setuptools]
 include-package-data = true

@@ -22,6 +22,9 @@ import matplotlib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# An argparse CLI for multiple-walker metadynamics, not a test module.
+collect_ignore = ["run_walker.py"]
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402  (must follow the backend choice)

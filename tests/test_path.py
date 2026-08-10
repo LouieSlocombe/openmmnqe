@@ -244,6 +244,7 @@ def test_path_from_steered_md_wants_more_frames_than_images(tmp_path):
                                  n_images=15)
 
 
+@pytest.mark.pipeline
 def test_malonaldehyde_steered_path():
     """Pull the proton across, make a path out of it, then bias along it."""
     print(flush=True)
