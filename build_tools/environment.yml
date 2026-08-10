@@ -4,13 +4,6 @@ channels:
   - conda-forge
   - nodefaults
 
-# openmm-plumed is deliberately absent: every conda-forge build of it requires
-# openmm >=8.4,<8.5, while openmm-ml 1.6 -- the first release with the 'ase'
-# potential that openmmnqe.openmm relies on -- requires openmm >=8.5.0. There
-# is no prebuilt combination that satisfies both, so openmm-plumed has to be
-# compiled. Run build_plumed.sh after creating this environment; it builds
-# PLUMED with the opes module (which the conda-forge build lacks anyway) and
-# then the matching openmm-plumed plugin. See README.md.
 dependencies:
   - python>=3.12
   - pip
@@ -20,15 +13,10 @@ dependencies:
   - mdanalysis
   - mdtraj
   - pdbfixer
-  - scikit-learn  # tests only, the [dev] extra
-  # Must not exceed the CUDA version your driver supports -- check the top
-  # right of `nvidia-smi` and lower this to match. Too new and every Context
-  # dies with CUDA_ERROR_UNSUPPORTED_PTX_VERSION, because the driver cannot
-  # JIT the PTX that openmm and pytorch were built with.
   - "cuda-version<=13.2"
   - "pytorch=*=cuda*"
   - pymace>=0.3.16
-  - nnpops  # openmm-ml uses it to accelerate the MACE potentials
+  - nnpops
   - ase>=3.28.0
   - openmm>=8.5.1
   - openmm-ml>=1.6
