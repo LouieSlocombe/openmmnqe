@@ -25,3 +25,4 @@ dependencies:
   - pip:
       - torch-dftd
       - git+https://github.com/LouieSlocombe/geodesic_interpolate.git
+      - git+https://github.com/LouieSlocombe/reactiontools.git
