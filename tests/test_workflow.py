@@ -211,7 +211,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                                       n_1=1_000,
                                       n_2=1_000)
 
-    pdb = app.PDBFile("rpmd_ready_centroid.pdb")
+    pdb = app.PDBFile("rpmd_ready_final.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
     nqe.run_openmm_rpmd_prod(modeller,
                              forcefield,

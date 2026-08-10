@@ -4,7 +4,6 @@ from typing import Dict, Sequence, Any, List, Union, Literal, Optional
 
 import numpy as np
 import openmm.unit as unit
-import torch
 from scipy import constants
 
 from openmm import openmm, app
@@ -709,10 +708,10 @@ def check_platform(platform=None):
     """
     Determines the computation platform to use, auto-detecting CUDA if not specified.
 
-    If the `platform` argument is not provided, this function checks if CUDA is
-    available via PyTorch (`torch.cuda.is_available()`). It returns 'CUDA' if
-    available, otherwise defaults to 'CPU'. If a specific platform string is
-    passed, it is returned directly.
+    If the `platform` argument is not provided, this function asks OpenMM which
+    platforms it was built with and returns 'CUDA' when that one is among them,
+    otherwise 'CPU'. If a specific platform string is passed, it is returned
+    directly.
 
     Parameters
     ----------
@@ -724,12 +723,17 @@ def check_platform(platform=None):
     -------
     str
         The platform name string (e.g., 'CUDA' or 'CPU').
+
+    Notes
+    -----
+    OpenMM is asked directly rather than, say, ``torch.cuda.is_available()``: a
+    CUDA-capable GPU is no use here unless the OpenMM build in this environment
+    also carries the CUDA platform, and only OpenMM knows that.
     """
     if platform is None:
-        if torch.cuda.is_available():
-            platform = 'CUDA'
-        else:
-            platform = 'CPU'
+        available = {openmm.Platform.getPlatform(i).getName()
+                     for i in range(openmm.Platform.getNumPlatforms())}
+        platform = 'CUDA' if 'CUDA' in available else 'CPU'
     return platform
 
 

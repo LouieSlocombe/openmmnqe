@@ -10,7 +10,7 @@ from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
                         )
-from .tools import deuterate_system, check_platform, init_beads
+from .tools import deuterate_system, check_platform, init_beads, centroid_positions
 
 
 def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calculator):
@@ -39,73 +39,51 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
     Returns
     -------
     tuple of (openmm.System, openmm.Platform)
+
+    Raises
+    ------
+    ValueError
+        If *potential* or *calculator* is given without *ml_idx*. There is
+        nothing sensible to do with an ML potential and no ML region, and
+        ``ForceField.createSystem`` absorbs unknown keywords into ``**args``,
+        so passing one through would quietly run the whole simulation at pure
+        MM instead.
     """
-    if (potential is not None or calculator is not None) and ml_idx is not None:
+    run_mixed = potential is not None or calculator is not None
+    if run_mixed:
+        if ml_idx is None:
+            raise ValueError(
+                "An ML potential or calculator was given but ml_idx is None, so the ML "
+                "region is undefined. Pass ml_idx with the indices of the atoms the ML "
+                "potential should cover."
+            )
         print("Adding ML potential to the system...", flush=True)
-        run_mixed = True
         platform_name = 'CUDA'
         print("ML potential in use: forcing platform to CUDA.", flush=True)
-    else:
-        run_mixed = False
 
-    if calculator is not None:
+    # An explicit potential wins; 'ase' is only the fallback that wraps a bare
+    # calculator.
+    if calculator is not None and potential is None:
         potential = MLPotential('ase')
 
     platform = openmm.Platform.getPlatformByName(check_platform(platform_name))
     has_box = modeller.topology.getUnitCellDimensions() is not None
 
-    if run_mixed:
-        mm_system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometer,
-            constraints=None,
-            rigidWater=False,
-            removeCMMotion=True,
-        )
-        if calculator is not None:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = potential.createMixedSystem(
-                modeller.topology,
-                mm_system,
-                ml_idx,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
-    else:
-        if calculator is not None:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-                calculator=calculator,
-            )
-        else:
-            system = forcefield.createSystem(
-                modeller.topology,
-                nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometer,
-                constraints=None,
-                rigidWater=False,
-                removeCMMotion=True,
-            )
+    system_kwargs = {
+        'nonbondedMethod': app.PME if has_box else app.CutoffNonPeriodic,
+        'nonbondedCutoff': 1.0 * unit.nanometer,
+        'constraints': None,
+        'rigidWater': False,
+        'removeCMMotion': True,
+    }
+
+    system = forcefield.createSystem(modeller.topology, **system_kwargs)
+    if not run_mixed:
+        return system, platform
+
+    if calculator is not None:
+        system_kwargs['calculator'] = calculator
+    system = potential.createMixedSystem(modeller.topology, system, ml_idx, **system_kwargs)
 
     return system, platform
 
@@ -186,24 +164,46 @@ def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
     ))
 
 
-def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpoint=True):
-    """Save an optional checkpoint and write the final structure to PDB."""
+def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpoint=True,
+                      n_beads=None):
+    """
+    Save an optional checkpoint and write the final structure to PDB.
+
+    Pass *n_beads* for an RPMD run: the context holds a single copy of the
+    system rather than the ring polymer, so the structure it hands back is
+    bead 0 and not the centroid. With a bead count the positions are averaged
+    over the copies via :func:`openmmnqe.tools.centroid_positions` instead.
+    """
     if save_checkpoint:
         simulation.saveCheckpoint(f'{output_prefix}.chk')
-    state = simulation.context.getState(getPositions=True, getVelocities=True)
+    if n_beads is None:
+        positions = simulation.context.getState(getPositions=True).getPositions()
+    else:
+        positions = centroid_positions(simulation,
+                                       simulation.topology.getNumAtoms(),
+                                       n_beads)
     with open(f'{output_prefix}{pdb_suffix}', 'w') as f:
-        app.PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+        app.PDBFile.writeFile(simulation.topology, positions, f)
 
 
-def _load_checkpoint_or_abort(simulation, checkpoint_file):
-    """Load an equilibration checkpoint; return False if it does not exist."""
+def _load_checkpoint(simulation, checkpoint_file):
+    """
+    Load an equilibration checkpoint into *simulation*.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *checkpoint_file* does not exist. Returning quietly here would let a
+        batch job exit successfully having run no simulation at all.
+    """
     if not os.path.exists(checkpoint_file):
-        print(f"Error: Checkpoint {checkpoint_file} not found. Run equilibration first.", flush=True)
-        return False
+        raise FileNotFoundError(
+            f"Checkpoint {checkpoint_file} not found. Run the equilibration stage first, "
+            "or pass checkpoint_file with the path it was written to."
+        )
 
     print(f"Loading state from {checkpoint_file}...", flush=True)
     simulation.loadCheckpoint(checkpoint_file)
-    return True
 
 
 def run_openmm_relaxation(modeller,
@@ -490,14 +490,24 @@ def run_openmm_heating(modeller,
     print(f"\n--- Starting Gentle Heating (0K -> {target_temp}) ---", flush=True)
     _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True)
 
+    # The ramp stops one step short of the target and the target gets a stage of
+    # its own, so that a target which is not a whole multiple of temp_step is
+    # still reached exactly rather than being left at the multiple below it.
     temp = temp_step
-    while temp <= target_temp:
+    while temp < target_temp:
         print(f"\n-> Heating to {temp}...", flush=True)
         integrator.setTemperature(temp)
         if temp == temp_step:
             simulation.context.setVelocitiesToTemperature(temp)
         simulation.step(steps_per_stage)
         temp += temp_step
+
+    print(f"\n-> Heating to {target_temp}...", flush=True)
+    integrator.setTemperature(target_temp)
+    if target_temp <= temp_step:
+        # The ramp never ran, so this stage is also where the velocities start.
+        simulation.context.setVelocitiesToTemperature(target_temp)
+    simulation.step(steps_per_stage)
     print("\n--- Heating Complete ---", flush=True)
     print(f"Running final equilibration at {target_temp} for {steps_final} steps...", flush=True)
     simulation.step(steps_final)
@@ -924,8 +934,11 @@ def run_openmm_rpmd_equilibration(modeller,
     simulation.step(n_2)
 
     print("\n--- Saving State ---", flush=True)
-    _save_final_state(simulation, output_prefix, pdb_suffix='_centroid.pdb')
-    print(f"Saved centroid visualization to {output_prefix}_centroid.pdb", flush=True)
+    # Not '_centroid.pdb': RPMDCentroidReporter owns that name and is still
+    # holding it open, so writing here would truncate the trajectory it spent
+    # the whole run building.
+    _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)
+    print(f"Saved final centroid structure to {output_prefix}_final.pdb", flush=True)
 
 
 def run_openmm_rpmd_contracted(modeller,
@@ -1010,6 +1023,13 @@ def run_openmm_rpmd_contracted(modeller,
     Returns
     -------
     None
+
+    Raises
+    ------
+    FileNotFoundError
+        If *checkpoint_file* does not exist.
+    ValueError
+        If an ML potential or calculator is given without *ml_idx*.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -1060,8 +1080,7 @@ def run_openmm_rpmd_contracted(modeller,
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep, contractions)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
-    if not _load_checkpoint_or_abort(simulation, checkpoint_file):
-        return
+    _load_checkpoint(simulation, checkpoint_file)
 
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)
@@ -1073,8 +1092,9 @@ def run_openmm_rpmd_contracted(modeller,
     print("Done.", flush=True)
 
     print("\n--- Saving State ---", flush=True)
-    _save_final_state(simulation, output_prefix, pdb_suffix='_centroid.pdb')
-    print(f"Saved centroid visualization to {output_prefix}_centroid.pdb", flush=True)
+    # See run_openmm_rpmd_equilibration: '_centroid.pdb' belongs to the reporter.
+    _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)
+    print(f"Saved final centroid structure to {output_prefix}_final.pdb", flush=True)
 
 
 def run_openmm_rpmd_prod(modeller,
@@ -1154,6 +1174,13 @@ def run_openmm_rpmd_prod(modeller,
     Returns
     -------
     None
+
+    Raises
+    ------
+    FileNotFoundError
+        If *checkpoint_file* does not exist.
+    ValueError
+        If an ML potential or calculator is given without *ml_idx*.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -1169,8 +1196,7 @@ def run_openmm_rpmd_prod(modeller,
                                        gamma,
                                        time_step)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    if not _load_checkpoint_or_abort(simulation, checkpoint_file):
-        return
+    _load_checkpoint(simulation, checkpoint_file)
 
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)

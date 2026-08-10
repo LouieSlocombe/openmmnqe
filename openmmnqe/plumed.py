@@ -859,8 +859,8 @@ def plumed_input_wob_2(modeller,
     per competing hydrogen bond -- which are summed into a single CV ``z``
     that metadynamics biases. This generalises the two-atom-pair CV of
     :func:`plumed_input_1pt` to the wobble pair's full hydrogen-bond
-    network. Upper walls on the O6-O4 and N1-N3 distances keep the base
-    pair from separating.
+    network. Upper walls on the O6-O4, N1-N3 and N2-O2 distances keep the
+    base pair from separating.
 
     Parameters
     ----------
@@ -876,8 +876,10 @@ def plumed_input_wob_2(modeller,
         Multiplier on each measured distance that sets the ``R_0`` of its
         coordination switching function. Default is 1.1.
     wall : float, optional
-        Multiplier on the O6-O4 and N1-N3 distances that sets their upper
-        walls. Default is 4.0.
+        Multiplier on the O6-O4, N1-N3 and N2-O2 distances that sets their
+        upper walls. Default is 4.0, which at that multiple is loose enough
+        to be all but inactive; 1.5, as in :func:`plumed_input_1pt`, is the
+        tighter choice.
     pace : int, optional
         ``PACE`` of the metadynamics bias, in steps. Default is 500.
     height : float, optional
@@ -904,9 +906,17 @@ def plumed_input_wob_2(modeller,
 
     # PLUMED, driven from OpenMM, works in nm, so the distances are converted
     # here rather than carried as Quantities into the input string.
+    def _d(a, b):
+        return distance_between_atoms(modeller, a, b).value_in_unit(unit.nanometer)
+
     def _r(a, b):
-        d = distance_between_atoms(modeller, a, b).value_in_unit(unit.nanometer)
-        return np.round(d * r_0, decimals=2)
+        return np.round(_d(a, b) * r_0, decimals=2)
+
+    # Walls are multiples of the distance each pair sits at now, as in the
+    # 1pt/2pt builders -- not the absolute distances of plumed_input_wob_1.
+    wall_1 = np.round(_d(idx_o6, idx_o4) * wall, decimals=2)
+    wall_2 = np.round(_d(idx_n1, idx_n3) * wall, decimals=2)
+    wall_3 = np.round(_d(idx_n2, idx_o2) * wall, decimals=2)
 
     r_1 = _r(idx_n3, idx_h3)
     r_2 = _r(idx_o6, idx_h3)
@@ -972,9 +982,9 @@ d1: DISTANCE ATOMS={idx_o6},{idx_o4}
 d2: DISTANCE ATOMS={idx_n1},{idx_n3}
 d3: DISTANCE ATOMS={idx_n2},{idx_o2}
 
-uw1: UPPER_WALLS ARG=d1 AT={wall} KAPPA=500
-uw2: UPPER_WALLS ARG=d2 AT={wall} KAPPA=500
-uw3: UPPER_WALLS ARG=d3 AT={wall} KAPPA=500
+uw1: UPPER_WALLS ARG=d1 AT={wall_1} KAPPA=500
+uw2: UPPER_WALLS ARG=d2 AT={wall_2} KAPPA=500
+uw3: UPPER_WALLS ARG=d3 AT={wall_3} KAPPA=500
 
 metad: METAD ARG=z PACE={pace} HEIGHT={height} SIGMA={sigma} BIASFACTOR={bias} TEMP={temperature_str} FILE=HILLS
 PRINT ARG=z,metad.bias STRIDE={pace} FILE=COLVAR

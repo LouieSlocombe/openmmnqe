@@ -25,7 +25,7 @@ if __name__ == "__main__":
     modeller.addHydrogens()
     forcefield = nqe.prepare_ligand_ff(forcefield_names, molecule)
 
-    pdb = app.PDBFile("rpmd_ready_centroid.pdb")
+    pdb = app.PDBFile("rpmd_ready_final.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
     chains = list(modeller.topology.chains())
