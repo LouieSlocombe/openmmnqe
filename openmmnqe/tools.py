@@ -1,3 +1,16 @@
+"""Assorted helpers for setting up and interrogating an OpenMM system.
+
+What collects here is the small stuff the simulation stages in
+:mod:`openmmnqe.openmm` and the input builders in :mod:`openmmnqe.plumed` need
+but that belongs to neither: seeding ring-polymer beads, swapping hydrogen for
+deuterium, measuring a distance or angle off a Modeller, translating atom
+indices between OpenMM's 0-based and PLUMED's 1-based conventions, and picking
+a compute platform.
+
+Anything here that takes a temperature or a mass accepts either a
+:class:`openmm.unit.Quantity` or a bare number in the obvious unit -- kelvin
+and daltons respectively.
+"""
 import math
 import re
 from typing import Dict, Sequence, Any, List, Union, Literal, Optional
@@ -11,66 +24,62 @@ from openmm import openmm, app
 
 def zero_velocities(n_atoms):
     """
-    Generates a list of zero velocity vectors for a given number of atoms.
+    Build a list of zero velocity vectors, one per atom.
 
     Parameters
     ----------
     n_atoms : int
-        The number of atoms for which zero velocity vectors are to be created.
+        Number of atoms to produce vectors for.
 
     Returns
     -------
-    list of openmm.Vec3
-        A list of zero velocity vectors, each scaled by the unit of nanometer/picosecond.
+    openmm.unit.Quantity
+        Zero velocities, in nanometres per picosecond.
     """
     return [openmm.Vec3(0, 0, 0) for _ in range(n_atoms)] * (unit.nanometer / unit.picosecond)
 
 
 def write_multimodel_pdb(topology, positions, fh, model_index):
     """
-    Writes a single model to a multi-model PDB file.
-
-    This function appends a model to an existing PDB file, allowing the creation
-    of a multi-model PDB file. Each model is identified by a unique index.
+    Append one model to an open multi-model PDB file.
 
     Parameters
     ----------
     topology : openmm.app.Topology
-        The topology of the system to be written.
+        Topology of the system being written.
     positions : openmm.unit.Quantity
-        The atomic positions to be written, with units of length.
+        Atomic positions, with units of length.
     fh : file-like object
-        An open file handle where the PDB model will be written.
+        An open, writable text handle.
     model_index : int
-        The index of the model to be written, used to distinguish models in the PDB file.
-
-    Returns
-    -------
-    None
+        Index distinguishing this model from the others in the file.
     """
     app.PDBFile.writeModel(topology, positions, fh, modelIndex=model_index)
 
 
 def centroid_positions(simulation, n_atoms, n_beads):
     """
-    Computes the centroid positions of atoms across multiple beads in a simulation.
-
-    This function calculates the average positions of atoms over a specified number
-    of beads in a ring-polymer molecular dynamics (RPMD) simulation.
+    Average the bead positions of an RPMD simulation into a centroid structure.
 
     Parameters
     ----------
     simulation : openmm.app.Simulation
-        The OpenMM simulation object containing the integrator and system state.
+        Simulation driven by an ``RPMDIntegrator``.
     n_atoms : int
-        The number of atoms in the system.
+        Number of atoms in the system.
     n_beads : int
-        The number of beads in the RPMD simulation.
+        Number of beads in the ring polymer.
 
     Returns
     -------
-    list of openmm.Vec3
-        A list of centroid positions for each atom, with units of nanometers.
+    openmm.unit.Quantity
+        Centroid position of each atom, in nanometres.
+
+    Notes
+    -----
+    The beads are averaged as they come, without unwrapping across periodic
+    boundaries; :class:`openmmnqe.reporters.RPMDCentroidReporter` explains
+    when that distinction matters.
     """
     acc = np.zeros((n_atoms, 3), dtype=float)
     for b in range(n_beads):
@@ -83,24 +92,23 @@ def centroid_positions(simulation, n_atoms, n_beads):
 
 def get_thermal_de_broglie_wavelength(mass, temperature):
     """
-    Calculates the thermal de Broglie wavelength for a given mass and temperature.
+    Compute the thermal de Broglie wavelength of a particle.
 
-    The thermal de Broglie wavelength is a quantum mechanical property that
-    characterizes the wave-like behavior of particles at a given temperature.
+    This length sets the scale over which a particle behaves as a wave rather
+    than a point, and so how far apart the beads of its ring polymer should
+    start; see :func:`init_beads_scaled`.
 
     Parameters
     ----------
     mass : openmm.unit.Quantity or float
-        The mass of the particle. If a `Quantity`, it should have units of daltons.
-        If a float, it is assumed to be in atomic mass units (amu).
+        Mass of the particle. A bare number is taken to be in daltons.
     temperature : openmm.unit.Quantity or float
-        The temperature of the system. If a `Quantity`, it should have units of kelvin.
-        If a float, it is assumed to be in kelvin.
+        Temperature of the system. A bare number is taken to be in kelvin.
 
     Returns
     -------
     openmm.unit.Quantity
-        The thermal de Broglie wavelength with units of meters.
+        The thermal de Broglie wavelength, in metres.
     """
     if unit.is_quantity(mass):
         mass_amu = mass.value_in_unit(unit.dalton)
@@ -122,27 +130,26 @@ def get_thermal_de_broglie_wavelength(mass, temperature):
 
 def init_beads_scaled(simulation, positions, n_beads, temperature, scale_factor=0.1):
     """
-    Initializes bead positions for a ring-polymer molecular dynamics (RPMD) simulation.
+    Seed RPMD bead positions, spread by each atom's thermal wavelength.
 
-    This function perturbs the initial positions of atoms in the system to create
-    multiple beads, scaled by the thermal de Broglie wavelength of each atom.
+    Every bead starts at the given positions plus Gaussian noise scaled by
+    the atom's thermal de Broglie wavelength, so light atoms open out further
+    than heavy ones and the ring polymers start closer to their equilibrium
+    extent than the uniform jiggle of :func:`init_beads` manages.  Velocities
+    are then drawn from the Maxwell-Boltzmann distribution.
 
     Parameters
     ----------
     simulation : openmm.app.Simulation
-        The OpenMM simulation object containing the system and integrator.
-    positions : openmm.unit.Quantity or np.ndarray
-        The initial atomic positions. If not a Quantity, it is assumed to be in nanometers.
+        Simulation driven by an ``RPMDIntegrator``, modified in place.
+    positions : openmm.unit.Quantity or numpy.ndarray
+        Initial atomic positions. A bare array is taken to be in nanometres.
     n_beads : int
-        The number of beads to initialize for the RPMD simulation.
+        Number of beads in the ring polymer.
     temperature : openmm.unit.Quantity
-        The temperature of the system, used to calculate the thermal de Broglie wavelength.
+        Temperature the wavelengths and velocities are drawn at.
     scale_factor : float, optional
-        A scaling factor applied to the thermal wavelength perturbation. Default is 0.1.
-
-    Returns
-    -------
-    None
+        Fraction of the thermal wavelength to perturb by. Default is 0.1.
     """
     system = simulation.system
     n_atoms = system.getNumParticles()
@@ -174,26 +181,24 @@ def init_beads_scaled(simulation, positions, n_beads, temperature, scale_factor=
 
 def init_beads(modeller, simulation, n_beads, perturb=0.002):
     """
-    Initializes bead positions and velocities for a ring-polymer molecular dynamics (RPMD) simulation.
+    Seed RPMD bead positions with a uniform jiggle and zero velocities.
 
-    This function perturbs the initial positions of atoms to create multiple beads
-    and sets their velocities to zero.
+    Beads that all start at the same point stay collapsed on top of one
+    another, so each is displaced by a small random amount.  The displacement
+    is the same size for every atom; :func:`init_beads_scaled` sizes it per
+    atom instead, at the cost of needing a temperature.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        The OpenMM modeller object containing the system topology and positions.
+        Modeller the initial positions are taken from.
     simulation : openmm.app.Simulation
-        The OpenMM simulation object containing the integrator and system state.
+        Simulation driven by an ``RPMDIntegrator``, modified in place.
     n_beads : int
-        The number of beads to initialize for the RPMD simulation.
+        Number of beads in the ring polymer.
     perturb : float, optional
-        The magnitude of the random perturbation applied to the initial positions.
-        Default is 0.002.
-
-    Returns
-    -------
-    None
+        Standard deviation of the displacement, in nanometres. Default is
+        0.002.
     """
     rng = np.random.default_rng(0)
     pos0 = modeller.positions
@@ -208,22 +213,22 @@ def init_beads(modeller, simulation, n_beads, perturb=0.002):
 
 def count_dna_and_estimate_charge(topology):
     """
-    Counts the number of DNA residues in a topology and estimates the total charge.
+    Estimate the charge of the DNA in a topology from its residue count.
 
-    This function identifies DNA residues in the given topology based on their residue names
-    and calculates the total charge of the DNA. Each DNA residue is assumed to contribute
-    a charge of -1 e.
+    Each nucleotide carries one deprotonated phosphate, so the charge is
+    simply minus the number of DNA residues.  This is the number of
+    counter-ions the system needs to come out neutral.
 
     Parameters
     ----------
     topology : openmm.app.Topology
-        The topology object containing the system's residues.
+        Topology to scan for DNA residues.
 
     Returns
     -------
     int
-        The estimated total charge of the DNA in the topology.
-        Negative value indicates the total charge contributed by the DNA residues.
+        Estimated total DNA charge, in units of the elementary charge. Zero
+        or negative.
     """
     dna_residue_names = {
         "DA", "DC", "DG", "DT",  # internal
@@ -244,39 +249,36 @@ def count_dna_and_estimate_charge(topology):
 
 def deuterate_system(modeller, system, option='all', target_resname=None):
     """
-    Replaces hydrogen atoms with deuterium in a molecular system.
+    Replace the hydrogens of a system, or part of it, with deuterium.
 
-    This function modifies the masses of hydrogen atoms in the system to the mass of deuterium
-    based on the specified option. It supports deuteration of all hydrogens, or specific subsets
-    such as water, protein, DNA, RNA, nucleic acids, or a specific ligand.
+    Only the particle masses change: the topology keeps calling them
+    hydrogens, and the force field keeps treating them as such.  That is all
+    a kinetic isotope effect needs, since the potential energy surface is
+    isotope-independent and the mass is what the dynamics sees.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        The OpenMM modeller object containing the system topology and positions.
+        Modeller whose topology names the residues to deuterate.
     system : openmm.System
-        The OpenMM system object to be modified.
-    option : str, optional
-        Specifies the subset of the system to deuterate. Options include:
-        'all', 'water', 'protein', 'dna', 'rna', 'nucleic', or 'ligand'. Default is 'all'.
-    target_resname : str, optional
-        The residue name of the ligand to deuterate. Required if `option` is 'ligand'.
+        System whose particle masses are modified in place.
+    option : {'all', 'water', 'protein', 'dna', 'rna', 'nucleic', 'ligand'}, optional
+        Which part of the system to deuterate. Default is ``'all'``.
+    target_resname : str or None, optional
+        Residue name of the ligand to deuterate. Required when *option* is
+        ``'ligand'``, ignored otherwise. Default is None.
 
     Raises
     ------
     ValueError
-        If `option` is 'ligand' and `target_resname` is not provided.
-        If `option` is not one of the supported values.
+        If *option* is ``'ligand'`` and *target_resname* is not given, or if
+        *option* is not one of the values listed above.
 
     Notes
     -----
-    - If `option` is 'all', all hydrogen atoms in the system are deuterated.
-    - If `option` is 'ligand' and no residues match `target_resname`, a warning is printed.
-    - If no residues match the specified `option`, a warning is printed.
-
-    Returns
-    -------
-    None
+    An *option* that matches no residue at all is only warned about, not
+    raised: it is a plausible thing to ask of a system that happens not to
+    have that component.
     """
     deuterium_mass = app.element.deuterium.mass
 
@@ -345,32 +347,25 @@ def deuterate_system(modeller, system, option='all', target_resname=None):
 
 def get_atoms_in_residue(pdb_file_path, residue_index, chain_id=None):
     """
-    Retrieves the atom indices of a specific residue in a PDB file.
-
-    This function reads a PDB file, identifies the specified residue by its index
-    and optionally its chain ID, and returns the indices of all atoms in that residue.
+    Look up the atom indices of one residue in a PDB file.
 
     Parameters
     ----------
     pdb_file_path : str
-        Path to the PDB file to be read.
+        Path to the PDB file to read.
     residue_index : int
-        The index of the residue whose atom indices are to be retrieved.
-    chain_id : str, optional
-        The ID of the chain containing the residue. If None, the residue is
-        searched in the global topology. Default is None.
+        Position of the residue, counted from 0 within its chain when
+        *chain_id* is given and within the whole topology otherwise. Note
+        that this is not the residue ID written in the PDB.
+    chain_id : str or None, optional
+        Chain to look in. If None, the whole topology is searched.
+        Default is None.
 
     Returns
     -------
     list of int or None
-        A list of atom indices in the specified residue. Returns None if the
-        residue or chain is not found, or if the residue index is out of bounds.
-
-    Notes
-    -----
-    - If `chain_id` is provided, the residue is searched within the specified chain.
-    - If `chain_id` is None, the residue is searched in the global topology.
-    - Prints error messages if the chain or residue index is invalid.
+        0-based indices of the residue's atoms, or None if the chain does
+        not exist or the index is out of range. The reason is printed.
     """
     pdb = app.PDBFile(pdb_file_path)
     topology = pdb.topology
@@ -423,34 +418,52 @@ def set_adqtb_particle_types_by_element(
         unknown_symbol: str = "X",
 ) -> Dict[str, int]:
     """
-    Assign OpenMM adQTB (QTBIntegrator) particle types so that all particles with the same
-    chemical element share the same integer type.
+    Assign adQTB particle types so each chemical element shares one type.
 
-    IMPORTANT: call this BEFORE creating a Context/Simulation; particle types are fixed at
-    Context creation time for QTBIntegrator.
+    A ``QTBIntegrator`` adapts one noise spectrum per particle type, so
+    grouping by element gives every carbon the same bath as every other
+    carbon.  Types are numbered by atomic number, lightest first, which puts
+    hydrogen -- where the quantum correction matters most -- at the front.
 
     Parameters
     ----------
-    integrator
-        An OpenMM QTBIntegrator (adQTB). Must provide setParticleType(index, type).
-    topology
-        openmm.app.Topology used to infer element per particle (atom.element), if
-        particle_elements is not provided.
-    system
-        openmm.System (optional) used to sanity-check that the number of particles matches.
-    particle_elements
-        Optional explicit per-particle element spec (length == system.getNumParticles()).
-        Each entry can be an openmm.app.element.Element, a symbol string like "C", or None.
-        Use this if your System has extra particles not present in the Topology (e.g., Drudes).
-    start_type
-        First type id to use (default 0).
-    unknown_symbol
-        Symbol to use when an element is missing/None (all such particles share a type).
+    integrator : openmm.QTBIntegrator
+        The adQTB integrator, modified in place. Must provide
+        ``setParticleType(index, type)``.
+    topology : openmm.app.Topology or None, optional
+        Topology the per-particle elements are read from. Required unless
+        *particle_elements* is given. Default is None.
+    system : openmm.System or None, optional
+        System to check the particle count against. Default is None.
+    particle_elements : sequence or None, optional
+        Explicit element per particle, one entry per particle in the system.
+        Each may be an ``openmm.app.element.Element``, a symbol such as
+        ``"C"``, or None. Use this when the system holds particles the
+        topology does not, such as Drude particles. Default is None.
+    start_type : int, optional
+        Type id to number from. Default is 0.
+    unknown_symbol : str, optional
+        Symbol standing in for a missing element; all such particles share
+        one type, sorted last. Default is ``"X"``.
 
     Returns
     -------
-    element_to_type
-        Mapping from element symbol (e.g., "H", "C") to assigned integer type id.
+    dict
+        Mapping from element symbol to the integer type id assigned to it.
+
+    Raises
+    ------
+    TypeError
+        If *integrator* is not a QTB integrator.
+    ValueError
+        If neither *topology* nor *particle_elements* is given, or if the
+        element count disagrees with the system's particle count.
+
+    Notes
+    -----
+    Call this *before* the ``Context`` or ``Simulation`` is created. A
+    ``QTBIntegrator`` fixes its particle types at context creation, so
+    assignments made afterwards are ignored.
     """
 
     if not hasattr(integrator, "setParticleType"):
@@ -460,19 +473,20 @@ def set_adqtb_particle_types_by_element(
 
     def _sym_and_Z(el: Any) -> tuple[str, int]:
         """
-        Extract element symbol and atomic number from an element-like object.
+        Extract the symbol and atomic number of an element-like object.
 
         Parameters
         ----------
-        el : openmm.app.element.Element, str, or None
-            An element, its symbol string, or None.
+        el : openmm.app.element.Element or str or None
+            An element, its symbol, or None.
 
         Returns
         -------
         sym : str
             The element symbol, or *unknown_symbol* if *el* is None.
         Z : int
-            The atomic number, or 10**9 if unknown.
+            The atomic number, or 10**9 when unknown, which sorts such
+            particles to the end.
         """
         if el is None:
             return unknown_symbol, 10 ** 9
@@ -531,34 +545,38 @@ def atom_indices_from_vmd_picks(
         chain_id: Optional[str] = None,
 ) -> List[Union[int, List[int]]]:
     """
-    Maps VMD pick strings to OpenMM Topology atom indices.
+    Map VMD pick strings onto OpenMM topology atom indices.
 
-    This function parses VMD-style atom selection strings (e.g., "HIE258:CD2")
-    and returns the corresponding atom indices from an OpenMM topology.
+    Picking atoms in VMD and pasting what it prints is the quickest way to
+    name the handful of atoms a collective variable acts on, and this turns
+    those strings into the indices the rest of the package wants.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        The OpenMM Modeller object whose topology will be searched.
+        Modeller whose topology is searched.
     picks : list of str
-        VMD pick strings specifying residue and atom names.
-        Format: "RESNAME<RESID>[INSERTION_CODE]:ATOMNAME"
-        Examples: ["HIE258:CD2", "ALA12:CA", "HIE258A:CD2"]
-    match_mode : {"unique", "first", "all"}, optional
-        Controls behavior when multiple atoms match a pick string:
-        - "unique": Requires exactly one match; raises ValueError otherwise.
-        - "first": Returns the first matching atom index if multiple matches exist.
-        - "all": Returns a list of all matching indices for each pick.
-        Default is "unique".
+        Pick strings of the form ``"RESNAME<RESID>[INSERTION_CODE]:ATOMNAME"``,
+        e.g. ``["HIE258:CD2", "ALA12:CA", "HIE258A:CD2"]``.
+    match_mode : {'unique', 'first', 'all'}, optional
+        What to do when a pick matches more than one atom: ``'unique'``
+        raises, ``'first'`` takes the lowest index, ``'all'`` returns them
+        all as a list. Default is ``'unique'``.
     chain_id : str or None, optional
-        If provided, restricts the search to residues in the specified chain.
-        Default is None (searches all chains).
+        Chain to restrict the search to. If None, every chain is searched.
+        Default is None.
 
     Returns
     -------
     list of int or list of list of int
-        Atom indices corresponding to each pick string. If match_mode is "all",
-        returns a list of lists.
+        One entry per pick, a list of indices when *match_mode* is
+        ``'all'`` and a single index otherwise.
+
+    Raises
+    ------
+    ValueError
+        If a pick is malformed, matches nothing, or -- under
+        ``'unique'`` -- matches more than one atom.
     """
     topo = modeller.topology
 
@@ -615,39 +633,42 @@ def atom_indices_from_vmd_picks(
 
 def atom_indices_to_plumed(atom_indices: List[int]) -> List[int]:
     """
-    Converts OpenMM atom indices to PLUMED atom indices.
-
-    PLUMED uses 1-based indexing, while OpenMM uses 0-based indexing.
-    This function adds 1 to each atom index to convert between the two conventions.
+    Convert OpenMM atom indices to PLUMED's 1-based convention.
 
     Parameters
     ----------
     atom_indices : list of int
-        A list of 0-based atom indices from OpenMM.
+        0-based indices, as OpenMM numbers them.
 
     Returns
     -------
     list of int
-        A list of 1-based atom indices compatible with PLUMED.
+        1-based indices, as PLUMED numbers them.
     """
     return [idx + 1 for idx in atom_indices]
 
 
 def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
     """
-    Return the distance between two atoms in an OpenMM Modeller.
+    Measure the distance between two atoms of a Modeller.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        An OpenMM Modeller object with positions set.
+        Modeller with its positions set.
     atom_index_1, atom_index_2 : int
-        0-based indices into modeller.positions (same order as modeller.topology.atoms()).
+        0-based indices into ``modeller.positions``, in the same order as
+        ``modeller.topology.atoms()``.
 
     Returns
     -------
     openmm.unit.Quantity
-        Distance in nanometers.
+        The distance, in nanometres.
+
+    Raises
+    ------
+    ValueError
+        If *modeller* has no positions.
     """
 
     positions = getattr(modeller, "positions", None)
@@ -663,21 +684,26 @@ def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
 
 def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
     """
-    Compute the angle i–j–k (at vertex j) from an OpenMM Modeller.
+    Measure the angle i-j-k, with its vertex at atom j.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        Modeller containing positions.
+        Modeller with its positions set.
     i, j, k : int
-        Atom indices (0-based) for atoms i-j-k. The angle is at atom j.
-    degrees : bool
-        If True, return angle in degrees. Otherwise radians.
+        0-based atom indices. The angle is subtended at *j*.
+    degrees : bool, optional
+        Whether to return degrees rather than radians. Default is False.
 
     Returns
     -------
     float
-        Angle in radians (default) or degrees.
+        The angle, in radians unless *degrees* is True.
+
+    Raises
+    ------
+    ValueError
+        If *i* or *k* coincides with *j*, leaving the angle undefined.
     """
     pos = modeller.positions
 
@@ -697,7 +723,7 @@ def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
 
     cos_theta = dot / (n1 * n2)
 
-    # Clamp for numerical stability
+    # Rounding can push a straight angle just past +/-1, where acos is undefined
     cos_theta = max(-1.0, min(1.0, cos_theta))
 
     theta = math.acos(cos_theta)
@@ -706,23 +732,19 @@ def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
 
 def check_platform(platform=None):
     """
-    Determines the computation platform to use, auto-detecting CUDA if not specified.
-
-    If the `platform` argument is not provided, this function asks OpenMM which
-    platforms it was built with and returns 'CUDA' when that one is among them,
-    otherwise 'CPU'. If a specific platform string is passed, it is returned
-    directly.
+    Pick a compute platform, preferring CUDA where it is available.
 
     Parameters
     ----------
-    platform : str, optional
-        The name of the platform to force (e.g., 'CUDA', 'OpenCL', 'CPU').
-        If None (default), the platform is automatically detected based on hardware.
+    platform : str or None, optional
+        Platform to force, e.g. ``'CUDA'``, ``'OpenCL'`` or ``'CPU'``. If
+        None, CUDA is used when OpenMM offers it and CPU otherwise.
+        Default is None.
 
     Returns
     -------
     str
-        The platform name string (e.g., 'CUDA' or 'CPU').
+        The chosen platform name, returned unchanged when one was given.
 
     Notes
     -----
@@ -739,18 +761,20 @@ def check_platform(platform=None):
 
 def temperature_to_kbt(temperature):
     """
-    Converts a temperature to kBT (Boltzmann constant times temperature) in kilojoules per mole.
+    Convert a temperature to kBT in kJ/mol.
+
+    This is the ``--kt`` the PLUMED free-energy reconstruction commands built
+    in :mod:`openmmnqe.plumed` are given.
 
     Parameters
     ----------
     temperature : openmm.unit.Quantity or float
-        The temperature to convert. If a Quantity, it should have units of kelvin.
-        If a float, it is assumed to be in kelvin.
+        Temperature to convert. A bare number is taken to be in kelvin.
 
     Returns
     -------
     float
-        The value of kBT at the given temperature, in kilojoules per mole.
+        kBT at that temperature, in kJ/mol.
     """
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     return kt.value_in_unit(unit.kilojoule_per_mole)

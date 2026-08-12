@@ -1,3 +1,29 @@
+"""Structure preparation and file conversion, upstream of every simulation.
+
+Getting a raw structure to the point where OpenMM will build a system from it
+is most of the work of setting up a run, and it is what this module does.  The
+entry point for a protein-ligand system is :func:`prepare_lig_system`, which
+strips the water and ions, works out which residues are ligands, and hands
+back a combined PDB and the ligand molecules; :func:`prepare_ligand_ff` then
+parameterises those ligands with GAFF and returns a force field that covers
+the whole system.  The rest are the smaller operations those two are built
+from and that the workflows call directly -- relabelling residues, repairing
+a PDB with PDBFixer, centring a structure in its box, and converting between
+XYZ, SDF and PDB.
+
+Two of those conversions matter more than the others:
+:func:`convert_xyz_to_plumed_ref` turns a reaction path into the multi-model
+PDB that PLUMED's ``PATHMSD`` reads, and :func:`save_only_index_atoms` writes
+the ``index_atoms.pdb`` that the path is aligned against.
+
+A note on residue names. Whether a residue counts as a ligand is decided by
+name against :data:`STANDARD_RESIDUE_NAMES`, but OpenMM itself matches
+residue templates on the molecular graph and ignores names entirely. The two
+can disagree, and when they do the GAFF parameters generated for a "ligand"
+are silently discarded in favour of the standard template -- hence the
+warnings raised by :func:`_warn_ff_named_ligands` and
+:func:`_warn_ff_matched_molecules`.
+"""
 import glob
 import os
 import re
@@ -148,10 +174,6 @@ def _write_xyz_frame(fh, symbols, positions, comment=''):
         Cartesian coordinates in Angstrom, one ``(x, y, z)`` triple per atom.
     comment : str, optional
         Text for the frame's comment line. Default is an empty string.
-
-    Returns
-    -------
-    None
     """
     fh.write(f"{len(symbols)}\n")
     fh.write(f"{comment}\n")
@@ -187,20 +209,12 @@ def _format_pdb_atom_name(symbol, count):
 
 def remove_directory(directory):
     """
-    Removes a directory if it exists.
-
-    This function checks if the specified directory exists. If it does, the directory
-    and all its contents are removed. If the directory does not exist, the function
-    does nothing.
+    Remove a directory and its contents, if it exists.
 
     Parameters
     ----------
     directory : str
-        The path to the directory to be removed.
-
-    Returns
-    -------
-    None
+        Path to the directory. A path that does not exist is not an error.
     """
     if os.path.exists(directory):
         shutil.rmtree(directory)
@@ -208,23 +222,16 @@ def remove_directory(directory):
 
 def copy_and_rename_file(src, dst_dir, new_name):
     """
-    Copies a file to a specified directory and renames it.
-
-    This function takes the path to a source file, copies it to a destination directory,
-    and renames the copied file to the specified new name.
+    Copy a file into a directory under a new name.
 
     Parameters
     ----------
     src : str
-        The path to the source file.
+        Path to the source file.
     dst_dir : str
-        The path to the destination directory.
+        Directory to copy it into.
     new_name : str
-        The new name for the copied file.
-
-    Returns
-    -------
-    None
+        Name the copy is given.
     """
     shutil.copy(src, os.path.join(dst_dir, new_name))
     return None
@@ -232,30 +239,26 @@ def copy_and_rename_file(src, dst_dir, new_name):
 
 def list_files_with_pattern(directory, pattern):
     """
-    Lists files in a directory that match a given pattern.
-
-    This function searches the specified directory for files that match the given pattern
-    and returns a list of their file paths. The pattern matching is performed using the
-    `glob` module.
+    List the files in a directory matching a glob pattern.
 
     Parameters
     ----------
     directory : str
-        The path to the directory to search in.
+        Directory to search.
     pattern : str
-        The pattern to match files against (e.g., '*.txt' for all text files).
+        Glob pattern to match names against, e.g. ``'*.txt'``.
 
     Returns
     -------
-    list
-        A list of file paths that match the given pattern.
+    list of str
+        Matching paths, in whatever order :mod:`glob` returns them.
     """
     return glob.glob(os.path.join(directory, pattern))
 
 
 def search_fes_files(target_directory: str, pattern: str = r'^fes_?(\d+)\.dat$') -> list[str]:
     r"""
-    Searches for numbered FES files in the target directory.
+    Find the numbered FES files in a directory, in index order.
 
     By default this matches the names written by ``plumed sum_hills --stride``
     and by the bundled OPES ``FES_from_*`` scripts, i.e. ``FES1.dat`` and
@@ -265,14 +268,15 @@ def search_fes_files(target_directory: str, pattern: str = r'^fes_?(\d+)\.dat$')
     Parameters
     ----------
     target_directory : str
-        The directory to search in.
+        Directory to search.
     pattern : str, optional
         Regular expression matched against each file name.  Its first capture
-        group, if present, is used as the sort key.
+        group, if present, is used as the sort key. Default matches
+        ``fes_<n>.dat`` and ``fes<n>.dat``.
 
     Returns
     -------
-    list[str]
+    list of str
         Matching file names, sorted by their index.
     """
     regex = re.compile(pattern, re.IGNORECASE)
@@ -320,8 +324,8 @@ def load_fes_data(directory: str,
 
     Returns
     -------
-    list
-        One :class:`reactiontools.FES` per file, ordered by file index.
+    list of reactiontools.FES
+        One surface per file, ordered by file index.
     """
     fes_files = search_fes_files(directory, pattern=pattern)
     fes_arrays = []
@@ -338,46 +342,61 @@ def load_fes_data(directory: str,
 
 def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=False):
     """
-    Converts an XYZ file to an SDF file, optionally inferring bonds, sanitizing, and kekulizing the molecules.
+    Convert an XYZ file to SDF, inferring the bonds as it goes.
 
-    This function reads molecular structures from an XYZ file, processes them into RDKit molecule objects,
-    and writes them to an SDF file. It supports optional charge parsing, bond inference, molecule sanitization,
-    and kekulization.
+    XYZ carries only elements and coordinates, so the bonds and bond orders
+    an SDF needs are worked out from the geometry by RDKit.  That inference
+    depends on the total charge, which is read from each frame's comment line
+    if it says something like ``charge=-1`` or ``q: -1``, and taken from
+    *default_charge* otherwise.
 
     Parameters
     ----------
     xyz_path : str
-        Path to the input XYZ file.
+        Path to the input XYZ file. May hold more than one frame.
     sdf_path : str
         Path to the output SDF file.
     default_charge : int, optional
-        Default charge to use for bond inference if no charge is specified in the XYZ file. Default is 0.
+        Total charge assumed for any frame whose comment does not give one.
+        Default is 0.
     sanitize : bool, optional
-        If True, sanitizes the RDKit molecule objects before writing. Default is True.
+        Whether to sanitise each molecule before writing, falling back to a
+        partial sanitisation if the full one fails. Default is True.
     kekulize : bool, optional
-        If True, kekulizes the RDKit molecule objects before writing. Default is False.
+        Whether to write explicit alternating bonds rather than aromatic
+        ones. Default is False.
 
     Returns
     -------
     int
-        The number of molecules successfully written to the SDF file.
+        The number of molecules written.
+
+    Raises
+    ------
+    ValueError
+        If the XYZ file is malformed or holds no frames.
+    IOError
+        If *sdf_path* cannot be opened for writing.
     """
 
     def _parse_charge_from_comment(comment, fallback):
         """
-        Extracts an integer charge from the comment line of an XYZ frame.
+        Extract a total charge from the comment line of an XYZ frame.
+
+        Three spellings are recognised, in decreasing order of confidence:
+        ``charge=-1``, ``q: -1``, and a bare signed integer standing alone.
 
         Parameters
         ----------
-        comment : str
-            The comment line from the XYZ file.
+        comment : str or None
+            The frame's comment line.
         fallback : int
-            The fallback charge to use if no charge is found in the comment.
+            Charge to return when the comment gives none.
 
         Returns
         -------
         int
-            The extracted charge or the fallback value.
+            The charge found, or *fallback*.
         """
         if comment is None:
             return fallback
@@ -403,7 +422,7 @@ def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=Fal
 
     def _read_xyz_frames(path):
         """
-        Reads molecular frames from an XYZ file.
+        Split an XYZ file into its frames.
 
         Parameters
         ----------
@@ -413,7 +432,13 @@ def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=Fal
         Returns
         -------
         list of tuple
-            A list of tuples, each containing the comment line and atom block for a frame.
+            One ``(comment, atom_lines)`` pair per frame.
+
+        Raises
+        ------
+        ValueError
+            If a frame is truncated, its atom count is unreadable, or the
+            file holds no frames at all.
         """
         frames = []
         with open(path, 'r', encoding='utf-8') as fh:
@@ -445,21 +470,29 @@ def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=Fal
 
     def _frame_to_mol(comment, coord_lines, name_fallback):
         """
-        Converts a single XYZ frame to an RDKit molecule object.
+        Build an RDKit molecule from one XYZ frame.
+
+        The molecule comes back with atoms and 3-D coordinates but no bonds;
+        those are inferred by the caller.
 
         Parameters
         ----------
         comment : str
-            The comment line from the XYZ frame.
+            The frame's comment line, used as the molecule name.
         coord_lines : list of str
-            The atom coordinate lines from the XYZ frame.
+            The frame's atom lines, each ``El x y z``.
         name_fallback : str
-            A fallback name for the molecule if no name is found in the comment.
+            Name to use when the comment is empty.
 
         Returns
         -------
         rdkit.Chem.Mol
-            The RDKit molecule object.
+            The molecule, with one conformer.
+
+        Raises
+        ------
+        ValueError
+            If an atom line is short or its coordinates do not parse.
         """
         rw = Chem.RWMol()
         conf = Chem.Conformer(len(coord_lines))
@@ -534,26 +567,28 @@ def extract_nonstandard_res(pdb_file_path: str,
                             output_dir: str = ".",
                             sdf: bool = False) -> list:
     """
-    Extracts non-standard residues from a PDB file and saves them as XYZ files.
+    Write each non-standard residue of a PDB file out to its own file.
 
-    This function identifies residues in a PDB file that are not part of
-    :data:`STANDARD_RESIDUE_NAMES`. Each non-standard residue is saved as a
-    separate XYZ file in the specified output directory. Optionally, the XYZ
-    files can be converted to SDF format.
+    A residue counts as non-standard when its name is absent from
+    :data:`STANDARD_RESIDUE_NAMES`, which in practice means a ligand needing
+    parameters of its own.  Single-atom residues are skipped: those are ions,
+    and there is nothing to parameterise.
 
     Parameters
     ----------
     pdb_file_path : str
         Path to the input PDB file.
     output_dir : str, optional
-        Directory where the extracted residue files will be saved. Default is the current directory.
+        Directory to write the residue files to, created if needed. Default
+        is the current directory.
     sdf : bool, optional
-        If True, converts the extracted XYZ files to SDF format. Default is False.
+        Whether to convert the files to SDF, with bonds inferred, and delete
+        the XYZ originals. Default is False.
 
     Returns
     -------
-    list
-        A list of file paths for the generated XYZ or SDF files.
+    list of str
+        Paths to the files written, one per residue.
     """
     pdb = PDBFile(pdb_file_path)
 
@@ -605,11 +640,11 @@ def extract_nonstandard_res(pdb_file_path: str,
 
 def get_non_standard_residues(pdb_file):
     """
-    Identifies non-standard residues in a PDB file.
+    Collect the non-standard residues of a PDB file as RDKit molecules.
 
-    This function reads a PDB file, splits it into residues, and compares each residue
-    against :data:`STANDARD_RESIDUE_NAMES`. Residues not in the standard set
-    are considered non-standard and are returned as RDKit molecule objects.
+    Membership of :data:`STANDARD_RESIDUE_NAMES` decides what counts as
+    standard. Each residue found and each one skipped is printed, with its
+    SMILES, which is the quick way to see what a structure is carrying.
 
     Parameters
     ----------
@@ -618,8 +653,12 @@ def get_non_standard_residues(pdb_file):
 
     Returns
     -------
-    list
-        A list of RDKit molecule objects representing non-standard residues.
+    list of rdkit.Chem.Mol
+        One unsanitised molecule per non-standard residue.
+
+    See Also
+    --------
+    list_non_standard_residues : Returns just the residue keys.
     """
     mol = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
     mols_by_residue = Chem.SplitMolByPDBResidues(mol)
@@ -641,11 +680,11 @@ def get_non_standard_residues(pdb_file):
 
 def list_non_standard_residues(pdb_file):
     """
-    Identifies and lists non-standard residues in a PDB file.
+    List the keys of the non-standard residues in a PDB file.
 
-    This function reads a PDB file, splits it into residues, and compares each residue
-    against :data:`STANDARD_RESIDUE_NAMES`. Residues not in the standard set
-    are considered non-standard and are returned.
+    The quiet counterpart to :func:`get_non_standard_residues`: it names the
+    residues without building molecules or printing anything, which is what
+    :func:`prepare_lig_system` uses to decide what its ligands are.
 
     Parameters
     ----------
@@ -654,8 +693,13 @@ def list_non_standard_residues(pdb_file):
 
     Returns
     -------
-    list
-        A list of residue keys representing non-standard residues.
+    list of str
+        Residue keys, each ``'<RESNAME>_<CHAIN><RESID>'`` as RDKit spells
+        them.
+
+    See Also
+    --------
+    get_non_standard_residues : Returns the molecules themselves.
     """
     mol = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
     mols_by_residue = Chem.SplitMolByPDBResidues(mol)
@@ -670,25 +714,26 @@ def list_non_standard_residues(pdb_file):
 
 def clean_ions_in_pdb(pdb_input_path: str, ions_to_remove: List[str], pdb_output_path: str) -> List[str]:
     """
-    Removes specified ion residues from a PDB file and saves the cleaned structure.
+    Remove named ion residues from a PDB file.
 
-    This function identifies ion residues in a PDB file based on their names and removes
-    those that match the provided list. The cleaned PDB structure is then saved to the
-    specified output file. A list of all ion types found in the input file is returned.
+    Anything that is a single-atom residue and is not water is taken to be
+    an ion.  Every such type found is reported, not only the ones removed,
+    so a first pass with an empty *ions_to_remove* is a way of finding out
+    what a structure contains.
 
     Parameters
     ----------
     pdb_input_path : str
         Path to the input PDB file.
     ions_to_remove : list of str
-        A list of ion residue names to remove from the PDB file.
+        Residue names to delete, matched case-insensitively.
     pdb_output_path : str
-        Path to save the cleaned PDB file.
+        Path to write the cleaned PDB to. May be the input path.
 
     Returns
     -------
     list of str
-        A sorted list of all ion residue types found in the input PDB file.
+        Every ion residue type found in the input, sorted.
     """
     pdb = PDBFile(pdb_input_path)
     modeller = Modeller(pdb.topology, pdb.positions)
@@ -724,24 +769,25 @@ def clean_ions_in_pdb(pdb_input_path: str, ions_to_remove: List[str], pdb_output
 
 def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
     """
-    Relabels residues in a PDB file based on a provided mapping and saves the modified structure.
+    Rename residues in a PDB file according to a mapping.
 
-    This function reads a PDB file, updates the residue names according to the `relabel_map`,
-    and writes the modified structure to an output file. A summary of changes is printed.
+    Renaming is how a residue is moved between the standard force field and
+    GAFF, since :func:`prepare_lig_system` decides what is a ligand by name.
+    A summary of what changed is printed.
 
     Parameters
     ----------
     pdb_file_path : str
         Path to the input PDB file.
     relabel_map : dict
-        A dictionary mapping original residue names (keys) to new residue names (values).
+        Mapping from old residue name to new. Names not in it are left be.
     output_file : str or file-like object
-        Path to the output PDB file or a file-like object where the modified structure will be saved.
+        Path to write to, or an open handle. May be the input path.
 
     Returns
     -------
-    PDBFile
-        The modified PDB structure.
+    openmm.app.PDBFile
+        The relabelled structure.
     """
     pdb = PDBFile(pdb_file_path)
     topology = pdb.topology
@@ -779,20 +825,16 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
 
 def remove_residues_in_pdb(input_pdb, output_pdb, names):
     """
-    Removes specific residues from a PDB file and writes the modified structure to a new file.
+    Remove every residue with one of the given names from a PDB file.
 
     Parameters
     ----------
     input_pdb : str
         Path to the input PDB file.
     output_pdb : str
-        Path to the output PDB file where the modified structure will be saved.
-    names : list of str
-        A list of residue names to be removed from the PDB file.
-
-    Returns
-    -------
-    None
+        Path to write the result to. May be the input path.
+    names : iterable of str
+        Residue names to delete, matched exactly.
     """
     pdb = PDBFile(input_pdb)
     modeller = Modeller(pdb.topology, pdb.positions)
@@ -813,25 +855,22 @@ def remove_residues_in_pdb(input_pdb, output_pdb, names):
 
 
 def remove_water_residues_in_pdb(input_pdb, output_pdb, water_names=None):
-    """Removes water residues from a PDB file.
-
-    This function identifies and removes residues considered to be water from a PDB file
-    and writes the resulting structure to a new PDB file. It is a convenience wrapper
-    around `remove_residues_in_pdb`.
+    """
+    Remove the water residues from a PDB file.
 
     Parameters
     ----------
     input_pdb : str
         Path to the input PDB file.
     output_pdb : str
-        Path to the output PDB file for the cleaned structure.
-    water_names : set of str, optional
-        A set of residue names to be treated as water. If None, defaults to
-        `{"HOH", "WAT"}`.
+        Path to write the result to. May be the input path.
+    water_names : set of str or None, optional
+        Residue names to treat as water. If None, ``{"HOH", "WAT"}`` is
+        used. Default is None.
 
-    Returns
-    -------
-    None
+    See Also
+    --------
+    remove_residues_in_pdb : The general form this wraps.
     """
     if water_names is None:
         water_names = {"HOH", "WAT"}
@@ -840,27 +879,26 @@ def remove_water_residues_in_pdb(input_pdb, output_pdb, water_names=None):
 
 
 def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
-    """Fixes a PDB file using PDBFixer.
+    """
+    Repair a PDB file with PDBFixer.
 
-    This function processes a PDB file to correct common issues like
-    missing residues, non-standard residues, missing atoms, and missing
-    hydrogens.
+    Rebuilds missing residues and atoms, substitutes non-standard residues
+    for their standard equivalents, and adds hydrogens.  Worth running on a
+    raw crystal structure; note that the substitution step is a silent
+    structural edit, so it is not something to apply to a structure that is
+    already equilibrated.
 
     Parameters
     ----------
     file_in : str
         Path to the input PDB file.
     file_out : str
-        Path to write the fixed PDB file.
+        Path to write the repaired PDB to.
     ph : float, optional
-        The pH to use when adding missing hydrogens. Default is 7.0.
+        pH the hydrogens are added at, which decides the protonation of
+        titratable residues. Default is 7.0.
     rm_heterogens : bool, optional
-        If True, remove heterogen atoms like water, ions, and ligands.
-        Default is True.
-
-    Returns
-    -------
-    None
+        Whether to drop water, ions and ligands. Default is True.
     """
     fixer = PDBFixer(filename=file_in)
     fixer.findMissingResidues()
@@ -878,22 +916,19 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
 
 def make_sdf(pdb_file, lig_name='LIG'):
     """
-    Converts a ligand from a PDB file to an SDF file.
+    Extract one ligand from a PDB file and write it to ``<lig_name>.sdf``.
 
-    This function reads a PDB file, extracts the ligand specified by its residue name,
-    and writes it to an SDF file. The ligand's atomic elements are guessed and added
-    to the topology before conversion.
+    Elements are guessed from the atom names, since a PDB written by some
+    tools carries no element column and MDAnalysis needs one to hand RDKit a
+    molecule.
 
     Parameters
     ----------
     pdb_file : str
         Path to the input PDB file.
     lig_name : str, optional
-        Residue name of the ligand to extract. Default is 'LIG'.
-
-    Returns
-    -------
-    None
+        Residue name of the ligand, which also names the output file.
+        Default is ``'LIG'``.
     """
     u = mda.Universe(pdb_file)
     elements = mda.topology.guessers.guess_types(u.atoms.names)
@@ -906,22 +941,18 @@ def make_sdf(pdb_file, lig_name='LIG'):
 
 def pdb_patcher(pdb_file, lig_name='LIG'):
     """
-    Modifies a PDB file to replace placeholder residue names and characters.
+    Repair the placeholder names a round-trip through OpenFF leaves behind.
 
-    This function reads a PDB file, replaces occurrences of the character 'x' with a space,
-    and changes the residue name 'UNK' to the specified ligand name. The modified PDB
-    content is then written back to the same file.
+    A ligand that has been through ``Molecule.to_topology()`` comes back
+    named ``UNK``, with ``x`` where the atom names should have padding, so
+    both are patched in place.
 
     Parameters
     ----------
     pdb_file : str
-        Path to the PDB file to be modified.
+        Path to the PDB file, rewritten in place.
     lig_name : str, optional
-        The new residue name to replace 'UNK'. Default is 'LIG'.
-
-    Returns
-    -------
-    None
+        Residue name to put in place of ``UNK``. Default is ``'LIG'``.
     """
     with open(pdb_file, 'r') as f:
         pdb_data = f.read()
@@ -951,10 +982,6 @@ def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
     patch : bool, optional
         If True, run :func:`pdb_patcher` on the output to fix residue names.
         Default is True.
-
-    Returns
-    -------
-    None
     """
     pdb = app.PDBFile(input_pdb)
     molecule = Molecule.from_file(f'{lig_name}.sdf')
@@ -983,10 +1010,6 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
         Path(s) to the input SDF file(s).
     output_filename : str, optional
         Path for the output PDB file. Default is ``'combined_output.pdb'``.
-
-    Returns
-    -------
-    None
     """
     if isinstance(input_files, str):
         input_files = [input_files]
@@ -1103,7 +1126,7 @@ def prepare_lig_system(input_pdb,
                        lig_names=None,
                        fix_receptor=False):
     """
-    Prepare a protein–ligand system from a raw PDB file.
+    Prepare a protein-ligand system from a raw PDB file.
 
     Removes water and (optionally) ions, relabels residues, identifies
     non-standard (ligand) residues, generates SDF files, optionally
@@ -1329,29 +1352,21 @@ def prepare_ligand_ff(standard_ff,
 
 def save_pdb_selection(input_pdb_path, atom_indices, output_pdb_path):
     """
-    Saves a subset of atoms from a PDB file to a new PDB file.
-
-    This function reads a PDB file, selects a subset of atoms based on their indices,
-    and writes the selected atoms to a new PDB file. Atoms not in the specified indices
-    are removed from the output.
+    Write out only the chosen atoms of a PDB file.
 
     Parameters
     ----------
     input_pdb_path : str
         Path to the input PDB file.
-    atom_indices : list of int
-        A list of atom indices to keep in the output PDB file.
+    atom_indices : iterable of int
+        0-based indices of the atoms to keep, as numbered in the input.
     output_pdb_path : str
-        Path to save the output PDB file containing the selected atoms.
-
-    Returns
-    -------
-    None
+        Path to write the selection to.
 
     Notes
     -----
-    - If the selection is empty, a warning is printed, and the output PDB file will be empty.
-    - The atom indices should correspond to the indices in the input PDB file.
+    A selection matching nothing is warned about rather than raised, and
+    produces an empty PDB.
     """
     pdb = app.PDBFile(input_pdb_path)
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -1382,11 +1397,6 @@ def remove_file_pattern(pattern: str):
     ----------
     pattern : str
         The glob pattern to match files (e.g., "*.txt" for all text files).
-
-    Returns
-    -------
-    None
-        This function does not return a value.
     """
     for path in glob.glob(pattern):
         try:
@@ -1403,11 +1413,6 @@ def remove_file(file_path: str):
     ----------
     file_path : str
         The path to the file to be removed.
-
-    Returns
-    -------
-    None
-        This function does not return a value.
     """
     try:
         os.remove(file_path)
@@ -1417,23 +1422,18 @@ def remove_file(file_path: str):
 
 def move_pdb_to_origin(input_pdb, output_filename):
     """
-    Moves the atomic positions in a PDB file to the origin.
-
-    This function reads a PDB file, calculates the geometric center (centroid)
-    of all atomic positions, shifts all positions so that the centroid is at
-    the origin, and writes the modified structure to a new PDB file.
+    Shift a structure so its centroid sits at the origin.
 
     Parameters
     ----------
     input_pdb : str
         Path to the input PDB file.
     output_filename : str
-        Path to the output PDB file where the modified structure will be saved.
+        Path to write the shifted structure to.
 
-    Returns
-    -------
-    None
-        The function writes the modified PDB structure to the specified output file.
+    See Also
+    --------
+    center_in_box : Centres in a periodic box rather than on the origin.
     """
     pdb = PDBFile(input_pdb)
     positions = pdb.getPositions(asNumpy=True)
@@ -1446,21 +1446,20 @@ def move_pdb_to_origin(input_pdb, output_filename):
 
 def center_in_box(modeller):
     """
-    Centers the atomic positions of a molecular system within the simulation box.
+    Shift a system so its centroid sits at the centre of its periodic box.
 
-    This function calculates the centroid of the atomic positions in the modeller object
-    and shifts the positions so that the centroid is at the center of the simulation box.
-    The box dimensions are determined from the modeller's topology.
+    A solute left near a box face interacts with its own periodic image, so
+    this is worth doing before solvating.  If the topology carries no box at
+    all the positions are left alone.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        The Modeller object containing the topology and positions of the molecular system.
+        Modeller whose positions are shifted in place.
 
-    Returns
-    -------
-    None
-        The function modifies the positions of the modeller object in place.
+    See Also
+    --------
+    move_pdb_to_origin : Centres on the origin rather than in a box.
     """
     pos_list = modeller.positions.value_in_unit(unit.nanometer)
 
@@ -1501,7 +1500,7 @@ def fix_pdb_chains(input_file, output_file):
 
     Reads the PDB line by line and replaces the chain-ID column so that
     every new residue receives the next available chain letter/digit
-    (A–Z, a–z, 0–9, cycling).
+    (A-Z, a-z, 0-9, cycling).
 
     Parameters
     ----------
@@ -1509,10 +1508,6 @@ def fix_pdb_chains(input_file, output_file):
         Path to the input PDB file.
     output_file : str
         Path to the output PDB file with corrected chain IDs.
-
-    Returns
-    -------
-    None
     """
     chain_chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
     current_residue = None
@@ -1544,10 +1539,6 @@ def fix_pdb_atom_labels(input_file, output_file):
         Path to the input PDB file.
     output_file : str
         Path to the output PDB file with corrected atom labels.
-
-    Returns
-    -------
-    None
     """
     current_residue = None
     element_counts = {}
@@ -1751,28 +1742,33 @@ def convert_pdb_to_xyz(input_file: str, output_file: str, comment: str | None = 
 
 def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HETATM'):
     """
-    Converts a multi-frame XYZ trajectory to a PLUMED-compatible multi-model PDB file using a template PDB.
+    Convert a reaction path from XYZ into the reference PLUMED's PATHMSD reads.
 
-    This function reads a template PDB file and a multi-frame XYZ file, then writes a new PDB file
-    where each frame from the XYZ is inserted as a model, using the atom records from the template.
-    The coordinates in each model are replaced with those from the corresponding XYZ frame.
-    Terminal entries (TER) are preserved in their original locations.
-    The output is formatted for use as a reference structure in PLUMED metadynamics simulations.
+    Each XYZ frame becomes one model of a multi-model PDB, written by taking
+    the template's atom records and substituting the frame's coordinates into
+    the columns that hold them.  Going through a template rather than writing
+    fresh records is what keeps the atom names, residues and numbering
+    identical to the structure the simulation will be aligned against; PLUMED
+    matches the two by atom serial, and any disagreement is fatal.  Both files
+    are renumbered on the way out to guarantee that.
 
     Parameters
     ----------
     xyz_file : str
-        Path to the input XYZ file containing one or more frames.
+        Path to the input XYZ file, holding one frame per path image.
     template_pdb : str
-        Path to the template PDB file whose atom records will be used as a base.
+        Path to the template PDB, normally the ``index_atoms.pdb`` written by
+        :func:`save_only_index_atoms`. Renumbered in place.
     output_file : str
-        Path to the output PDB file to be written in multi-model format.
-    atom_line : str, tuple, optional
-        The record type to match in the template PDB (default: 'HETATM'). Can also be ('ATOM', 'HETATM').
+        Path to write the multi-model PDB to.
+    atom_line : str or tuple of str, optional
+        Record type the template's atoms are written under; only these lines
+        are carried into the output. Default is ``'HETATM'``, which is what
+        OpenMM writes for ligand-like residues.
 
-    Returns
-    -------
-    None
+    See Also
+    --------
+    openmmnqe.path.path_from_steered_md : Builds the path from steered MD.
     """
     with open(template_pdb, 'r') as f:
         template_lines = [line for line in f if line.startswith(atom_line) or line.startswith('TER')]
@@ -1819,25 +1815,23 @@ def convert_xyz_to_plumed_ref(xyz_file, template_pdb, output_file, atom_line='HE
 
 def save_only_index_atoms(modeller, idx_list, file_idx='index_atoms.pdb'):
     """
-    Saves only the atoms with specified indices from a Modeller object to a PDB file.
+    Write out only the chosen atoms of a Modeller.
 
-    This function creates a new Modeller object from the provided modeller's topology and positions,
-    selects atoms whose indices are in the given idx_list, deletes all other atoms, and writes the
-    resulting structure to a PDB file.
+    This is how the alignment template for a path collective variable is
+    made: the atoms written here are the ones ``FIT_TO_TEMPLATE`` and
+    ``PATHMSD`` see, and the file is what :func:`convert_xyz_to_plumed_ref`
+    and :func:`openmmnqe.path.path_from_steered_md` take their atom records
+    from. The input Modeller is left untouched.
 
     Parameters
     ----------
     modeller : openmm.app.Modeller
-        The Modeller object containing the molecular system.
-    idx_list : list of int
-        List of atom indices to retain in the output PDB file.
+        Modeller holding the full system.
+    idx_list : iterable of int
+        0-based indices of the atoms to keep.
     file_idx : str, optional
-        Filename for the output PDB file. Default is 'index_atoms.pdb'.
-
-    Returns
-    -------
-    None
-        The function writes the selected atoms to the specified PDB file.
+        Path to write to. Default is ``'index_atoms.pdb'``, which is the
+        name the PLUMED inputs in :mod:`openmmnqe.plumed` reference.
     """
     modeller_new = app.Modeller(modeller.topology, modeller.positions)
     atoms_to_keep = [atom for atom in modeller_new.topology.atoms() if atom.index in idx_list]
@@ -1848,42 +1842,35 @@ def save_only_index_atoms(modeller, idx_list, file_idx='index_atoms.pdb'):
 
 def pdb_remove_ter_index(input_path, output_path):
     """
-    Renumber atom serial indices in a PDB file and normalize TER/CONECT records.
+    Renumber the atom serials of a PDB file, keeping TER and CONECT in step.
 
-    This function reads a PDB-like file, rewrites atom serial numbers sequentially,
-    and updates `CONECT` records to remain consistent with the new numbering. It also:
-    - resets numbering at each new model marker (`MODEL` or `REMARK NUMBER=`),
-    - updates any `TER` record to share the serial index of the following atom,
-    - preserves all non-target lines unchanged.
+    Atoms are renumbered sequentially from 1, restarting at each model, and
+    ``CONECT`` records are rewritten to point at the new serials.  PLUMED
+    insists that a reference and its template agree on numbering, which an
+    edited PDB usually does not, so both are put through this before being
+    handed over.  Records other than these are copied out unchanged.
 
     Parameters
     ----------
     input_path : str
         Path to the input PDB file.
     output_path : str
-        Path to write the cleaned/reindexed PDB file.
-
-    Returns
-    -------
-    None
-        The processed content is written to `output_path`.
+        Path to write the renumbered PDB to. May be the input path.
     """
     with open(input_path, 'r') as f:
         lines = f.readlines()
 
     clean_lines = []
     atom_serial = 1
-    # Maps old atom serials (as strings) to new right-aligned 5-char serial fields.
+    # Old serial (as written) -> new right-aligned 5-character serial field
     index_map = {}
 
     for line in lines:
         if line.startswith(("MODEL", "REMARK NUMBER=")):
-            # Start a fresh atom numbering sequence for each model.
             atom_serial = 1
             clean_lines.append(line)
 
         elif line.startswith(("ATOM  ", "HETATM")):
-            # Reindex ATOM/HETATM serial field (columns 7-11 in PDB format).
             old_serial = line[6:11].strip()
             index_map.setdefault(old_serial, f"{atom_serial:>5}")
             new_line = line[:6] + f"{atom_serial:5d}" + line[11:]
@@ -1891,18 +1878,15 @@ def pdb_remove_ter_index(input_path, output_path):
             atom_serial += 1
 
         elif line.startswith("TER"):
-            # Preserve the TER line and update its serial number (columns 7-11).
-            # We explicitly do NOT increment `atom_serial` so the next ATOM
-            # line receives this exact same index.
+            # A TER shares the serial of the atom that follows it, so this
+            # deliberately does not advance the counter.
             if len(line) >= 11:
                 new_line = line[:6] + f"{atom_serial:5d}" + line[11:]
             else:
-                # Fallback just in case the TER line is truncated
                 new_line = f"{line.strip():<6}{atom_serial:5d}\n"
             clean_lines.append(new_line)
 
         elif line.startswith("CONECT"):
-            # Rewrite CONECT atom references using the reindex map.
             new_conect = line[:6]
             for i in range(6, len(line.strip()), 5):
                 old_idx = line[i:i + 5].strip()
@@ -1910,7 +1894,6 @@ def pdb_remove_ter_index(input_path, output_path):
             clean_lines.append(new_conect.rstrip() + "\n")
 
         else:
-            # Preserve unrelated records (e.g., REMARK, END, CRYST1).
             clean_lines.append(line)
 
     with open(output_path, 'w') as f:
@@ -1931,10 +1914,6 @@ def strip_hydrogens_keep_indices(input_pdb, output_pdb, keep=None):
         0-based atom indices (matching PDB serial number minus one) of
         hydrogens to retain even though they would otherwise be stripped.
         If None, all hydrogens are removed. Default is None.
-
-    Returns
-    -------
-    None
     """
     if keep is None:
         keep = set()

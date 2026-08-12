@@ -1,3 +1,36 @@
+"""Builders for the PLUMED inputs that drive the enhanced-sampling stages.
+
+A proton transfer will not happen on its own inside an MD run: the barrier is
+several times kBT and the event is rare enough that unbiased sampling never
+sees it.  Every builder here writes a PLUMED script that biases the system
+along a collective variable so that it does, and returns alongside it the
+shell command that turns the resulting bias back into a free-energy surface --
+``plumed sum_hills`` for well-tempered metadynamics, or the bundled
+:mod:`openmmnqe.opes` scripts when ``OPES_METAD`` is used instead.  Pass the
+script to a ``run_openmm_*`` driver in :mod:`openmmnqe.openmm`, and the surface
+it produces to :func:`reactiontools.plot_plumed_fes`.
+
+The builders fall into three families:
+
+* **Coordination difference** -- :func:`plumed_input_1pt`,
+  :func:`plumed_input_2pt_1d` and :func:`plumed_input_2pt_2d` bias one or two
+  proton transfers directly, the CV running from +1 at the donor to -1 at the
+  acceptor.
+* **Wobble base pair** -- :func:`plumed_input_wob_1` through
+  :func:`plumed_input_wob_4` extend that to the hydrogen-bond network of a
+  mispaired base, where the transfer competes with the pair sliding open.
+* **Path** -- :func:`plumed_input_neb_path` and
+  :func:`plumed_input_neb_path_wob` bias progress along a reference path
+  instead, which is the option that copes when the reaction is not well
+  described by any one geometric coordinate.
+
+:func:`plumed_input_steered` stands apart: it drags a CV rather than biasing
+it, and exists to generate the reference path the last family needs (see
+:mod:`openmmnqe.path`).
+
+Distances in these scripts are in nanometres and energies in kJ/mol, since
+that is what PLUMED uses when driven from OpenMM.
+"""
 import os
 
 import mdtraj as md
@@ -23,22 +56,28 @@ def _metad_and_sumhills(f_opes, arg, pace, height, sigma, bias, temperature_str,
         ``plumed sum_hills``.
     arg : str
         The PLUMED ``ARG=`` value the bias acts on.
-    pace, height, sigma, bias
-        Values interpolated into the bias line. For multi-dimensional biases
-        pass pre-joined strings (e.g. ``f'{sigma},{sigma}'``).
-    temperature_str, kt_str
-        Temperature in kelvin and the kBT string for the FES command.
-    grid_bin
-        Grid bin count (pre-joined string for multi-dimensional biases).
-    grid_min, grid_max : optional
-        Grid bounds; omitted from both commands when None.
+    pace, height, sigma, bias : int or float or str
+        Values interpolated into the bias line. For a multi-dimensional bias
+        pass pre-joined strings, e.g. ``f'{sigma},{sigma}'``.
+    temperature_str : float
+        Temperature in kelvin.
+    kt_str : float
+        kBT in kJ/mol, for the ``--kt`` of the FES command.
+    grid_bin : int or str
+        Grid bin count, pre-joined for a multi-dimensional bias.
+    grid_min, grid_max : float or str or None, optional
+        Grid bounds. When None the grid is left out of both commands, and
+        PLUMED sizes it itself. Default is None.
     label : str, optional
-        Prefix of the bias line (label plus alignment spacing).
+        Prefix of the bias line, being the label plus enough spaces to keep
+        the script's columns aligned. Default is ``'metad:      '``.
 
     Returns
     -------
-    tuple of (str, str)
-        The ``metad_line`` and ``sum_hills_input`` strings.
+    metad_line : str
+        The PLUMED bias line.
+    sum_hills_input : str
+        Shell command reconstructing the free-energy surface from it.
     """
     fes_grid = f' --min {grid_min} --max {grid_max}' if grid_min is not None else ''
     if f_opes:
@@ -60,38 +99,33 @@ def _metad_and_sumhills(f_opes, arg, pace, height, sigma, bias, temperature_str,
 
 def estimate_path_lambda(pdb_path: str) -> float:
     """
-    Estimate the optimal LAMBDA parameter for PLUMED's PATH collective variable
-    based on the mean squared displacement (MSD) between consecutive frames in a
-    path (trajectory) provided as a PDB file.
+    Estimate the LAMBDA a reference path should be given in ``PATHMSD``.
 
-    This function loads a multi-frame PDB file, aligns all frames to the first frame,
-    computes the MSD between each pair of consecutive frames, and suggests a LAMBDA
-    value for use in PLUMED path-based collective variables. It also prints a summary
-    of the path statistics and warnings if the path is unevenly spaced or if the
-    recommended LAMBDA is unusually high.
+    ``LAMBDA`` sets how sharply ``path.sss`` tells neighbouring frames apart.
+    Too small and the whole path reads as one blurred position; too large and
+    the CV jumps between frames instead of moving smoothly along them.  The
+    recommendation is the usual rule of thumb, ``2.3 / avg_msd``, which puts
+    the crossover between consecutive frames at roughly one unit of the
+    exponent.  A summary of the path and any warnings are printed as it goes.
 
     Parameters
     ----------
     pdb_path : str
-        Path to the multi-frame PDB file representing the path.
+        Multi-frame PDB holding the path, as written by
+        :func:`openmmnqe.io.convert_xyz_to_plumed_ref` or
+        :func:`openmmnqe.path.path_from_steered_md`.
 
     Returns
     -------
     float
-        The recommended LAMBDA value for PLUMED.
-
-    Prints
-    ------
-    - Number of frames in the path
-    - Average and maximum MSD between frames (in nm^2)
-    - Recommended LAMBDA value for PLUMED
-    - Warnings if frames are unevenly spaced or if LAMBDA is very high
+        Recommended ``LAMBDA``, to pass to the ``plumed_input_neb_path*``
+        builders.
 
     Notes
     -----
-    - The function assumes the input PDB contains multiple frames (e.g., a NEB path).
-    - The MSD is multiplied by 100 to convert from nm^2 to Å^2 before use in the LAMBDA calculation.
-    - A typical path should have 15 to 30 frames for best results.
+    A path of 15 to 30 frames behaves best. Fewer and consecutive frames are
+    too far apart for the CV to interpolate between; more and ``PATHMSD``
+    spends its time on frames that add nothing.
     """
     traj = md.load(pdb_path)
     traj.superpose(traj[0])
@@ -166,10 +200,9 @@ def plumed_input_steered(cv_block,
                          colvar_file='COLVAR_SMD',
                          extra_lines=None):
     """
-    Build a PLUMED input that drags a collective variable from one value to
-    another with a moving harmonic restraint (steered MD).
+    Build a PLUMED input that drags a collective variable (steered MD).
 
-    The restraint centre is moved linearly from *cv_start* to *cv_stop* over
+    The centre of a harmonic restraint is moved linearly from *cv_start* to *cv_stop* over
     *steps* MD steps, optionally after holding at the starting value for
     *steps_equil* steps and before holding at the final value for
     *steps_relax* steps. The trajectory this produces is a first guess at the
@@ -432,8 +465,7 @@ def plumed_input_1pt(modeller,
         bias written by *plumed_input*: ``plumed sum_hills``, or the bundled
         OPES ``FES_from_State.py`` when *f_opes* is True.
     """
-    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
-    # here rather than carried as Quantities into the input string.
+    # Stripped to bare nm here; the script has nowhere to put a unit.
     r_01 = distance_between_atoms(modeller, idx[0], idx[1]).value_in_unit(unit.nanometer)
     r_21 = distance_between_atoms(modeller, idx[2], idx[1]).value_in_unit(unit.nanometer)
     r_02 = distance_between_atoms(modeller, idx[0], idx[2]).value_in_unit(unit.nanometer)
@@ -547,8 +579,7 @@ def plumed_input_2pt_1d(modeller,
         Shell command that reconstructs the free-energy surface from the
         bias written by *plumed_input*.
     """
-    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
-    # here rather than carried as Quantities into the input string.
+    # Stripped to bare nm here; the script has nowhere to put a unit.
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1]).value_in_unit(unit.nanometer)
     r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1]).value_in_unit(unit.nanometer)
     r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2]).value_in_unit(unit.nanometer)
@@ -683,8 +714,7 @@ def plumed_input_2pt_2d(modeller,
         Shell command that reconstructs the free-energy surface from the
         bias written by *plumed_input*.
     """
-    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
-    # here rather than carried as Quantities into the input string.
+    # Stripped to bare nm here; the script has nowhere to put a unit.
     r1_01 = distance_between_atoms(modeller, idx1[0], idx1[1]).value_in_unit(unit.nanometer)
     r1_21 = distance_between_atoms(modeller, idx1[2], idx1[1]).value_in_unit(unit.nanometer)
     r1_02 = distance_between_atoms(modeller, idx1[0], idx1[2]).value_in_unit(unit.nanometer)
@@ -904,8 +934,7 @@ def plumed_input_wob_2(modeller,
     """
     idx_n3, idx_h3, idx_o6, idx_o4, idx_n1, idx_h1, idx_o2, idx_n2 = idx
 
-    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
-    # here rather than carried as Quantities into the input string.
+    # Stripped to bare nm here; the script has nowhere to put a unit.
     def _d(a, b):
         return distance_between_atoms(modeller, a, b).value_in_unit(unit.nanometer)
 
@@ -1063,8 +1092,7 @@ def plumed_input_wob_3(modeller,
         Shell command (``plumed sum_hills``) that reconstructs the
         free-energy surface from the bias written by *plumed_input*.
     """
-    # PLUMED, driven from OpenMM, works in nm, so the distances are converted
-    # here rather than carried as Quantities into the input string.
+    # Stripped to bare nm here; the script has nowhere to put a unit.
     d_nr = distance_between_atoms(modeller, idx_nr1[0], idx_nr2[0]).value_in_unit(unit.nanometer)
     wall_u = np.round(d_nr * wall, decimals=2)
     wall_l = np.round(d_nr * (2.0 - wall), decimals=2)

@@ -1,3 +1,32 @@
+"""The OpenMM simulation stages, from minimisation through to production.
+
+Each ``run_openmm_*`` function is one stage of a workflow, and they are meant
+to be run in order, each picking up where the last left off:
+
+1. :func:`run_openmm_relaxation` or :func:`run_openmm_relaxation_simple` --
+   take the strain out of the starting structure,
+2. :func:`run_openmm_heating` -- warm it to temperature under restraints,
+3. :func:`run_openmm_npt` -- relax the box density,
+4. :func:`run_openmm_prod` -- classical production, optionally biased,
+5. :func:`run_openmm_rpmd_equilibration` then
+   :func:`run_openmm_rpmd_prod` or :func:`run_openmm_rpmd_contracted`, or
+   :func:`run_openmm_adqtb_eq` then :func:`run_openmm_adqtb_prod` -- the two
+   routes to nuclear quantum effects.
+
+Ring-polymer MD is the reference method and converges to the exact quantum
+statistics with enough beads, but costs a force evaluation per bead;
+the adaptive quantum thermal bath costs no more than a classical run but is
+an approximation. :func:`run_openmm_steered` sits outside the sequence and
+pulls a collective variable to generate a reference path (see
+:mod:`openmmnqe.path`).
+
+Every stage takes the same shape: build the system, optionally deuterate it,
+attach a PLUMED bias and the reporters, run, then save a checkpoint and a
+structure for the next stage to start from. The shared arguments behave the
+same throughout -- *potential* with *ml_idx* runs an ML/MM mixed system and
+forces the CUDA platform, *plumed_script_path* attaches a bias, and
+*output_prefix* names every file the stage writes.
+"""
 import os
 import sys
 
@@ -49,7 +78,10 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
 
     Returns
     -------
-    tuple of (openmm.System, openmm.Platform)
+    system : openmm.System
+        The parameterised system.
+    platform : openmm.Platform
+        The platform to run it on.
 
     Raises
     ------
@@ -248,7 +280,7 @@ def run_openmm_relaxation(modeller,
                           calculator=None,
                           ):
     """
-    Perform a staged energy minimisation with progressively weaker backbone restraints.
+    Minimise in stages, easing the backbone restraints as it goes.
 
     Three successive minimisation stages are executed with decreasing restraint
     spring constants on backbone atoms, allowing the structure to relax gently.
@@ -278,11 +310,11 @@ def run_openmm_relaxation(modeller,
         Atom names considered backbone for restraints. If None, defaults to
         ``['CA', 'C', 'N', 'P', 'O3']``.
     ks_1 : float, optional
-        Spring constant for stage 1 in kJ/mol/nm². Default is 100.0.
+        Spring constant for stage 1 in kJ/mol/nm^2. Default is 100.0.
     ks_2 : float, optional
-        Spring constant for stage 2 in kJ/mol/nm². Default is 10.0.
+        Spring constant for stage 2 in kJ/mol/nm^2. Default is 10.0.
     ks_3 : float, optional
-        Spring constant for stage 3 in kJ/mol/nm². Default is 0.0.
+        Spring constant for stage 3 in kJ/mol/nm^2. Default is 0.0.
     platform_name : str or None, optional
         OpenMM platform name. Default is None, which auto-detects via
         ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
@@ -293,10 +325,6 @@ def run_openmm_relaxation(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
-
-    Returns
-    -------
-    None
     """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
@@ -387,10 +415,6 @@ def run_openmm_relaxation_simple(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
-
-    Returns
-    -------
-    None
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -429,7 +453,7 @@ def run_openmm_heating(modeller,
                        calculator=None,
                        ):
     """
-    Gently heat a system from 0 K to the target temperature with backbone restraints.
+    Heat a system from 0 K to temperature, under backbone restraints.
 
     The temperature is incremented in steps of ``temp_step`` until
     ``target_temp`` is reached, followed by a final equilibration stage at the
@@ -444,7 +468,7 @@ def run_openmm_heating(modeller,
     output_prefix : str, optional
         Prefix for output files. Default is ``'equilibrate'``.
     k1 : float, optional
-        Backbone restraint spring constant in kJ/mol/nm². Default is 100.0.
+        Backbone restraint spring constant in kJ/mol/nm^2. Default is 100.0.
     backbone_names : list of str or None, optional
         Atom names considered backbone for restraints. If None, defaults to
         ``['CA', 'C', 'N', 'P', 'O3']``.
@@ -478,10 +502,6 @@ def run_openmm_heating(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
-
-    Returns
-    -------
-    None
     """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
@@ -589,7 +609,7 @@ def run_openmm_npt(modeller,
         Atom names considered backbone for restraints. If None, defaults to
         ``['CA', 'C', 'N', 'P', 'O3']``.
     k : float, optional
-        Backbone restraint spring constant in kJ/mol/nm². Default is 10.0.
+        Backbone restraint spring constant in kJ/mol/nm^2. Default is 10.0.
     n_report : int, optional
         Reporter interval in steps. Default is 500.
     n_1 : int, optional
@@ -610,10 +630,6 @@ def run_openmm_npt(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
-
-    Returns
-    -------
-    None
     """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
@@ -726,10 +742,6 @@ def run_openmm_prod(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
-
-    Returns
-    -------
-    None
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -927,10 +939,6 @@ def run_openmm_rpmd_equilibration(modeller,
         Optional calculator object to pass to the ML potential. Default is None.
     atoms_to_watch : list of int or None, optional
         Atom indices for quantum spread monitoring. Default is None.
-
-    Returns
-    -------
-    None
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -1038,14 +1046,10 @@ def run_openmm_rpmd_contracted(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
-    calculator : object or None, optional
-        Optional calculator object to pass to the ML potential. Default is None.
     atoms_to_watch : list of int or None, optional
         Atom indices for quantum spread monitoring. Default is None.
-
-    Returns
-    -------
-    None
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Raises
     ------
@@ -1058,13 +1062,12 @@ def run_openmm_rpmd_contracted(modeller,
                                      potential, ml_idx, calculator)
 
     if contractions is None:
-        # Note: NumCopies must be a divisor of num_beads (32).
-        # Valid divisors for 32: 1, 2, 4, 8, 16, 32.
+        # Each copy count must divide n_beads. Groups left out of the dict --
+        # here group 0, the cheap bonded forces -- run on every bead.
         contractions = {
-            1: 8,  # Nonbonded Direct Space (calculate on every 4th bead)
-            2: 1  # PME Reciprocal Space (calculate only on centroid)
+            1: 8,  # nonbonded direct space
+            2: 1  # PME reciprocal space, on the centroid alone
         }
-        # Group 0 is not in the dict, so it defaults to num_beads (32)
 
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
@@ -1073,17 +1076,15 @@ def run_openmm_rpmd_contracted(modeller,
 
     _load_plumed(system, plumed_script_path)
 
-    # We must assign specific forces to specific integer groups (0-31).
-    # Group 0: Bonded Forces (Cheap) -> 32 copies (Implicit default)
-    # Group 1: Nonbonded Direct Space (Expensive) -> 8 copies
-    # Group 2: PME Reciprocal Space (Very Expensive) -> 1 copy
-
+    # Contraction is keyed on force group, so the forces have to be sorted into
+    # the groups `contractions` names: the costlier the force, the fewer beads
+    # it should be evaluated on.
     print("Assigning force groups for contraction...", flush=True)
 
     for force in system.getForces():
         if isinstance(force, openmm.NonbondedForce):
-            # NonbondedForce handles both VdW+Coulomb (direct space) and PME
-            # (reciprocal space), so its two parts are split across groups.
+            # One force object covering two costs, so its direct and reciprocal
+            # halves are split across groups and contracted separately.
             force.setForceGroup(1)
             force.setReciprocalSpaceForceGroup(2)
             print(f"  - {force.__class__.__name__}: Direct->Group 1, Reciprocal->Group 2")
@@ -1189,14 +1190,10 @@ def run_openmm_rpmd_prod(modeller,
         ML potential object with a ``createMixedSystem`` method. Default is None.
     ml_idx : list of int or None, optional
         Atom indices for the ML region. Default is None.
-    calculator : object or None, optional
-        Optional calculator object to pass to the ML potential. Default is None.
     atoms_to_watch : list of int or None, optional
         Atom indices for quantum spread monitoring. Default is None.
-
-    Returns
-    -------
-    None
+    calculator : object or None, optional
+        Optional calculator object to pass to the ML potential. Default is None.
 
     Raises
     ------
@@ -1292,10 +1289,6 @@ def run_openmm_adqtb_eq(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
-
-    Returns
-    -------
-    None
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -1389,10 +1382,6 @@ def run_openmm_adqtb_prod(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
-
-    Returns
-    -------
-    None
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
