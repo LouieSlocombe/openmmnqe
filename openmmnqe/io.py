@@ -1487,21 +1487,14 @@ def center_in_box(modeller):
                             getattr(p, 'z', p[2])] for p in pos_list], dtype=float)
 
     centroid = pos_nm.mean(axis=0)
-    box_vec = None
-
-    if hasattr(modeller.topology, 'getUnitCellDimensions'):
-        dims = modeller.topology.getUnitCellDimensions()
-        if dims is not None:
-            box_vec = np.array([dims.x, dims.y, dims.z])
-
-    # Fall back to the periodic box vectors if unit cell dimensions aren't set.
-    if box_vec is None and hasattr(modeller.topology, 'getPeriodicBoxVectors'):
+    box_center = None
+    if hasattr(modeller.topology, 'getPeriodicBoxVectors'):
         vecs = modeller.topology.getPeriodicBoxVectors()
         if vecs is not None:
-            box_vec = np.array([vecs[0].x, vecs[1].y, vecs[2].z])
+            box_vectors = np.asarray(vecs.value_in_unit(unit.nanometer), dtype=float)
+            box_center = np.sum(box_vectors, axis=0) / 2.0
 
-    if box_vec is not None:
-        box_center = box_vec / 2.0
+    if box_center is not None:
         shift = box_center - centroid
         new_pos = pos_nm + shift
         modeller.positions = unit.Quantity(new_pos, unit.nanometer)
@@ -1528,7 +1521,7 @@ def fix_pdb_chains(input_file, output_file):
     with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
         for line in infile:
             if line.startswith(("ATOM  ", "HETATM")):
-                res_id = line[22:27]
+                res_id = (line[21], line[22:27])
                 if res_id != current_residue:
                     current_residue = res_id
                     chain_index += 1

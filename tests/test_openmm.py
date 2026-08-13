@@ -553,6 +553,19 @@ def test_fix_pdb_chains():
     os.remove('fixed.pdb')
 
 
+def test_fix_pdb_chains_distinguishes_equal_ids_in_source_chains(tmp_path):
+    output = tmp_path / "fixed.pdb"
+    nqe.fix_pdb_chains("tests/data/pdb/gc.pdb", str(output))
+
+    chains_by_residue = {}
+    with open(output) as handle:
+        for line in handle:
+            if line.startswith(("ATOM  ", "HETATM")):
+                chains_by_residue.setdefault(line[17:20].strip(), set()).add(line[21])
+
+    assert chains_by_residue["GGG"] != chains_by_residue["CCC"]
+
+
 def test_fix_pdb_atom_labels():
     print(flush=True)
     input_pdb = 'tests/data/pdb/malformed.pdb'
@@ -661,6 +674,27 @@ def test_center_in_box():
     centroid = np.mean(centered_positions, axis=0)
     box_center = np.array([5.0, 5.0, 5.0])  # Half of box dimensions
     assert np.allclose(centroid, box_center, atol=1e-6), f"Centroid {centroid} not at box center {box_center}"
+
+
+def test_center_in_box_uses_triclinic_vector_sum():
+    topology = app.Topology()
+    chain = topology.addChain()
+    residue = topology.addResidue("RES", chain)
+    topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
+    box_vectors = (
+        Vec3(2.0, 0.0, 0.0),
+        Vec3(0.5, 2.0, 0.0),
+        Vec3(0.2, 0.3, 2.0),
+    ) * unit.nanometer
+    topology.setPeriodicBoxVectors(box_vectors)
+    modeller = app.Modeller(
+        topology, [Vec3(0.0, 0.0, 0.0)] * unit.nanometer
+    )
+
+    nqe.center_in_box(modeller)
+
+    centered = modeller.positions.value_in_unit(unit.nanometer)
+    assert np.allclose(centered[0], [1.35, 1.15, 1.0])
 
 
 def test_temperature_to_kbt():

@@ -15,6 +15,8 @@ import openmm.unit as unit
 
 from openmm import app
 
+from .tools import centroid_positions
+
 
 def _calculate_quantum_spread(integrator, atom_indices=None):
     """
@@ -289,24 +291,11 @@ class RPMDCentroidReporter(object):
         state : openmm.State
             Unused; the bead positions come from the RPMD integrator.
         """
-        integrator = simulation.integrator
-
-        ref_state = integrator.getState(0, getPositions=True, enforcePeriodicBox=True)
-        ref = ref_state.getPositions(asNumpy=True).value_in_unit(unit.nanometers)
-        box = ref_state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(unit.nanometers)
-
-        sum_pos = ref.copy()
-        for i in range(1, self._num_beads):
-            pos = integrator.getState(i, getPositions=True, enforcePeriodicBox=True) \
-                .getPositions(asNumpy=True).value_in_unit(unit.nanometers)
-            disp = pos - ref
-            # Minimum image in OpenMM's reduced box form: remove whole box
-            # vectors from the displacement, c then b then a.
-            for k in (2, 1, 0):
-                disp -= box[k] * np.round(disp[:, k:k + 1] / box[k][k])
-            sum_pos += ref + disp
-
-        centroid_pos = (sum_pos / self._num_beads) * unit.nanometers
+        centroid_pos = centroid_positions(
+            simulation,
+            self._topology.getNumAtoms(),
+            self._num_beads,
+        )
 
         app.PDBFile.writeModel(self._topology, centroid_pos, self._out, self._next_frame_index)
         self._next_frame_index += 1

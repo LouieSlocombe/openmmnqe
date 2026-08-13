@@ -280,7 +280,7 @@ if dim2:
     if period_y == grid_cv_y[-1] - grid_cv_y[0]:  # first and last are the same if periodic
         grid_cv_y = grid_cv_y[:-1]
         grid_bin_y -= 1
-    x, y = np.meshgrid(grid_cv_x, grid_cv_y)
+    x, y = np.meshgrid(grid_cv_x, grid_cv_y, indexing='ij')
     fes = np.zeros((grid_bin_x, grid_bin_y))
     if calc_der:
         der_fes_x = np.zeros((grid_bin_x, grid_bin_y))

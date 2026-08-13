@@ -77,17 +77,42 @@ def centroid_positions(simulation, n_atoms, n_beads):
 
     Notes
     -----
-    The beads are averaged as they come, without unwrapping across periodic
-    boundaries; :class:`openmmnqe.reporters.RPMDCentroidReporter` explains
-    when that distinction matters.
+    For periodic systems, each bead is wrapped and then unwrapped relative to
+    bead 0 with the minimum-image convention before averaging. This prevents
+    beads on opposite sides of a box face from producing a centroid near the
+    middle of the box.
     """
-    acc = np.zeros((n_atoms, 3), dtype=float)
-    for b in range(n_beads):
-        state = simulation.integrator.getState(b, getPositions=True)
-        r = state.getPositions(asNumpy=True)
-        acc += r.value_in_unit(unit.nanometer)
-    acc /= n_beads
-    return [openmm.Vec3(*acc[i]) for i in range(n_atoms)] * unit.nanometer
+    integrator = simulation.integrator
+    periodic = simulation.system.usesPeriodicBoundaryConditions()
+
+    ref_state = integrator.getState(
+        0, getPositions=True, enforcePeriodicBox=periodic
+    )
+    ref = ref_state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    sum_pos = ref.copy()
+
+    if periodic:
+        box = ref_state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(
+            unit.nanometer
+        )
+
+    for bead in range(1, n_beads):
+        pos = integrator.getState(
+            bead, getPositions=True, enforcePeriodicBox=periodic
+        ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+        if periodic:
+            disp = pos - ref
+            # OpenMM box vectors are in reduced form. Remove whole c, b, then
+            # a vectors to obtain the minimum image of each displacement.
+            for axis in (2, 1, 0):
+                disp -= box[axis] * np.round(
+                    disp[:, axis:axis + 1] / box[axis][axis]
+                )
+            pos = ref + disp
+        sum_pos += pos
+
+    centroid = sum_pos / n_beads
+    return [openmm.Vec3(*centroid[i]) for i in range(n_atoms)] * unit.nanometer
 
 
 def get_thermal_de_broglie_wavelength(mass, temperature):
