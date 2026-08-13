@@ -1331,6 +1331,7 @@ def run_openmm_adqtb_prod(modeller,
                           potential=None,
                           ml_idx=None,
                           calculator=None,
+                          checkpoint_file='adqtb_ready.chk',
                           ):
     """
     Run an adaptive quantum thermal bath (adQTB) production simulation.
@@ -1382,6 +1383,15 @@ def run_openmm_adqtb_prod(modeller,
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    checkpoint_file : str, optional
+        Path to the adQTB equilibration checkpoint. The checkpoint contains
+        the adapted friction spectrum as well as coordinates and velocities.
+        Default is ``'adqtb_ready.chk'``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *checkpoint_file* does not exist.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -1398,8 +1408,7 @@ def run_openmm_adqtb_prod(modeller,
     integrator.setDefaultAdaptationRate(adaptation_rate)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    simulation.context.setPositions(modeller.positions)
-    simulation.context.setVelocitiesToTemperature(temperature)
+    _load_checkpoint(simulation, checkpoint_file)
 
     _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
                             checkpoint_interval=n_report * 10)

@@ -916,11 +916,12 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
 
 def make_sdf(pdb_file, lig_name='LIG'):
     """
-    Extract one ligand from a PDB file and write it to ``<lig_name>.sdf``.
+    Extract ligand residues from a PDB file into ``<lig_name>.sdf``.
 
     Elements are guessed from the atom names, since a PDB written by some
     tools carries no element column and MDAnalysis needs one to hand RDKit a
-    molecule.
+    molecule. Each residue is written as a separate SDF record so repeated
+    copies of the same ligand do not become one disconnected molecule.
 
     Parameters
     ----------
@@ -933,9 +934,14 @@ def make_sdf(pdb_file, lig_name='LIG'):
     u = mda.Universe(pdb_file)
     elements = mda.topology.guessers.guess_types(u.atoms.names)
     u.add_TopologyAttr('elements', elements)
-    lig = u.select_atoms(f"resname {lig_name}")
-    mol = lig.convert_to("RDKIT")
-    Chem.MolToMolFile(mol, f"{lig_name}.sdf", kekulize=False)
+    residues = u.select_atoms(f"resname {lig_name}").residues
+    if len(residues) == 0:
+        raise ValueError(f"No residues named {lig_name!r} found in {pdb_file}")
+
+    with Chem.SDWriter(f"{lig_name}.sdf") as writer:
+        writer.SetKekulize(False)
+        for residue in residues:
+            writer.write(residue.atoms.convert_to("RDKIT"))
     return None
 
 
@@ -984,12 +990,16 @@ def combine_sdf_pdb(input_pdb, lig_name='LIG', patch=True):
         Default is True.
     """
     pdb = app.PDBFile(input_pdb)
-    molecule = Molecule.from_file(f'{lig_name}.sdf')
-    ligand_ff_topology = molecule.to_topology()
-    ligand_omm_topology = ligand_ff_topology.to_openmm()
-    ligand_positions = ligand_ff_topology.get_positions().to_openmm()
+    molecules = Molecule.from_file(f'{lig_name}.sdf')
+    if not isinstance(molecules, list):
+        molecules = [molecules]
+
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.add(ligand_omm_topology, ligand_positions)
+    for molecule in molecules:
+        ligand_ff_topology = molecule.to_topology()
+        ligand_omm_topology = ligand_ff_topology.to_openmm()
+        ligand_positions = ligand_ff_topology.get_positions().to_openmm()
+        modeller.add(ligand_omm_topology, ligand_positions)
     with open(input_pdb, 'w') as f:
         app.PDBFile.writeFile(modeller.topology, modeller.positions, f)
     if patch:
@@ -1210,9 +1220,15 @@ def prepare_lig_system(input_pdb,
         sdf_filename = f'{lig_name}.sdf'
         make_sdf(clean_pdb, lig_name=lig_name)
         generated_sdfs.append(sdf_filename)
-        mol = Molecule.from_file(sdf_filename)
-        mol.name = lig_name
-        molecules.append(mol)
+        ligand_molecules = Molecule.from_file(sdf_filename)
+        if not isinstance(ligand_molecules, list):
+            ligand_molecules = [ligand_molecules]
+
+        for mol in ligand_molecules:
+            mol.name = lig_name
+            if not any(Molecule.are_isomorphic(mol, known)[0]
+                       for known in molecules):
+                molecules.append(mol)
 
     pdb_temp = app.PDBFile(clean_pdb)
     residues = list(pdb_temp.topology.residues())
@@ -1247,9 +1263,6 @@ def prepare_lig_system(input_pdb,
         for sdf_file in generated_sdfs:
             if os.path.exists(sdf_file):
                 os.remove(sdf_file)
-
-    for mol, lig_name in zip(molecules, lig_names_list):
-        mol.name = lig_name
 
     if len(molecules) == 1:
         return pdb_data, molecules[0]

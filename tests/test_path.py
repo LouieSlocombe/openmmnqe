@@ -170,6 +170,17 @@ def test_plumed_input_steered_pt_reads_the_ends_off_the_geometry():
     assert at_values[-1] == pytest.approx(-at_values[0])
 
 
+def test_estimate_path_lambda_uses_square_nanometres(tmp_path):
+    path_file = tmp_path / "path.pdb"
+    fake_steered_traj(str(path_file), n_frames=2)
+
+    path = md.load(str(path_file))
+    path.superpose(path[0])
+    msd_nm2 = np.mean(np.sum((path.xyz[0] - path.xyz[1]) ** 2, axis=1))
+
+    assert nqe.estimate_path_lambda(str(path_file)) == pytest.approx(2.3 / msd_nm2)
+
+
 def test_path_from_steered_md_writes_a_pathmsd_reference(tmp_path):
     template = tmp_path / "index_atoms.pdb"
     shutil.copy(MALONALDEHYDE, template)

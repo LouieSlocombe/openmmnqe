@@ -1,6 +1,7 @@
 import json
 import os
 import warnings
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +11,7 @@ import pytest
 from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
 from mace.calculators.foundations_models import mace_off
+from openmm import Vec3
 from openmmml import MLPotential
 from scipy.stats import linregress
 
@@ -205,6 +207,38 @@ def test_prepare_ligand_ff_multiple():
 
     nqe.remove_file(cache_name)
     nqe.remove_file_pattern('minimized*')
+
+
+def test_prepare_lig_system_deduplicates_repeated_ligand_copies(tmp_path,
+                                                                monkeypatch):
+    source = Path("tests/data/pdb/toluene.pdb").resolve()
+    pdb = app.PDBFile(str(source))
+    receptor_topology = app.Topology()
+    receptor_chain = receptor_topology.addChain()
+    receptor_residue = receptor_topology.addResidue("ALA", receptor_chain)
+    receptor_topology.addAtom(
+        "CA", app.Element.getBySymbol("C"), receptor_residue
+    )
+    modeller = app.Modeller(
+        receptor_topology, [Vec3(-1.0, 0.0, 0.0)] * unit.nanometer
+    )
+    modeller.add(pdb.topology, pdb.positions)
+    shift = Vec3(1.0, 0.0, 0.0) * unit.nanometer
+    modeller.add(pdb.topology, [position + shift for position in pdb.positions])
+
+    repeated_pdb = tmp_path / "two_toluenes.pdb"
+    with open(repeated_pdb, "w") as handle:
+        app.PDBFile.writeFile(modeller.topology, modeller.positions, handle)
+
+    monkeypatch.chdir(tmp_path)
+    pdb_data, molecule = nqe.prepare_lig_system(str(repeated_pdb), lig_names="MBN")
+
+    assert not isinstance(molecule, list)
+    assert molecule.n_atoms == 15
+    residues = list(pdb_data.topology.residues())
+    assert [residue.name for residue in residues].count("MBN") == 2
+    assert len(residues) == 3
+    assert pdb_data.topology.getNumAtoms() == 31
 
 
 def test_ligand_already_in_force_field_warns():

@@ -131,7 +131,7 @@ def estimate_path_lambda(pdb_path: str) -> float:
     traj.superpose(traj[0])
 
     msds = [
-        np.mean(np.sum((traj.xyz[i] - traj.xyz[i + 1]) ** 2, axis=1)) * 100
+        np.mean(np.sum((traj.xyz[i] - traj.xyz[i + 1]) ** 2, axis=1))
         for i in range(len(traj) - 1)
     ]
     avg_msd = np.mean(msds)
