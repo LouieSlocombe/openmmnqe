@@ -801,5 +801,7 @@ def temperature_to_kbt(temperature):
     float
         kBT at that temperature, in kJ/mol.
     """
+    if not unit.is_quantity(temperature):
+        temperature = temperature * unit.kelvin
     kt = unit.MOLAR_GAS_CONSTANT_R * temperature
     return kt.value_in_unit(unit.kilojoule_per_mole)
