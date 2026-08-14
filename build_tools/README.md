@@ -112,4 +112,7 @@ Worked examples live in `examples/`: `gc.py` (guanine-cytosine) and `ma.py`
 The complete staged workflows (minimise → heat → NPT → production → RPMD → adQTB) for the
 G·T wobble systems live alongside that study in
 [NQE_GT_Wobble_Misincorporation](https://github.com/LouieSlocombe/NQE_GT_Wobble_Misincorporation),
-under `code/openmmnqe_examples/`.
+under `code/openmmnqe_examples/`. So do the collective variables they are biased along: the
+wobble-pair CVs encode one particular base pair, so they sit with the study in
+`code/openmmnqe_examples/gt_wobble/plumed_cvs.py` rather than in reactiontools, which keeps
+the builders any proton transfer can use and the public plumbing for writing your own.
