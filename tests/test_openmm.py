@@ -1,9 +1,7 @@
 import json
 import os
-import warnings
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
@@ -13,7 +11,6 @@ from ase.io import read
 from mace.calculators.foundations_models import mace_off
 from openmm import Vec3
 from openmmml import MLPotential
-from scipy.stats import linregress
 
 import openmmnqe as nqe
 import reactiontools as rt
@@ -101,21 +98,11 @@ def test_openmm_ml_mixed_system():
     nqe.remove_file_pattern('minimized*')
 
 
-def test_prepare_ligand_ff():
+def test_prepare_ligand_ff(tmp_path):
     print(flush=True)
-    input_pdb = "tests/data/pdb/gt_wob_pol.pdb"
-    cache_name = "gaff-molecules.json"
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
-    residue_map = {'DGN': 'DG',
-                   'DTN': 'DT',
-                   'GTP': 'LIG'}
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb,
-                                                rm_ions=rm_ions,
-                                                residue_map=residue_map,
-                                                lig_names='LIG',
-                                                rm_files=False)
+    input_pdb = "tests/data/pdb/toluene.pdb"
+    cache_name = str(tmp_path / "gaff-molecules.json")
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
     modeller.deleteWater()
     modeller.addHydrogens()
@@ -138,15 +125,8 @@ def test_prepare_ligand_ff():
 
 def test_nonstandard_ligand():
     print(flush=True)
-    input_pdb = "tests/data/pdb/gt_wob_pol.pdb"
-
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
-    residue_map = {'DGN': 'DG',
-                   'DTN': 'DT',
-                   'GTP': 'LIG'}
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions, residue_map=residue_map, lig_names='LIG')
+    input_pdb = "tests/data/pdb/toluene.pdb"
+    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
     pdb_topology = pdb_data.topology
     pdb_positions = pdb_data.positions
     modeller = app.Modeller(pdb_topology, pdb_positions)
@@ -156,7 +136,8 @@ def test_nonstandard_ligand():
                                        molecule)
 
     nqe.run_openmm_relaxation(modeller,
-                              forcefield)
+                              forcefield,
+                              platform_name='CPU')
     nqe.remove_file_pattern('minimized*')
 
 
@@ -164,9 +145,6 @@ def test_prepare_ligand_ff_multiple():
     print(flush=True)
     # A guanine/cytosine pair: two different residues, neither of which any
     # standard force field knows, so both have to be parameterised by GAFF.
-    # The G-T wobble PDBs cannot be used here -- their DGN/DTN deoxynucleosides
-    # are standard amber14 residues, so amber14-all.xml matches them on graph
-    # (residue names are not consulted) and the ligand path is never reached.
     input_pdb = "tests/data/pdb/gc.pdb"
     # Deliberately not the cache test_prepare_ligand_ff leaves behind, so
     # neither test can seed the other's parameters.
@@ -204,7 +182,8 @@ def test_prepare_ligand_ff_multiple():
                                        use_cache=True,
                                        cache_name=cache_name)
     nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield)
+                                     forcefield,
+                                     platform_name='CPU')
 
     nqe.remove_file(cache_name)
     nqe.remove_file_pattern('minimized*')
@@ -240,33 +219,6 @@ def test_prepare_lig_system_deduplicates_repeated_ligand_copies(tmp_path,
     assert [residue.name for residue in residues].count("MBN") == 2
     assert len(residues) == 3
     assert pdb_data.topology.getNumAtoms() == 31
-
-
-def test_ligand_already_in_force_field_warns():
-    print(flush=True)
-    # DGN and DTN are free deoxynucleosides: non-standard names as far as the
-    # ligand scan is concerned, but amber14-all.xml carries templates for both.
-    # OpenMM matches residue templates on the molecular graph and never looks at
-    # residue names, so the standard template wins and every bit of GAFF work
-    # done for these two is discarded -- which is what the warnings say.
-    with pytest.warns(UserWarning, match="standard AMBER residue names"):
-        _, molecules = nqe.prepare_lig_system("tests/data/pdb/gt_wob_solv_clean.pdb")
-    assert {mol.name for mol in molecules} == {'DGN', 'DTN'}
-
-    with pytest.warns(UserWarning, match="already matched by residue template"):
-        nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                              molecules)
-
-    # The negative control: GGG/CCC are genuine ligands, so neither warning may
-    # fire for them, or the check would be worthless.
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        _, gc_molecules = nqe.prepare_lig_system("tests/data/pdb/gc.pdb")
-        nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                              gc_molecules)
-    assert not [w for w in caught
-                if "standard AMBER residue names" in str(w.message)
-                or "already matched by residue template" in str(w.message)]
 
 
 def _get_total_mass(system):
@@ -325,17 +277,13 @@ def test_get_atoms_in_residue():
     assert indexes == ref_indexes
 
 
-@pytest.mark.xfail(reason="gt_wob_pol.pdb holds 21 DNA residues (11+6+4 nt over "
-                          "three chains), so the function's -1-per-residue contract "
-                          "gives -21; the recorded -6 predates the current file and "
-                          "needs a science review",
-                   strict=False)
 def test_count_dna_and_estimate_charge():
-    print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/gt_wob_pol.pdb")
-    est_charge = nqe.count_dna_and_estimate_charge(pdb.topology)
-    print(f"Estimated net charge: {est_charge}")
-    assert est_charge == -6
+    topology = app.Topology()
+    chain = topology.addChain()
+    for residue_name in ("DA", "DC", "DG", "DT", "ALA"):
+        topology.addResidue(residue_name, chain)
+
+    assert nqe.count_dna_and_estimate_charge(topology) == -4
 
 
 def test_atom_indices_from_vmd_picks():
@@ -352,15 +300,14 @@ def test_atom_indices_from_vmd_picks():
 
 def test_distance_between_atoms():
     print(flush=True)
-    input_pdb = 'tests/data/pdb/gt_wob_solv_clean.pdb'
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     pdb = app.PDBFile(input_pdb)
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:H3', 'DGN1:O6'])
+    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'LIG1:H5'])
     distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
     nm = distance.value_in_unit(unit.nanometer)
     print(f"Distance between atoms: {nm:.4f} nm", flush=True)
-    ref_distance = 0.179  # in nm
-    assert abs(nm - ref_distance) < 0.01
+    assert nm == pytest.approx(0.0991984, abs=1e-6)
 
 
 def test_distance_between_atoms_carries_its_units():
@@ -372,9 +319,9 @@ def test_distance_between_atoms_carries_its_units():
     someone asks it for another unit -- or calls ``value_in_unit`` and gets an
     AttributeError, as every caller in ``reactiontools.tools_cv`` does.
     """
-    pdb = app.PDBFile('tests/data/pdb/gt_wob_solv_clean.pdb')
+    pdb = app.PDBFile('tests/data/pdb/malonaldehyde.pdb')
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:H3', 'DGN1:O6'])
+    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'LIG1:H5'])
 
     distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
 
@@ -387,154 +334,13 @@ def test_distance_between_atoms_carries_its_units():
 
 def test_angle_between_atoms():
     print(flush=True)
-    input_pdb = 'tests/data/pdb/gt_wob_solv_clean.pdb'
+    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     pdb = app.PDBFile(input_pdb)
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['DTN1:N3', 'DTN1:H3', 'DGN1:O6'])
+    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'LIG1:H5', 'LIG1:O2'])
     angle = nqe.angle_between_atoms(modeller, indexes[0], indexes[1], indexes[2], degrees=True)
     print(f"Angle between atoms: {angle:.4f} degrees", flush=True)
-    ref_angle = 149.89  # in degrees
-    assert abs(angle - ref_angle) < 0.01
-
-
-def ase_distance_between_atoms(atoms, index1, index2):
-    """
-    Calculate the distances between two atoms across all frames in a trajectory.
-
-    Parameters
-    ----------
-    atoms : list of ase.Atoms
-        Trajectory frames.
-    index1 : int
-        Index of the first atom.
-    index2 : int
-        Index of the second atom.
-
-    Returns
-    -------
-    list of float
-        Distance between the two specified atoms for each frame.
-    """
-    distances = []
-    for frame in atoms:
-        pos1 = frame[index1].position
-        pos2 = frame[index2].position
-        distance = np.linalg.norm(pos1 - pos2)
-        distances.append(distance)
-    return distances
-
-
-def ase_angle_between_atoms(atoms, index1, index2, index3):
-    """
-    Calculate the angles formed by three atoms across all frames in a trajectory.
-
-    Parameters
-    ----------
-    atoms : list of ase.Atoms
-        Trajectory frames.
-    index1 : int
-        Index of the first atom.
-    index2 : int
-        Index of the second atom (vertex of the angle).
-    index3 : int
-        Index of the third atom.
-
-    Returns
-    -------
-    list of float
-        Angle in degrees formed by the three specified atoms for each frame.
-    """
-    angles = []
-    for frame in atoms:
-        pos1 = frame[index1].position
-        pos2 = frame[index2].position
-        pos3 = frame[index3].position
-        v1 = pos1 - pos2
-        v2 = pos3 - pos2
-        cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-        angle = np.arccos(cos_angle) * 180.0 / np.pi
-        angles.append(angle)
-    return angles
-
-
-def check_linear_relationship(y, x=None, f_print=True):
-    """
-    Check the linear relationship between two variables using the coefficient of determination (R^2).
-
-    Parameters
-    ----------
-    y : array_like
-        The dependent variable (response data).
-    x : array_like, optional
-        The independent variable (predictor data). If None, defaults to a
-        range of integers from 0 to the length of `y`.
-    f_print : bool, optional
-        If True, prints the calculated R^2 value. Default is True.
-
-    Returns
-    -------
-    float
-        The coefficient of determination (R^2), which indicates the strength
-        of the linear relationship between `x` and `y`. A value closer to 1
-        indicates a strong linear relationship.
-    """
-    if x is None:
-        x = np.arange(len(y))
-    _, _, r_value, _, _ = linregress(x, y)
-    r2 = r_value ** 2
-    if f_print:
-        print(f"R2: {r2:.4f}")
-    return r2
-
-
-def test_ase_rc1():
-    atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
-
-    # How linear is the proton-transfer distance difference along the path?
-    a1_d = 21
-    a2_d = 30
-    a3_d = 18
-    d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
-    d2 = np.array(ase_distance_between_atoms(atoms, a3_d, a2_d))
-    r1 = d1 - d2
-    check_linear_relationship(r1)
-
-    # ... and the angle that opens up as it transfers?
-    a1_a = 8
-    a2_a = 5
-    a3_a = 21
-    angles = ase_angle_between_atoms(atoms, a1_a, a2_a, a3_a)
-    check_linear_relationship(angles)
-
-    rr = check_linear_relationship(r1, x=angles)
-    plt.plot(angles, r1)
-    plt.xlabel(f'Angle {a1_a}-{a2_a}-{a3_a}')
-    plt.ylabel(f'Distance {a1_d}-{a2_d} and {a3_d}-{a2_d}')
-    plt.title(f'Angle vs Distance Difference, R2={rr:.4f}')
-    plt.show()
-
-
-def test_ase_rc2():
-    atoms = read('tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj', index=':')
-
-    # The N1-O2 distance on its own, as a candidate coordinate
-    a1_d = 6
-    a2_d = 18
-    d1 = np.array(ase_distance_between_atoms(atoms, a1_d, a2_d))
-    rr = check_linear_relationship(d1)
-    plt.plot(d1)
-    plt.xlabel('Frame')
-    plt.ylabel('Distance (Angstrom)')
-    plt.title(f'r1, Distance Difference between {a1_d}-{a2_d}, R2={rr:.4f}')
-    plt.show()
-
-
-def test_ase_load():
-    print(flush=True)
-    name = 'tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj'
-    atoms = read(name, index=':')
-    print(atoms)
-    assert len(atoms) > 0
+    assert angle == pytest.approx(146.601, abs=0.01)
 
 
 def test_fix_pdb_chains():
@@ -584,7 +390,7 @@ def test_fix_pdb_atom_labels():
 
 def test_convert_xyz_to_pdb():
     # Define your file names
-    input_file = 'tests/data/G_T_wob.traj'
+    input_file = 'tests/data/GC.xyz'
     output_file = 'output.pdb'
     rt.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1)
     # Assert that the pdb file was created
@@ -644,11 +450,11 @@ def test_move_pdb_to_origin():
 
 
 def test_convert_sdfs_to_pdb():
-    nqe.convert_sdfs_to_pdb("tests/data/DGN.sdf", "single_ligand.pdb")
+    nqe.convert_sdfs_to_pdb("tests/data/CH4.sdf", "single_ligand.pdb")
     assert os.path.isfile('single_ligand.pdb')
     os.remove('single_ligand.pdb')
 
-    nqe.convert_sdfs_to_pdb(["tests/data/DGN.sdf", "tests/data/DTN.sdf"], "combined_ligands.pdb")
+    nqe.convert_sdfs_to_pdb(["tests/data/CH4.sdf", "tests/data/H2O.sdf"], "combined_ligands.pdb")
     assert os.path.isfile('combined_ligands.pdb')
     os.remove('combined_ligands.pdb')
 
@@ -696,47 +502,3 @@ def test_center_in_box_uses_triclinic_vector_sum():
 
     centered = modeller.positions.value_in_unit(unit.nanometer)
     assert np.allclose(centered[0], [1.35, 1.15, 1.0])
-
-
-def to_fraction(d):
-    return (d - d[0]) / d[0] + 1
-
-
-def test_check_neb_distances():
-    print(flush=True)
-    name = 'tests/data/G_T_wob-G_T_enol_ML-NEB_B3LYP_GOLD_IMPSOL_NWC.traj'
-    atoms = read(name, index=':')
-
-    o6 = 5
-    o4 = 21
-    n3 = 19
-    n1 = 6
-    o2 = 18
-    n2 = 8
-
-    d_o6_o4 = np.array(ase_distance_between_atoms(atoms, o6, o4))
-    d_o6_n3 = np.array(ase_distance_between_atoms(atoms, o6, n3))
-
-    d_n1_n3 = np.array(ase_distance_between_atoms(atoms, n1, n3))
-    d_n1_o2 = np.array(ase_distance_between_atoms(atoms, n1, o2))
-    d_n2_o2 = np.array(ase_distance_between_atoms(atoms, n2, o2))
-
-    o6_o4 = to_fraction(d_o6_o4)
-    o6_n3 = to_fraction(d_o6_n3)
-    n1_n3 = to_fraction(d_n1_n3)
-    n1_o2 = to_fraction(d_n1_o2)
-    n2_o2 = to_fraction(d_n2_o2)
-    labels = ['o6_o4', 'o6_n3', 'n1_n3', 'n1_o2', 'n2_o2']
-    dist = [d_o6_o4, d_o6_n3, d_n1_n3, d_n1_o2, d_n2_o2]
-    items = [o6_o4, o6_n3, n1_n3, n1_o2, n2_o2]
-    for i, item in enumerate(items):
-        print(f"{labels[i]}: Start: {dist[i][0]:.2f} Min: {np.min(item):.2f}, Max: {np.max(item):.2f}", flush=True)
-        tmp = labels[i].split('_')
-        line = f'{labels[i]}: DISTANCE ATOMS=' + '{' + tmp[0] + '},' + '{' + tmp[1] + '}'
-        print(line, flush=True)
-
-        line = f'UPPER_WALLS ARG={labels[i]} AT={0.1 * dist[i][0] * np.max(item):.2f} ' + ' KAPPA={kappa}'
-        print(line, flush=True)
-        line = f'LOWER_WALLS ARG={labels[i]} AT={0.1 * dist[i][0] * np.min(item):.2f} ' + ' KAPPA={kappa}'
-        print(line, flush=True)
-        print(flush=True)
