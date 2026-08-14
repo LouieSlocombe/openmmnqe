@@ -7,10 +7,11 @@ approaches.
 ## Scope
 
 `openmmnqe` covers the simulation itself: system preparation, the OpenMM stages (minimise, heat, NPT, production,
-RPMD, adQTB), the PLUMED input those stages are driven with, and the reporters that read them back.
+RPMD, adQTB), and the reporters that read them back.
 
 What sits either side of that lives in [reactiontools](https://github.com/LouieSlocombe/reactiontools), which is a
-dependency — building a reaction path with NEB, refining a transition state, running ORCA, and plotting the
+dependency — building a reaction path with NEB, refining a transition state, running ORCA, the PLUMED collective
+variables these stages are biased along, turning a steered trajectory back into a reference path, and plotting the
 free-energy surface that comes out. Import those from there:
 
 ```python
@@ -19,10 +20,17 @@ import reactiontools as rt
 
 product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
 neb_path = rt.quick_guess_path(reactant, product)
-nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-...
+rt.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+
+plumed_input, fes_command = rt.plumed_input_neb_path(temperature)
+nqe.run_openmm_prod(modeller, forcefield, plumed_script_path="plumed.dat")
+
+rt.run_sum_hills()
 rt.plot_plumed_fes("fes.dat", filename="fes")
 ```
+
+The reactiontools builders take the `openmm.app.Modeller` and `openmm.unit.Quantity` this package works in, so they
+can be called with whatever is already to hand.
 
 ## Installation
 

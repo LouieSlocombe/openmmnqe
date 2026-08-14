@@ -18,7 +18,7 @@ statistics with enough beads, but costs a force evaluation per bead;
 the adaptive quantum thermal bath costs no more than a classical run but is
 an approximation. :func:`run_openmm_steered` sits outside the sequence and
 pulls a collective variable to generate a reference path (see
-:mod:`openmmnqe.path`).
+:mod:`reactiontools.tools_path`).
 
 Every stage takes the same shape: build the system, optionally deuterate it,
 attach a PLUMED bias and the reporters, run, then save a checkpoint and a
@@ -792,8 +792,8 @@ def run_openmm_steered(modeller,
     This is :func:`run_openmm_prod` with the settings a pulling run wants: no
     barostat, a short time step, and frequent reporting so the trajectory has
     enough frames to pick a path out of. The PLUMED script comes from
-    :func:`openmmnqe.plumed.plumed_input_steered` or one of its wrappers, and
-    the trajectory feeds :func:`openmmnqe.path.path_from_steered_md`.
+    :func:`reactiontools.plumed_input_steered` or one of its wrappers, and
+    the trajectory feeds :func:`reactiontools.path_from_steered_md`.
 
     Parameters
     ----------

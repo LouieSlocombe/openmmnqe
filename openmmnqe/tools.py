@@ -1,11 +1,11 @@
 """Assorted helpers for setting up and interrogating an OpenMM system.
 
 What collects here is the small stuff the simulation stages in
-:mod:`openmmnqe.openmm` and the input builders in :mod:`openmmnqe.plumed` need
-but that belongs to neither: seeding ring-polymer beads, swapping hydrogen for
-deuterium, measuring a distance or angle off a Modeller, translating atom
-indices between OpenMM's 0-based and PLUMED's 1-based conventions, and picking
-a compute platform.
+:mod:`openmmnqe.openmm` and the collective-variable builders in
+:mod:`reactiontools.tools_cv` need but that belongs to neither: seeding
+ring-polymer beads, swapping hydrogen for deuterium, measuring a distance or
+angle off a Modeller, naming atoms the way VMD does, and picking a compute
+platform.
 
 Anything here that takes a temperature or a mass accepts either a
 :class:`openmm.unit.Quantity` or a bare number in the obvious unit -- kelvin
@@ -656,23 +656,6 @@ def atom_indices_from_vmd_picks(
     return out
 
 
-def atom_indices_to_plumed(atom_indices: List[int]) -> List[int]:
-    """
-    Convert OpenMM atom indices to PLUMED's 1-based convention.
-
-    Parameters
-    ----------
-    atom_indices : list of int
-        0-based indices, as OpenMM numbers them.
-
-    Returns
-    -------
-    list of int
-        1-based indices, as PLUMED numbers them.
-    """
-    return [idx + 1 for idx in atom_indices]
-
-
 def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
     """
     Measure the distance between two atoms of a Modeller.
@@ -782,26 +765,3 @@ def check_platform(platform=None):
                      for i in range(openmm.Platform.getNumPlatforms())}
         platform = 'CUDA' if 'CUDA' in available else 'CPU'
     return platform
-
-
-def temperature_to_kbt(temperature):
-    """
-    Convert a temperature to kBT in kJ/mol.
-
-    This is the ``--kt`` the PLUMED free-energy reconstruction commands built
-    in :mod:`openmmnqe.plumed` are given.
-
-    Parameters
-    ----------
-    temperature : openmm.unit.Quantity or float
-        Temperature to convert. A bare number is taken to be in kelvin.
-
-    Returns
-    -------
-    float
-        kBT at that temperature, in kJ/mol.
-    """
-    if not unit.is_quantity(temperature):
-        temperature = temperature * unit.kelvin
-    kt = unit.MOLAR_GAS_CONSTANT_R * temperature
-    return kt.value_in_unit(unit.kilojoule_per_mole)

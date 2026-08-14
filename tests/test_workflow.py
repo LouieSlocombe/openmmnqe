@@ -250,7 +250,7 @@ def test_eq_workflow_plumed_dihedral_opes():
     print(flush=True)
     n_steps = 100_000
     temperature = 300.0 * unit.kelvin
-    kbt = nqe.temperature_to_kbt(temperature)
+    kbt = rt.thermal_energy(temperature)
 
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml',
@@ -295,8 +295,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
                         plumed_script_path=plumed_script_path,
                         steps=n_steps)
 
-    fes_cmd = os.path.join(nqe.openmm_nqe_dir, "opes", "FES_from_State.py")
-    os.system(f'python3 {fes_cmd} --state STATE --min 0 --max 4.0 --bin 100 --kt {kbt}')
+    rt.run_opes_fes(state="STATE", grid_min=0, grid_max=4.0, grid_bin=100, kt=kbt)
     rt.plot_plumed_fes("fes.dat", show=True)
 
     rt.plot_plumed_colvar("COLVAR", show=True)
@@ -332,11 +331,11 @@ def test_malonaldehyde_pt():
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
-                                                         idx,
-                                                         temperature,
-                                                         height=8.0,
-                                                         bias=5.0)
+    plumed_input, sum_hills_input = rt.plumed_input_1pt(modeller,
+                                                        idx,
+                                                        temperature,
+                                                        height=8.0,
+                                                        bias=5.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -395,11 +394,11 @@ def test_malonaldehyde_pt_solvated():
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
-                                                         idx,
-                                                         temperature,
-                                                         height=8.0,
-                                                         bias=5.0)
+    plumed_input, sum_hills_input = rt.plumed_input_1pt(modeller,
+                                                        idx,
+                                                        temperature,
+                                                        height=8.0,
+                                                        bias=5.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -469,11 +468,11 @@ def test_malonaldehyde_pt_quantum_solvated():
                                       n_2=100)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
-                                                         idx,
-                                                         temperature,
-                                                         height=8.0,
-                                                         bias=5.0)
+    plumed_input, sum_hills_input = rt.plumed_input_1pt(modeller,
+                                                        idx,
+                                                        temperature,
+                                                        height=8.0,
+                                                        bias=5.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -548,11 +547,11 @@ def test_malonaldehyde_pt_adqtb_solvated():
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
-                                                         idx,
-                                                         temperature,
-                                                         height=8.0,
-                                                         bias=5.0)
+    plumed_input, sum_hills_input = rt.plumed_input_1pt(modeller,
+                                                        idx,
+                                                        temperature,
+                                                        height=8.0,
+                                                        bias=5.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -630,11 +629,11 @@ def test_malonaldehyde_pt_solvated_full():
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O2', 'LIG1:H5', 'LIG1:O1'])
-    plumed_input, sum_hills_input = nqe.plumed_input_1pt(modeller,
-                                                         idx,
-                                                         temperature,
-                                                         height=8.0,
-                                                         bias=5.0)
+    plumed_input, sum_hills_input = rt.plumed_input_1pt(modeller,
+                                                        idx,
+                                                        temperature,
+                                                        height=8.0,
+                                                        bias=5.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -701,13 +700,13 @@ def test_fad_pt_solvated():
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['FAD1:O1', 'LIG1:H2', 'LIG1:O2'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'FAD1:H2', 'FAD1:O2'])
 
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
-                                                            idx1,
-                                                            idx2,
-                                                            temperature,
-                                                            wall=1.0,
-                                                            height=20.0,
-                                                            bias=10.0)
+    plumed_input, sum_hills_input = rt.plumed_input_2pt_1d(modeller,
+                                                           idx1,
+                                                           idx2,
+                                                           temperature,
+                                                           wall=1.0,
+                                                           height=20.0,
+                                                           bias=10.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -772,13 +771,13 @@ def test_gc_pt_solvated():
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['GGG1:O1', 'CCC1:H2', 'CCC1:N1'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['CCC1:N2', 'GGG1:H3', 'GGG1:N3'])
 
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
-                                                            idx1,
-                                                            idx2,
-                                                            temperature,
-                                                            wall=1.0,
-                                                            height=20.0,
-                                                            bias=10.0)
+    plumed_input, sum_hills_input = rt.plumed_input_2pt_1d(modeller,
+                                                           idx1,
+                                                           idx2,
+                                                           temperature,
+                                                           wall=1.0,
+                                                           height=20.0,
+                                                           bias=10.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -851,13 +850,13 @@ def test_gc_pt_quantum_solvated():
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['GGG1:O1', 'CCC1:H2', 'CCC1:N1'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['CCC1:N2', 'GGG1:H3', 'GGG1:N3'])
 
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
-                                                            idx1,
-                                                            idx2,
-                                                            temperature,
-                                                            wall=1.0,
-                                                            height=20.0,
-                                                            bias=10.0)
+    plumed_input, sum_hills_input = rt.plumed_input_2pt_1d(modeller,
+                                                           idx1,
+                                                           idx2,
+                                                           temperature,
+                                                           wall=1.0,
+                                                           height=20.0,
+                                                           bias=10.0)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -925,14 +924,14 @@ def test_g_enol_t_pt_solvated():
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:O2', 'AAA1:H5', 'AAA1:O1'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N3', 'AAB1:H1', 'AAB1:N2'])
 
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
-                                                            idx1,
-                                                            idx2,
-                                                            temperature,
-                                                            wall=1.0,
-                                                            height=100.0,
-                                                            bias=10.0,
-                                                            f_opes=True)
+    plumed_input, sum_hills_input = rt.plumed_input_2pt_1d(modeller,
+                                                           idx1,
+                                                           idx2,
+                                                           temperature,
+                                                           wall=1.0,
+                                                           height=100.0,
+                                                           bias=10.0,
+                                                           f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1008,13 +1007,11 @@ def test_gt_wob_pt_solvated():
            'AAB1:N1']
     idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
 
-    plumed_input, sum_hills_input = nqe.plumed_input_wob_4(modeller,
-                                                           idx,
-                                                           temperature,
-                                                           wall=1.0,
-                                                           height=200.0,
-                                                           bias=10.0,
-                                                           f_opes=True)
+    plumed_input, sum_hills_input = rt.plumed_input_wob_4(idx,
+                                                          temperature,
+                                                          height=200.0,
+                                                          bias=10.0,
+                                                          f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1070,7 +1067,7 @@ def test_malonaldehyde_pathmsd():
                                      forcefield,
                                      potential=potential,
                                      ml_idx=ml_atoms)
-    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
+    rt.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
 
@@ -1083,25 +1080,25 @@ def test_malonaldehyde_pathmsd():
     product = rt.optimise_geom(product, calc, fmax=0.01)
     neb_path = rt.quick_guess_path(reactant, product, n_images=n_images)
     write("neb_path.xyz", neb_path)
-    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
-    lambda_val = nqe.estimate_path_lambda("neb_path.pdb") * 0.5
+    rt.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+    lambda_val = rt.estimate_path_lambda("neb_path.pdb") * 0.5
 
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:H5'])
-    nqe.strip_hydrogens_keep_indices("neb_path.pdb", "neb_path_tmp.pdb", keep=idx)
-    nqe.strip_hydrogens_keep_indices("index_atoms.pdb", "index_atoms_tmp.pdb", keep=idx)
+    rt.strip_hydrogens_keep_indices("neb_path.pdb", "neb_path_tmp.pdb", keep=idx)
+    rt.strip_hydrogens_keep_indices("index_atoms.pdb", "index_atoms_tmp.pdb", keep=idx)
     # Written to _tmp names above since strip_hydrogens_keep_indices can't write in place.
     os.rename("neb_path_tmp.pdb", "neb_path.pdb")
     os.rename("index_atoms_tmp.pdb", "index_atoms.pdb")
 
-    nqe.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
+    rt.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
-    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature,
-                                                              grid_min=0.0,
-                                                              grid_max=6.0,
-                                                              lambda_val=lambda_val,
-                                                              neigh_size=n_images,
-                                                              f_opes=True)
+    plumed_input, sum_hills_input = rt.plumed_input_neb_path(temperature,
+                                                             grid_min=0.0,
+                                                             grid_max=6.0,
+                                                             lambda_val=lambda_val,
+                                                             neigh_size=n_images,
+                                                             f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1171,7 +1168,7 @@ def test_gt_wob_pathmsd():
     product = rt.optimise_geom(product, calc, fmax=0.01)
     neb_path = rt.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
-    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+    rt.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -1183,12 +1180,12 @@ def test_gt_wob_pathmsd():
            'AAA1:N1',
            'AAB1:N1']
     idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
-    plumed_input, sum_hills_input = nqe.plumed_input_neb_path_wob(idx,
-                                                                  temperature,
-                                                                  height=10.0,
-                                                                  kappa=1000.0,
-                                                                  lambda_val=1000.0,
-                                                                  f_opes=True)
+    plumed_input, sum_hills_input = rt.plumed_input_neb_path_wob(idx,
+                                                                 temperature,
+                                                                 height=10.0,
+                                                                 kappa=1000.0,
+                                                                 lambda_val=1000.0,
+                                                                 f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -1258,9 +1255,9 @@ def test_estimate_path_lambda():
     product = rt.optimise_geom(product, calc, fmax=0.01)
     neb_path = rt.quick_guess_path(reactant, product, n_images=5)
     write("neb_path.xyz", neb_path)
-    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+    rt.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    assert nqe.estimate_path_lambda("neb_path.pdb") > 0.0, "Estimated lambda should be positive"
+    assert rt.estimate_path_lambda("neb_path.pdb") > 0.0, "Estimated lambda should be positive"
 
 
 def test_strip_hydrogens_keep_indices():
@@ -1300,7 +1297,7 @@ def test_strip_hydrogens_keep_indices():
     product = rt.optimise_geom(product, calc, fmax=0.01)
     neb_path = rt.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
-    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+    rt.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
     idx = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:H6'])
-    nqe.strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
-    nqe.strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")
+    rt.strip_hydrogens_keep_indices("neb_path.pdb", "stripped_neb_path.pdb", keep=idx)
+    rt.strip_hydrogens_keep_indices("neb_path.pdb", "all_stripped_neb_path.pdb")

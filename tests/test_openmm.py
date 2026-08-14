@@ -16,6 +16,7 @@ from openmmml import MLPotential
 from scipy.stats import linregress
 
 import openmmnqe as nqe
+import reactiontools as rt
 
 
 @pytest.mark.pipeline
@@ -369,7 +370,7 @@ def test_distance_between_atoms_carries_its_units():
     indexing a Quantity that wraps a Vec3 hands back the bare component. The
     result then reads as a plain number of nanometres, which is right up until
     someone asks it for another unit -- or calls ``value_in_unit`` and gets an
-    AttributeError, as every caller in ``openmmnqe.plumed`` does.
+    AttributeError, as every caller in ``reactiontools.tools_cv`` does.
     """
     pdb = app.PDBFile('tests/data/pdb/gt_wob_solv_clean.pdb')
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -585,7 +586,7 @@ def test_convert_xyz_to_pdb():
     # Define your file names
     input_file = 'tests/data/G_T_wob.traj'
     output_file = 'output.pdb'
-    nqe.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1)
+    rt.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1)
     # Assert that the pdb file was created
     assert os.path.isfile(output_file)
     os.remove(output_file)
@@ -595,7 +596,7 @@ def test_convert_pdb_to_xyz():
     print(flush=True)
     input_file = 'tests/data/pdb/malonaldehyde.pdb'
     output_file = 'output.xyz'
-    n_frames = nqe.convert_pdb_to_xyz(input_file, output_file)
+    n_frames = rt.convert_pdb_to_xyz(input_file, output_file)
     assert os.path.isfile(output_file)
     assert n_frames == 1
 
@@ -615,9 +616,9 @@ def test_convert_xyz_to_pdb_round_trip():
     xyz_file = 'round_trip.xyz'
 
     # A GC base pair is two separate molecules
-    n_clusters = nqe.convert_xyz_to_pdb(input_file, pdb_file, cutoff_multiplier=1.1)
+    n_clusters = rt.convert_xyz_to_pdb(input_file, pdb_file, cutoff_multiplier=1.1)
     assert n_clusters == 2
-    nqe.convert_pdb_to_xyz(pdb_file, xyz_file)
+    rt.convert_pdb_to_xyz(pdb_file, xyz_file)
 
     original = read(input_file)
     recovered = read(xyz_file)
@@ -695,14 +696,6 @@ def test_center_in_box_uses_triclinic_vector_sum():
 
     centered = modeller.positions.value_in_unit(unit.nanometer)
     assert np.allclose(centered[0], [1.35, 1.15, 1.0])
-
-
-def test_temperature_to_kbt():
-    print(flush=True)
-    temperature = 300.0 * unit.kelvin
-    kbt = nqe.temperature_to_kbt(temperature)
-    print(kbt, flush=True)
-    assert np.allclose(kbt, 2.494338785445972, atol=1e-6)
 
 
 def to_fraction(d):

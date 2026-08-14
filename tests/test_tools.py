@@ -70,7 +70,3 @@ def test_centroid_positions_does_not_wrap_nonperiodic_systems():
     assert np.allclose(centroid_nm[0], [1.0, 0.0, 0.0])
 
 
-def test_temperature_to_kbt_treats_bare_numbers_as_kelvin():
-    expected = nqe.temperature_to_kbt(300.0 * unit.kelvin)
-
-    assert nqe.temperature_to_kbt(300.0) == expected

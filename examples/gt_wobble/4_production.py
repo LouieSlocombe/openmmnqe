@@ -43,13 +43,11 @@ if __name__ == "__main__":
            'AAB1:N1']
     idx = nqe.atom_indices_from_vmd_picks(modeller, idx)
 
-    plumed_input, sum_hills_input = nqe.plumed_input_wob_4(modeller,
-                                                           idx,
-                                                           temperature,
-                                                           wall=1.0,
-                                                           height=200.0,
-                                                           bias=10.0,
-                                                           f_opes=True)
+    plumed_input, sum_hills_input = rt.plumed_input_wob_4(idx,
+                                                          temperature,
+                                                          height=200.0,
+                                                          bias=10.0,
+                                                          f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:

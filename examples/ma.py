@@ -50,9 +50,9 @@ if __name__ == "__main__":
     product = rt.optimise_geom(product, calc, fmax=0.01)
     neb_path = rt.quick_guess_path(reactant, product)
     write("neb_path.xyz", neb_path)
-    nqe.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
+    rt.convert_xyz_to_plumed_ref("neb_path.xyz", "index_atoms.pdb", "neb_path.pdb")
 
-    plumed_input, sum_hills_input = nqe.plumed_input_neb_path(temperature)
+    plumed_input, sum_hills_input = rt.plumed_input_neb_path(temperature)
 
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)

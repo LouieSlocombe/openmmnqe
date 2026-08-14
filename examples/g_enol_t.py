@@ -48,14 +48,14 @@ if __name__ == "__main__":
     modeller = app.Modeller(pdb.topology, pdb.positions)
     idx1 = nqe.atom_indices_from_vmd_picks(modeller, ['AAB1:O2', 'AAA1:H5', 'AAA1:O1'])
     idx2 = nqe.atom_indices_from_vmd_picks(modeller, ['AAA1:N3', 'AAB1:H1', 'AAB1:N2'])
-    plumed_input, sum_hills_input = nqe.plumed_input_2pt_1d(modeller,
-                                                            idx1,
-                                                            idx2,
-                                                            temperature,
-                                                            wall=1.0,
-                                                            height=100.0,
-                                                            bias=10.0,
-                                                            f_opes=True)
+    plumed_input, sum_hills_input = rt.plumed_input_2pt_1d(modeller,
+                                                           idx1,
+                                                           idx2,
+                                                           temperature,
+                                                           wall=1.0,
+                                                           height=100.0,
+                                                           bias=10.0,
+                                                           f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:

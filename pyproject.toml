@@ -17,11 +17,9 @@ authors = [
 dependencies = [
     "numpy",
     "scipy",
-    "pandas",  # openmmnqe/opes/, which openmmnqe/plumed.py builds commands for
     "openmm",
     "openmmml",      # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
     "openmmplumed",  # conda-forge: openmm-plumed (dist name OpenMMPlumed) -- same
-    "mdtraj",
     "MDAnalysis",
     "ase",
     "openmmforcefields",
@@ -29,7 +27,9 @@ dependencies = [
     "rdkit",
     "mace-torch",
     "openff-toolkit",
-    "reactiontools @ git+https://github.com/LouieSlocombe/reactiontools.git",
+    # The [path] extra pulls in mdtraj, which reactiontools needs to read a
+    # steered trajectory back as a reference path -- a step of these workflows.
+    "reactiontools[path] @ git+https://github.com/LouieSlocombe/reactiontools.git",
 ]
 
 classifiers = [
