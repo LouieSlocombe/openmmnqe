@@ -157,6 +157,7 @@ def test_pure_mm_build_uses_boundary_appropriate_nonbonded_method(
     assert forcefield.calls[0][1]["nonbondedMethod"] == expected_method
     assert forcefield.calls[0][1]["constraints"] is None
     assert forcefield.calls[0][1]["rigidWater"] is False
+    assert forcefield.calls[0][1]["hydrogenMass"] is None
 
 
 def test_explicit_potential_builds_mixed_system_and_forces_cuda(fake_platform):
@@ -178,10 +179,12 @@ def test_explicit_potential_builds_mixed_system_and_forces_cuda(fake_platform):
     assert platform == "platform:CUDA"
     assert fake_platform == ["CUDA"]
     assert forcefield.calls[0][1].get("calculator") is None
+    assert forcefield.calls[0][1]["hydrogenMass"] is None
     _, mm_system, ml_idx, kwargs = potential.calls[0]
     assert mm_system == "mm-system"
     assert ml_idx == [1, 3]
     assert kwargs["calculator"] is calculator
+    assert kwargs["hydrogenMass"] is None
 
 
 def test_bare_calculator_uses_ase_potential_fallback(monkeypatch, fake_platform):

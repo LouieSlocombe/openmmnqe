@@ -40,6 +40,7 @@ def run_openmm_rpmd():
         constraints=None,
         rigidWater=False,
         removeCMMotion=True,
+        hydrogenMass=None,
     )
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, dt)
@@ -86,6 +87,7 @@ def run_openmm_rpmd_solvated():
         constraints=None,
         rigidWater=False,
         removeCMMotion=True,
+        hydrogenMass=None,
     )
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, dt)
@@ -126,6 +128,7 @@ def run_openmm_rpmd_ml():
         constraints=None,
         rigidWater=False,
         removeCMMotion=True,
+        hydrogenMass=None,
     )
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, dt)
@@ -174,7 +177,8 @@ def run_openmm_rpmd_mixed():
                                         nonbondedCutoff=1.0 * unit.nanometer,
                                         constraints=None,
                                         rigidWater=False,
-                                        removeCMMotion=True)
+                                        removeCMMotion=True,
+                                        hydrogenMass=None)
 
     chains = list(modeller.topology.chains())
     ml_atoms = [atom.index for atom in chains[0].atoms()]
@@ -217,6 +221,7 @@ def run_rpmd_quantum_spread_reporter():
         constraints=None,
         rigidWater=False,
         removeCMMotion=True,
+        hydrogenMass=None,
     )
 
     n_beads = 32
@@ -273,6 +278,7 @@ def run_rpmd_bead_reporter():
         constraints=None,
         rigidWater=False,
         removeCMMotion=True,
+        hydrogenMass=None,
     )
 
     n_beads = 4
@@ -315,6 +321,7 @@ def run_rpmd_centroid_reporter():
         constraints=None,
         rigidWater=False,
         removeCMMotion=True,
+        hydrogenMass=None,
     )
 
     n_beads = 32
@@ -369,6 +376,7 @@ def run_openmm_adqtb():
         constraints=None,
         rigidWater=False,
         removeCMMotion=True,
+        hydrogenMass=None,
     )
 
     integrator = openmm.QTBIntegrator(temperature, friction, dt)

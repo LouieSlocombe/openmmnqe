@@ -137,6 +137,11 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
         'constraints': None,
         'rigidWater': False,
         'removeCMMotion': True,
+        # RPMD and adQTB depend on the physical vibrational frequencies, so
+        # hydrogen mass repartitioning must not be used.  Keep this explicit:
+        # it is too important for the NQE workflows to rely on an OpenMM
+        # default, and it also keeps the MM part of a mixed system unchanged.
+        'hydrogenMass': None,
     }
 
     if not run_mixed:
