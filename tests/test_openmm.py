@@ -4,96 +4,11 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pytest
-from ase.calculators.orca import ORCA, OrcaProfile
 from ase.io import read
-from mace.calculators.foundations_models import mace_off
 from openmm import Vec3
-from openmmml import MLPotential
 
 import openmmnqe as nqe
 import reactiontools as rt
-
-
-@pytest.mark.pipeline
-def test_openmm_ml():
-    print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = MLPotential('mace-off23-small')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield)
-    nqe.remove_file_pattern('minimized*')
-
-
-@pytest.mark.pipeline
-def test_ase_mace():
-    print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-
-    potential = MLPotential('ase')
-    calculator = mace_off('small',
-                          default_dtype='float32')
-
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    nqe.run_openmm_relaxation_simple(modeller,
-                                     potential,
-                                     calculator=calculator)
-    nqe.remove_file_pattern('minimized*')
-
-
-@pytest.mark.orca
-@pytest.mark.skipif("ORCA_PATH" not in os.environ,
-                    reason="needs an ORCA installation (ORCA_PATH unset)")
-def test_ase_orca():
-    print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/malonaldehyde.pdb")
-
-    potential = MLPotential('ase')
-    profile = OrcaProfile(command=os.environ['ORCA_PATH'])
-    calculator = ORCA(profile=profile, orcasimpleinput='ENGRAD')
-
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    nqe.run_openmm_relaxation_simple(modeller,
-                                     potential,
-                                     calculator=calculator)
-    nqe.remove_file_pattern('minimized*')
-    nqe.remove_file_pattern('orca*')
-
-
-@pytest.mark.pipeline
-def test_openmm_ml_mixed_system():
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml',
-                                'amber14/tip3pfb.xml')
-    potential = MLPotential('mace-off23-small')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    # Solvate
-    padding = 1.5
-    box_shape = 'dodecahedron'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
-
-    chains = list(modeller.topology.chains())
-    ml_atoms = [atom.index for atom in chains[0].atoms()]
-
-    nqe.run_openmm_relaxation(modeller,
-                              forcefield,
-                              potential=potential,
-                              ml_idx=ml_atoms)
-    nqe.remove_file_pattern('minimized*')
 
 
 @pytest.mark.forcefield

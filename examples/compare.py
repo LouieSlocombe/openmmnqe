@@ -1,3 +1,6 @@
+"""Long-running comparisons of classical and quantum simulation methods."""
+
+import argparse
 import os
 from sys import stdout
 
@@ -6,15 +9,11 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 
-import pytest
-
 import openmmnqe as nqe
 from openmm import openmm
 
-pytestmark = pytest.mark.pipeline
-
 # WHAM is built separately, see http://membrane.urmc.rochester.edu/sites/default/files/wham/
-WHAM = os.environ.get("WHAM_PATH", "/home/louie/skunkworks/wham/wham/wham/wham")
+WHAM = os.environ.get("WHAM_PATH")
 
 
 def compute_rdf(context, particles, box_size):
@@ -60,7 +59,7 @@ def compute_rdf(context, particles, box_size):
     return rdf
 
 
-def test_parahydrogen():
+def run_parahydrogen():
     particles = 32
     box_size = 1.1896
     temperature = 25 * unit.kelvin
@@ -132,7 +131,10 @@ def test_parahydrogen():
     plt.show()
 
 
-def test_smd():
+def run_smd():
+    if WHAM is None:
+        raise RuntimeError("set WHAM_PATH to the WHAM executable")
+
     print(flush=True)
     pdb = app.PDBFile('tests/data/pdb/deca-ala.pdb')
 
@@ -303,3 +305,20 @@ def test_smd():
     nqe.remove_file("smd_traj.dcd")
     nqe.remove_file("smd_traj.pdb")
     nqe.remove_file("wham_log.txt")
+
+
+EXAMPLES = {
+    "parahydrogen": run_parahydrogen,
+    "smd": run_smd,
+}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("example", choices=sorted(EXAMPLES))
+    args = parser.parse_args()
+    EXAMPLES[args.example]()
+
+
+if __name__ == "__main__":
+    main()

@@ -2,12 +2,13 @@
 set -euo pipefail
 
 NW=4
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p BIAS
 
 for i in $(seq 0 $((NW-1))); do
   mkdir -p "Walker_${i}"
   cp plumed.dat "Walker_${i}/plumed.dat"
-  cp run_walker.py "Walker_${i}/run_walker.py"
+  cp "${SCRIPT_DIR}/run_walker.py" "Walker_${i}/run_walker.py"
 done
 
 for i in $(seq 0 $((NW-1))); do

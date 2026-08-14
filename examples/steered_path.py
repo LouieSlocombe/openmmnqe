@@ -1,4 +1,4 @@
-"""End-to-end test of building a reference path and biasing along it.
+"""Build a malonaldehyde reference path and bias a simulation along it.
 
 The frame selection, the CV builders and the file writing are all
 reactiontools' now, and are unit-tested there against a faked trajectory. What
@@ -10,7 +10,6 @@ import os
 
 import openmm.app as app
 import openmm.unit as unit
-import pytest
 from openmmml import MLPotential
 
 import openmmnqe as nqe
@@ -19,8 +18,7 @@ import reactiontools as rt
 MALONALDEHYDE = 'tests/data/pdb/malonaldehyde.pdb'
 
 
-@pytest.mark.pipeline
-def test_malonaldehyde_steered_path():
+def main():
     """Pull the proton across, make a path out of it, then bias along it."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -96,3 +94,7 @@ def test_malonaldehyde_steered_path():
     nqe.remove_file('index_atoms.pdb')
     nqe.remove_file('neb_path.pdb')
     nqe.remove_file('neb_path.xyz')
+
+
+if __name__ == "__main__":
+    main()

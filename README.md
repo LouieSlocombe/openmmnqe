@@ -54,6 +54,24 @@ rt.plot_plumed_fes("fes.dat", filename="fes")
 The reactiontools builders take the `openmm.app.Modeller` and `openmm.unit.Quantity` this package works in, so they
 can be called with whatever is already to hand.
 
+## Examples
+
+The `examples/` directory contains complete simulation workflows. Run the
+scripts from the repository root so they can find the structures in
+`tests/data/`. The grouped examples list their available workflows with
+`--help`; for example:
+
+```bash
+python examples/potentials.py --help
+python examples/potentials.py openmm_ml
+python examples/rpmd.py openmm_rpmd --platform CUDA
+python examples/workflows.py malonaldehyde_pt
+```
+
+These examples can require a CUDA GPU, downloaded MACE models, PLUMED, ORCA,
+or AmberTools depending on the selected workflow. The focused regression
+suite remains under `tests/` and runs with `pytest`.
+
 ## Installation
 
 Some dependencies (openmm-ml, openmm-plumed) are not installable from PyPI, and openmm-plumed has to be compiled, so

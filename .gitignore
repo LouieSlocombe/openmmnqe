@@ -165,8 +165,8 @@ cython_debug/
 .idea/
 .vscode/
 
-# Simulation & test outputs (drivers write into the working directory,
-# and the test session runs from the repo root)
+# Simulation, example, and test outputs (drivers write into the working
+# directory, and the test session runs from the repo root)
 minimized*
 equilibrate*
 npt_equilibrate*

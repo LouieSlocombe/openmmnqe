@@ -1,3 +1,6 @@
+"""RPMD, adQTB, and quantum-reporter simulation examples."""
+
+import argparse
 from sys import stdout
 
 import numpy as np
@@ -6,16 +9,13 @@ import openmm.unit as unit
 from matplotlib import pyplot as plt
 from openmm import openmm
 from openmmml import MLPotential
-import pytest
 
 import openmmnqe as nqe
-
-pytestmark = pytest.mark.pipeline
 
 device = "CUDA"
 
 
-def test_openmm_rpmd():
+def run_openmm_rpmd():
     print(flush=True)
     n_steps = 1_000
     report_every = 100
@@ -57,7 +57,7 @@ def test_openmm_rpmd():
     simulation.step(n_steps)
 
 
-def test_openmm_rpmd_solvated():
+def run_openmm_rpmd_solvated():
     print(flush=True)
     n_steps = 200
     report_every = 100
@@ -102,7 +102,7 @@ def test_openmm_rpmd_solvated():
     simulation.step(n_steps)
 
 
-def test_openmm_rpmd_ml():
+def run_openmm_rpmd_ml():
     print(flush=True)
     n_steps = 200
     report_every = 100
@@ -143,7 +143,7 @@ def test_openmm_rpmd_ml():
     simulation.step(n_steps)
 
 
-def test_openmm_rpmd_mixed():
+def run_openmm_rpmd_mixed():
     print(flush=True)
     n_steps = 200
     report_every = 100
@@ -203,7 +203,7 @@ def test_openmm_rpmd_mixed():
     simulation.step(n_steps)
 
 
-def test_rpmd_quantum_spread_reporter():
+def run_rpmd_quantum_spread_reporter():
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
@@ -259,7 +259,7 @@ def test_rpmd_quantum_spread_reporter():
     nqe.remove_file("quantum_spread.txt")
 
 
-def test_rpmd_bead_reporter():
+def run_rpmd_bead_reporter():
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
@@ -301,7 +301,7 @@ def test_rpmd_bead_reporter():
         nqe.remove_file(f'out_bead_{i}.pdb')
 
 
-def test_rpmd_centroid_reporter():
+def run_rpmd_centroid_reporter():
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
@@ -342,7 +342,7 @@ def test_rpmd_centroid_reporter():
     nqe.remove_file('centroid.pdb')
 
 
-def test_openmm_adqtb():
+def run_openmm_adqtb():
     print(flush=True)
     n_steps = 1_000
     report_every = 100
@@ -394,7 +394,7 @@ def test_openmm_adqtb():
     simulation.step(n_steps)
 
 
-def test_run_openmm_rpmd_equilibration():
+def run_openmm_rpmd_equilibration():
     print(flush=True)
     n_beads = 2
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -413,7 +413,7 @@ def test_run_openmm_rpmd_equilibration():
     nqe.remove_file_pattern('rpmd_ready*')
 
 
-def test_run_openmm_rpmd_prod():
+def run_openmm_rpmd_prod():
     print(flush=True)
     n_beads = 2
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -439,7 +439,7 @@ def test_run_openmm_rpmd_prod():
     nqe.remove_file_pattern('rpmd_prod*')
 
 
-def test_run_openmm_rpmd_contracted():
+def run_openmm_rpmd_contracted():
     print(flush=True)
     n_beads = 8
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -466,7 +466,7 @@ def test_run_openmm_rpmd_contracted():
     nqe.remove_file_pattern('rpmd_prod_contracted*')
 
 
-def test_run_openmm_adqtb_eq():
+def run_openmm_adqtb_eq():
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -483,7 +483,7 @@ def test_run_openmm_adqtb_eq():
     nqe.remove_file_pattern('adqtb_ready*')
 
 
-def test_run_openmm_adqtb_prod():
+def run_openmm_adqtb_prod():
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -509,3 +509,26 @@ def test_run_openmm_adqtb_prod():
 
     nqe.remove_file_pattern('adqtb_ready*')
     nqe.remove_file_pattern('adqtb_prod*')
+
+
+EXAMPLES = {
+    name.removeprefix("run_"): function
+    for name, function in list(globals().items())
+    if name.startswith("run_") and callable(function)
+}
+
+
+def main():
+    global device
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("example", choices=sorted(EXAMPLES))
+    parser.add_argument("--platform", default=device)
+    args = parser.parse_args()
+
+    device = args.platform
+    EXAMPLES[args.example]()
+
+
+if __name__ == "__main__":
+    main()
