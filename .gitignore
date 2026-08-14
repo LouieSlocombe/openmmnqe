@@ -189,4 +189,5 @@ bck.*
 fes.dat
 plumed.dat
 py.out
-gaff-molecules.json
+ligands.xml
+forcefill_work/

@@ -14,6 +14,10 @@ dependencies:
   - openmm=8.5.1
   - openmm-ml=1.6
   - openmmforcefields=0.15.1
+  # forcefill's gaff backend runs the antechamber and parmchk2 executables, which
+  # exist only as a conda package. openmmforcefields already depends on ambertools,
+  # but a dependency that is relied on should be declared rather than inherited.
+  - ambertools
   - pdbfixer
   - mdanalysis
 
@@ -25,4 +29,5 @@ dependencies:
   - pip:
       - torch-dftd
       - git+https://github.com/LouieSlocombe/geodesic_interpolate.git
+      - git+https://github.com/LouieSlocombe/forcefill.git
       - git+https://github.com/LouieSlocombe/reactiontools.git

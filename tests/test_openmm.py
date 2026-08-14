@@ -1,6 +1,4 @@
-import json
 import os
-from pathlib import Path
 
 import numpy as np
 import openmm.app as app
@@ -98,42 +96,15 @@ def test_openmm_ml_mixed_system():
     nqe.remove_file_pattern('minimized*')
 
 
-def test_prepare_ligand_ff(tmp_path):
+@pytest.mark.forcefield
+def test_nonstandard_ligand(ligand_forcefield):
+    """A ligand no standard force field knows drives a simulation stage.
+
+    The contract this package cares about: whatever forcefill writes, an
+    openmmnqe driver can run on it.
+    """
     print(flush=True)
-    input_pdb = "tests/data/pdb/toluene.pdb"
-    cache_name = str(tmp_path / "gaff-molecules.json")
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                          molecule,
-                          gen_cache=True,
-                          use_cache=False,
-                          cache_name=cache_name)
-
-    # Check that the cache files were created
-    assert os.path.exists(cache_name)
-
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule,
-                                       gen_cache=False,
-                                       use_cache=True,
-                                       cache_name=cache_name)
-    forcefield.createSystem(modeller.topology)
-
-
-def test_nonstandard_ligand():
-    print(flush=True)
-    input_pdb = "tests/data/pdb/toluene.pdb"
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    pdb_topology = pdb_data.topology
-    pdb_positions = pdb_data.positions
-    modeller = app.Modeller(pdb_topology, pdb_positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield("tests/data/pdb/toluene.pdb")
 
     nqe.run_openmm_relaxation(modeller,
                               forcefield,
@@ -141,84 +112,24 @@ def test_nonstandard_ligand():
     nqe.remove_file_pattern('minimized*')
 
 
-def test_prepare_ligand_ff_multiple():
+@pytest.mark.forcefield
+def test_multiple_ligand_forcefield(ligand_forcefield):
+    """Two different ligands, whose separate templates merge into one ffxml.
+
+    A guanine/cytosine pair: two residues, neither of which any standard force
+    field knows, so both go through GAFF and both templates have to survive
+    into the combined file that is then loaded over a two-chain topology.
+    """
     print(flush=True)
-    # A guanine/cytosine pair: two different residues, neither of which any
-    # standard force field knows, so both have to be parameterised by GAFF.
-    input_pdb = "tests/data/pdb/gc.pdb"
-    # Deliberately not the cache test_prepare_ligand_ff leaves behind, so
-    # neither test can seed the other's parameters.
-    cache_name = "gaff-molecules-multiple.json"
-    nqe.remove_file(cache_name)
+    modeller, forcefield = ligand_forcefield("tests/data/pdb/gc.pdb")
 
-    pdb_data, molecules = nqe.prepare_lig_system(input_pdb)
-    assert len(molecules) == 2, "both residues should be picked up as ligands"
-    assert {mol.name for mol in molecules} == {'GGG', 'CCC'}
-
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecules,
-                                       gen_cache=True,
-                                       use_cache=False,
-                                       cache_name=cache_name)
+    assert {residue.name for residue in modeller.topology.residues()} == {'GGG', 'CCC'}
     forcefield.createSystem(modeller.topology)
 
-    # The cache file appears as soon as it is opened, so its existence proves
-    # nothing -- what matters is that both ligands are in it.
-    with open(cache_name) as f:
-        cache = json.load(f)
-    cached_smiles = {record['smiles']
-                     for table in cache.values()
-                     for record in table.values()}
-    assert cached_smiles == {mol.to_smiles() for mol in molecules}
-
-    # The cache alone must be enough to rebuild the same system
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecules,
-                                       gen_cache=False,
-                                       use_cache=True,
-                                       cache_name=cache_name)
     nqe.run_openmm_relaxation_simple(modeller,
                                      forcefield,
                                      platform_name='CPU')
-
-    nqe.remove_file(cache_name)
     nqe.remove_file_pattern('minimized*')
-
-
-def test_prepare_lig_system_deduplicates_repeated_ligand_copies(tmp_path,
-                                                                monkeypatch):
-    source = Path("tests/data/pdb/toluene.pdb").resolve()
-    pdb = app.PDBFile(str(source))
-    receptor_topology = app.Topology()
-    receptor_chain = receptor_topology.addChain()
-    receptor_residue = receptor_topology.addResidue("ALA", receptor_chain)
-    receptor_topology.addAtom(
-        "CA", app.Element.getBySymbol("C"), receptor_residue
-    )
-    modeller = app.Modeller(
-        receptor_topology, [Vec3(-1.0, 0.0, 0.0)] * unit.nanometer
-    )
-    modeller.add(pdb.topology, pdb.positions)
-    shift = Vec3(1.0, 0.0, 0.0) * unit.nanometer
-    modeller.add(pdb.topology, [position + shift for position in pdb.positions])
-
-    repeated_pdb = tmp_path / "two_toluenes.pdb"
-    with open(repeated_pdb, "w") as handle:
-        app.PDBFile.writeFile(modeller.topology, modeller.positions, handle)
-
-    monkeypatch.chdir(tmp_path)
-    pdb_data, molecule = nqe.prepare_lig_system(str(repeated_pdb), lig_names="MBN")
-
-    assert not isinstance(molecule, list)
-    assert molecule.n_atoms == 15
-    residues = list(pdb_data.topology.residues())
-    assert [residue.name for residue in residues].count("MBN") == 2
-    assert len(residues) == 3
-    assert pdb_data.topology.getNumAtoms() == 31
 
 
 def _get_total_mass(system):

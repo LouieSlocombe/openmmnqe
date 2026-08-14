@@ -1,5 +1,7 @@
+import logging
 import os
 
+import forcefill as ff
 import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
@@ -10,17 +12,35 @@ import reactiontools as rt
 
 if __name__ == "__main__":
     print(flush=True)
+    # forcefill reports through logging where openmmnqe prints, so without this
+    # its INFO lines -- which residues it is parameterising, the net charge it
+    # assumed, where the intermediate files went -- go nowhere.
+    logging.basicConfig(level=logging.INFO,
+                        format="%(levelname)s %(name)s: %(message)s")
     temperature = 300.0 * unit.kelvin
     steps_prod = 50_000
     input_pdb = os.path.join(os.path.dirname(nqe.openmm_nqe_dir), 'tests/data/pdb/gc.pdb')
     ml_model = 'mace-off23-small'
     forcefield_names = ("amber14-all.xml", "amber14/tip3pfb.xml")
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
+
+    # The guanine and cytosine residues are not in any standard force field, so
+    # forcefill parameterises them with GAFF2/AM1-BCC and writes an ffxml that
+    # loads underneath the standard ones.  A charged ligand would need
+    # net_charges={'GGG': -1}: a residue read out of a PDB carries no formal
+    # charge, so forcefill assumes zero without saying so.
+    result = ff.build_forcefield_xml(input_pdb,
+                                     "ligands.xml",
+                                     base_forcefield=forcefield_names,
+                                     workdir="forcefill_work")
+    print(f"Parameterised: {result.parameterized}, skipped: {result.skipped}", flush=True)
+
+    # Built from the same file forcefill read, with nothing in between: the
+    # templates describe those residues exactly as this file spells them, so an
+    # edit here (adding hydrogens, deleting water) stops them matching.
+    pdb_data = app.PDBFile(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(forcefield_names, molecule)
+    forcefield = app.ForceField(*forcefield_names, result.forcefield_xml)
 
     padding = 1.5
     box_shape = 'cube'
@@ -83,3 +103,5 @@ if __name__ == "__main__":
     nqe.remove_file('index_atoms.pdb')
     nqe.remove_file('neb_path.pdb')
     nqe.remove_file('neb_path.xyz')
+    nqe.remove_file('ligands.xml')
+    nqe.remove_directory('forcefill_work')

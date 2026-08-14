@@ -20,13 +20,14 @@ dependencies = [
     "openmm",
     "openmmml",      # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
     "openmmplumed",  # conda-forge: openmm-plumed (dist name OpenMMPlumed) -- same
-    "MDAnalysis",
     "ase",
-    "openmmforcefields",
-    "pdbfixer",
-    "rdkit",
+    "pdbfixer",      # openmmnqe.io.fix_pdb -- forcefill is subtractive only and will not repair
+    "rdkit",         # openmmnqe.io.xyz_to_sdf and convert_sdfs_to_pdb
     "mace-torch",
-    "openff-toolkit",
+    # Ligand parameterisation: the non-standard residues of a structure to an
+    # OpenMM ffxml, via AmberTools GAFF/AM1-BCC. The antechamber and parmchk2
+    # executables it shells out to are conda-only -- see build_tools/.
+    "forcefill @ git+https://github.com/LouieSlocombe/forcefill.git",
     # The [path] extra pulls in mdtraj, which reactiontools needs to read a
     # steered trajectory back as a reference path -- a step of these workflows.
     "reactiontools[path] @ git+https://github.com/LouieSlocombe/reactiontools.git",
@@ -50,6 +51,7 @@ testpaths = ["tests"]
 markers = [
     "pipeline: full MD/ML pipeline; needs a CUDA GPU, MACE model downloads, or long walltime",
     "orca: needs an external ORCA installation (ORCA_PATH)",
+    "forcefield: parameterises a ligand through forcefill; needs AmberTools (antechamber, parmchk2) on PATH",
 ]
 
 [project.urls]

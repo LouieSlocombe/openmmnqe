@@ -362,19 +362,15 @@ def test_malonaldehyde_pt():
     nqe.remove_file('plumed.dat')
 
 
-def test_malonaldehyde_pt_solvated():
+@pytest.mark.forcefield
+def test_malonaldehyde_pt_solvated(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 40_000
 
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'
@@ -427,7 +423,8 @@ def test_malonaldehyde_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def test_malonaldehyde_pt_quantum_solvated():
+@pytest.mark.forcefield
+def test_malonaldehyde_pt_quantum_solvated(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
@@ -436,12 +433,7 @@ def test_malonaldehyde_pt_quantum_solvated():
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'
@@ -503,7 +495,8 @@ def test_malonaldehyde_pt_quantum_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def test_malonaldehyde_pt_adqtb_solvated():
+@pytest.mark.forcefield
+def test_malonaldehyde_pt_adqtb_solvated(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
@@ -511,15 +504,7 @@ def test_malonaldehyde_pt_adqtb_solvated():
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')
 
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'
@@ -578,7 +563,8 @@ def test_malonaldehyde_pt_adqtb_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def test_malonaldehyde_pt_solvated_full():
+@pytest.mark.forcefield
+def test_malonaldehyde_pt_solvated_full(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 50_000
@@ -586,15 +572,7 @@ def test_malonaldehyde_pt_solvated_full():
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    rm_ions = ['Na+',
-               'Cl-',
-               'NA']
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb, rm_ions=rm_ions)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'
@@ -664,7 +642,8 @@ def test_malonaldehyde_pt_solvated_full():
     nqe.remove_file('plumed.dat')
 
 
-def test_fad_pt_solvated():
+@pytest.mark.forcefield
+def test_fad_pt_solvated(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 20_000
@@ -672,12 +651,7 @@ def test_fad_pt_solvated():
     input_pdb = 'tests/data/pdb/fad.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'
@@ -735,7 +709,8 @@ def test_fad_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def test_gc_pt_solvated():
+@pytest.mark.forcefield
+def test_gc_pt_solvated(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 40_000
@@ -743,12 +718,7 @@ def test_gc_pt_solvated():
     input_pdb = 'tests/data/pdb/gc.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'
@@ -806,7 +776,8 @@ def test_gc_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def test_gc_pt_quantum_solvated():
+@pytest.mark.forcefield
+def test_gc_pt_quantum_solvated(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 60_000
@@ -815,12 +786,7 @@ def test_gc_pt_quantum_solvated():
     input_pdb = 'tests/data/pdb/gc.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
 
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'
@@ -887,7 +853,8 @@ def test_gc_pt_quantum_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def test_malonaldehyde_pathmsd():
+@pytest.mark.forcefield
+def test_malonaldehyde_pathmsd(ligand_forcefield):
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 100_000
@@ -895,12 +862,7 @@ def test_malonaldehyde_pathmsd():
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)  # mace-off23-large mace-off23-small
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
     padding = 1.5
     box_shape = 'cube'
     modeller.addSolvent(forcefield,
@@ -977,17 +939,13 @@ def test_malonaldehyde_pathmsd():
     nqe.remove_file('neb_path.xyz')
 
 
-def test_estimate_path_lambda():
+@pytest.mark.forcefield
+def test_estimate_path_lambda(ligand_forcefield):
     print(flush=True)
     input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
     ml_model = 'mace-off23-small'
     potential = MLPotential(ml_model)
-    pdb_data, molecule = nqe.prepare_lig_system(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-    forcefield = nqe.prepare_ligand_ff(("amber14-all.xml", "amber14/tip3pfb.xml"),
-                                       molecule)
+    modeller, forcefield = ligand_forcefield(input_pdb)
 
     padding = 1.5
     box_shape = 'cube'

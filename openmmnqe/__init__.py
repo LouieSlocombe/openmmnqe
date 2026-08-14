@@ -1,21 +1,44 @@
 """
 openmmnqe: OpenMM workflows for nuclear quantum effects and enhanced sampling.
 
-Bundles system preparation (:mod:`openmmnqe.io`), OpenMM simulation stages
+Bundles structure edits (:mod:`openmmnqe.io`), OpenMM simulation stages
 including RPMD and adQTB nuclear-quantum-effect integrators and ML/MM
 potentials (:mod:`openmmnqe.openmm`), RPMD reporters
 (:mod:`openmmnqe.reporters`) and assorted simulation-setup utilities
 (:mod:`openmmnqe.tools`).
 
-This package is the simulation itself. Everything upstream of it -- building a
-reaction path with NEB, refining a transition state, running ORCA -- and
-everything alongside or downstream of it -- the PLUMED collective variables
-that bias a proton transfer, turning a steered trajectory into a reference
-path, and plotting the free-energy surface that comes out -- lives in
-`reactiontools <https://github.com/LouieSlocombe/reactiontools>`_, which is a
-dependency. Import those from there rather than from here::
+This package is the simulation itself, and it has two dependencies that are
+the rest of the workflow.
 
-    import openmmnqe as nqe
+Ligand parameters come from
+`forcefill <https://github.com/LouieSlocombe/forcefill>`_: it asks the base
+force field which residues it cannot match, parameterises those with GAFF and
+AM1-BCC, and writes an ffxml that loads underneath the standard files. The
+force field every ``run_openmm_*`` stage takes is built from that::
+
+    import forcefill as ff
+    import openmm.app as app
+
+    names = ("amber14-all.xml", "amber14/tip3pfb.xml")
+    result = ff.build_forcefield_xml(input_pdb, "ligands.xml", base_forcefield=names)
+
+    pdb_data = app.PDBFile(input_pdb)
+    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
+    forcefield = app.ForceField(*names, result.forcefield_xml)
+
+Nothing may edit the topology between those two blocks -- the templates
+describe the residues exactly as ``input_pdb`` spells them. A raw crystal
+structure is repaired first, with :func:`openmmnqe.io.fix_pdb`: forcefill
+decides what needs parameters by asking what the base force field cannot
+match, and a protein missing its hydrogens matches nothing.
+
+Everything upstream of the simulation -- building a reaction path with NEB,
+refining a transition state, running ORCA -- and everything alongside or
+downstream of it -- the PLUMED collective variables that bias a proton
+transfer, turning a steered trajectory into a reference path, and plotting the
+free-energy surface that comes out -- lives in
+`reactiontools <https://github.com/LouieSlocombe/reactiontools>`_::
+
     import reactiontools as rt
 
     product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
@@ -35,20 +58,10 @@ from .io import (remove_directory,
                  copy_and_rename_file,
                  list_files_with_pattern,
                  xyz_to_sdf,
-                 extract_nonstandard_res,
-                 get_non_standard_residues,
-                 list_non_standard_residues,
-                 clean_ions_in_pdb,
                  relabel_residues_in_pdb,
                  remove_residues_in_pdb,
-                 remove_water_residues_in_pdb,
                  fix_pdb,
-                 make_sdf,
-                 pdb_patcher,
-                 combine_sdf_pdb,
                  convert_sdfs_to_pdb,
-                 prepare_lig_system,
-                 prepare_ligand_ff,
                  save_pdb_selection,
                  remove_file_pattern,
                  remove_file,
