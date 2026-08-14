@@ -17,7 +17,7 @@
 set -eo pipefail
 
 ENV_NAME="openmmnqe"
-PY_SCRIPT="${1:-g_enol_t.py}"
+PY_SCRIPT="${1:-gc.py}"
 
 module load cuda-13.0.1-gcc-13.2.0
 module load mamba/latest

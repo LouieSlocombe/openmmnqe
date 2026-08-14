@@ -76,8 +76,8 @@ Once installed, `sub_sol_run.sh` runs a single simulation script inside that env
 sbatch sub_sol_run.sh 1_minimise.py
 ```
 
-It defaults to `g_enol_t.py` if no script is given. For multi-stage runs, the per-system
-`run.sh` files under `examples/` chain the stages together in one job.
+It defaults to `gc.py` if no script is given. For multi-stage runs, chain the stages
+together in one job with a `run.sh` that calls each script in turn.
 
 ## Source build
 
@@ -106,5 +106,10 @@ hand.
 
 ## Next steps
 
-Worked examples live in `examples/`, which contains complete staged workflows (minimise →
-heat → NPT → production → RPMD → adQTB) for a couple of systems.
+Worked examples live in `examples/`: `gc.py` (guanine-cytosine) and `ma.py`
+(malonaldehyde) each run a single-file proton-transfer workflow end to end.
+
+The complete staged workflows (minimise → heat → NPT → production → RPMD → adQTB) for the
+G·T wobble systems live alongside that study in
+[NQE_GT_Wobble_Misincorporation](https://github.com/LouieSlocombe/NQE_GT_Wobble_Misincorporation),
+under `code/openmmnqe_examples/`.
