@@ -80,6 +80,10 @@ class RPMDQuantumSpreadReporter(object):
     """
 
     def __init__(self, file, reportInterval, atom_indices, names=None):
+        if reportInterval <= 0:
+            raise ValueError("reportInterval must be positive")
+        if names is not None and len(names) != len(atom_indices):
+            raise ValueError("names must contain one entry per atom index")
         self._reportInterval = reportInterval
         self._atom_indices = atom_indices
         self._out = open(file, 'w')
@@ -133,7 +137,9 @@ class RPMDQuantumSpreadReporter(object):
 
     def __del__(self):
         """Close the output file."""
-        self._out.close()
+        out = getattr(self, "_out", None)
+        if out is not None:
+            out.close()
 
 
 class RPMDBeadReporter(object):
@@ -157,6 +163,10 @@ class RPMDBeadReporter(object):
     """
 
     def __init__(self, file_base_name, reportInterval, num_beads, topology):
+        if reportInterval <= 0:
+            raise ValueError("reportInterval must be positive")
+        if num_beads <= 0:
+            raise ValueError("num_beads must be positive")
         self._reportInterval = reportInterval
         self._num_beads = num_beads
         self._topology = topology
@@ -216,7 +226,7 @@ class RPMDBeadReporter(object):
 
     def __del__(self):
         """Write the PDB footers and close every bead file."""
-        for f in self._files:
+        for f in getattr(self, "_files", []):
             try:
                 # The footer has to go in before the close, or the file is not
                 # valid PDB.
@@ -247,6 +257,10 @@ class RPMDCentroidReporter(object):
     """
 
     def __init__(self, file_name, reportInterval, num_beads, topology):
+        if reportInterval <= 0:
+            raise ValueError("reportInterval must be positive")
+        if num_beads <= 0:
+            raise ValueError("num_beads must be positive")
         self._reportInterval = reportInterval
         self._num_beads = num_beads
         self._topology = topology

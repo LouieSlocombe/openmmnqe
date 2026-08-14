@@ -36,5 +36,4 @@ jobs:
           cache-environment: true
       - run: pip install -e . --no-deps
       - run: python -c "import openmmnqe; print(openmmnqe.__version__)"
-      # pipeline-marked tests need a GPU, MACE model downloads, or ORCA
-      - run: pytest tests -m "not pipeline" -q
+      - run: pytest tests --cov=openmmnqe --cov-branch --cov-report=term-missing -q

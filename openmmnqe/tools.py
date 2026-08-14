@@ -12,6 +12,7 @@ Anything here that takes a temperature or a mass accepts either a
 and daltons respectively.
 """
 import math
+import os
 import re
 from typing import Dict, Sequence, Any, List, Union, Literal, Optional
 
@@ -376,7 +377,7 @@ def get_atoms_in_residue(pdb_file_path, residue_index, chain_id=None):
 
     Parameters
     ----------
-    pdb_file_path : str
+    pdb_file_path : str or os.PathLike
         Path to the PDB file to read.
     residue_index : int
         Position of the residue, counted from 0 within its chain when
@@ -392,7 +393,7 @@ def get_atoms_in_residue(pdb_file_path, residue_index, chain_id=None):
         0-based indices of the residue's atoms, or None if the chain does
         not exist or the index is out of range. The reason is printed.
     """
-    pdb = app.PDBFile(pdb_file_path)
+    pdb = app.PDBFile(os.fspath(pdb_file_path))
     topology = pdb.topology
     if chain_id is not None:
         found_chain = None
@@ -515,6 +516,12 @@ def set_adqtb_particle_types_by_element(
         """
         if el is None:
             return unknown_symbol, 10 ** 9
+        if isinstance(el, str):
+            try:
+                element = app.Element.getBySymbol(el)
+            except KeyError:
+                return el, 10 ** 9
+            return element.symbol, int(element.atomic_number)
         sym = getattr(el, "symbol", None)
         if sym is None:
             sym = str(el)
@@ -608,7 +615,8 @@ def atom_indices_from_vmd_picks(
     lookup = {}
     for atom in topo.atoms():
         res = atom.residue
-        key = (res.chain.id, res.name, str(res.id), atom.name)
+        resid = f"{res.id}{res.insertionCode or ''}"
+        key = (res.chain.id, res.name, resid, atom.name)
         lookup.setdefault(key, []).append(atom.index)
 
     out: List[Union[int, List[int]]] = []

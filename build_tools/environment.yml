@@ -8,6 +8,7 @@ dependencies:
   - python>=3.12
   - pip
   - pytest
+  - pytest-cov
   - pandas
   - matplotlib
   - mdanalysis

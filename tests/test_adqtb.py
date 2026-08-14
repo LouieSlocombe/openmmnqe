@@ -3,32 +3,10 @@
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
-from openmm import Vec3, openmm
+import pytest
+from openmm import openmm
 
 import openmmnqe as nqe
-
-
-class _OneParticleForceField:
-    """Small deterministic system accepted by the public workflow helpers."""
-
-    def createSystem(self, topology, **kwargs):
-        system = openmm.System()
-        system.addParticle(39.9 * unit.dalton)
-        restraint = openmm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
-        restraint.addGlobalParameter(
-            "k", 100.0 * unit.kilojoule_per_mole / unit.nanometer**2
-        )
-        restraint.addParticle(0, [])
-        system.addForce(restraint)
-        return system
-
-
-def _one_particle_modeller():
-    topology = app.Topology()
-    chain = topology.addChain()
-    residue = topology.addResidue("AR", chain)
-    topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
-    return app.Modeller(topology, [Vec3(0.1, 0.0, 0.0)] * unit.nanometer)
 
 
 def _adapted_friction_from_checkpoint(modeller, forcefield, checkpoint):
@@ -50,9 +28,11 @@ def _adapted_friction_from_checkpoint(modeller, forcefield, checkpoint):
     return np.asarray(integrator.getAdaptedFriction(0))
 
 
-def test_adqtb_production_preserves_equilibrated_friction(tmp_path):
-    modeller = _one_particle_modeller()
-    forcefield = _OneParticleForceField()
+def test_adqtb_production_loads_equilibrated_friction_before_stepping(
+    tmp_path,
+    one_particle_system,
+):
+    modeller, forcefield = one_particle_system
     ready = tmp_path / "adqtb_ready"
     production = tmp_path / "adqtb_prod"
 
@@ -67,6 +47,9 @@ def test_adqtb_production_preserves_equilibrated_friction(tmp_path):
     equilibrated = _adapted_friction_from_checkpoint(
         modeller, forcefield, ready.with_suffix(".chk")
     )
+    assert not np.allclose(equilibrated, 1.0)
+    assert ready.with_suffix(".pdb").is_file()
+    assert ready.with_suffix(".chk").stat().st_size > 0
 
     nqe.run_openmm_adqtb_prod(
         modeller,
@@ -82,4 +65,20 @@ def test_adqtb_production_preserves_equilibrated_friction(tmp_path):
         modeller, forcefield, production.with_suffix(".chk")
     )
 
-    assert np.allclose(continued, equilibrated)
+    np.testing.assert_array_equal(continued, equilibrated)
+    assert production.with_suffix(".pdb").is_file()
+    assert production.with_suffix(".chk").stat().st_size > 0
+
+
+def test_adqtb_production_rejects_missing_checkpoint(tmp_path, one_particle_system):
+    modeller, forcefield = one_particle_system
+    with pytest.raises(FileNotFoundError, match="equilibration stage"):
+        nqe.run_openmm_adqtb_prod(
+            modeller,
+            forcefield,
+            checkpoint_file=str(tmp_path / "missing.chk"),
+            barostat_freq=None,
+            platform_name="CPU",
+            steps=0,
+            output_prefix=str(tmp_path / "production"),
+        )

@@ -339,11 +339,11 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
 
     Parameters
     ----------
-    pdb_file_path : str
+    pdb_file_path : str or os.PathLike
         Path to the input PDB file.
     relabel_map : dict
         Mapping from old residue name to new. Names not in it are left be.
-    output_file : str or file-like object
+    output_file : str, os.PathLike, or file-like object
         Path to write to, or an open handle. May be the input path.
 
     Returns
@@ -351,7 +351,7 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
     openmm.app.PDBFile
         The relabelled structure.
     """
-    pdb = PDBFile(pdb_file_path)
+    pdb = PDBFile(os.fspath(pdb_file_path))
     topology = pdb.topology
     positions = pdb.positions
     changed_residues = {}
@@ -374,7 +374,7 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
         print("No residues found matching the relabel map. Topology is unchanged.")
 
     print("Saving modified topology and positions...")
-    if isinstance(output_file, str):
+    if isinstance(output_file, (str, os.PathLike)):
         with open(output_file, 'w') as f:
             PDBFile.writeFile(topology, positions, f)
         print(f"Successfully saved modified PDB to: {output_file}")
@@ -398,14 +398,14 @@ def remove_residues_in_pdb(input_pdb, output_pdb, names):
 
     Parameters
     ----------
-    input_pdb : str
+    input_pdb : str or os.PathLike
         Path to the input PDB file.
-    output_pdb : str
+    output_pdb : str or os.PathLike
         Path to write the result to. May be the input path.
     names : iterable of str
         Residue names to delete, matched exactly.
     """
-    pdb = PDBFile(input_pdb)
+    pdb = PDBFile(os.fspath(input_pdb))
     modeller = Modeller(pdb.topology, pdb.positions)
 
     residues_to_delete = [res for res in modeller.topology.residues()
@@ -451,9 +451,9 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
 
     Parameters
     ----------
-    file_in : str
+    file_in : str or os.PathLike
         Path to the input PDB file.
-    file_out : str
+    file_out : str or os.PathLike
         Path to write the repaired PDB to.
     ph : float, optional
         pH the hydrogens are added at, which decides the protonation of
@@ -461,7 +461,7 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
     rm_heterogens : bool, optional
         Whether to drop water, ions and ligands. Default is True.
     """
-    fixer = PDBFixer(filename=file_in)
+    fixer = PDBFixer(filename=os.fspath(file_in))
     fixer.findMissingResidues()
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
@@ -484,12 +484,12 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
 
     Parameters
     ----------
-    input_files : str or list of str
+    input_files : str, os.PathLike, or sequence thereof
         Path(s) to the input SDF file(s).
-    output_filename : str, optional
+    output_filename : str or os.PathLike, optional
         Path for the output PDB file. Default is ``'combined_output.pdb'``.
     """
-    if isinstance(input_files, str):
+    if isinstance(input_files, (str, os.PathLike)):
         input_files = [input_files]
     all_mols = []
     for sdf_path in input_files:
@@ -503,10 +503,13 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
         res_name = os.path.splitext(os.path.basename(sdf_path))[0]
         residue = combined_topology.addResidue(res_name, combined_topology.addChain())
         rdkit_idx_to_atom = {}
+        element_counts = {}
         for atom in mol.GetAtoms():
             symbol = atom.GetSymbol()
             element = Element.getBySymbol(symbol)
-            omm_atom = combined_topology.addAtom(symbol, element, residue)
+            element_counts[symbol] = element_counts.get(symbol, 0) + 1
+            atom_name = format_pdb_atom_name(symbol, element_counts[symbol])
+            omm_atom = combined_topology.addAtom(atom_name, element, residue)
             rdkit_idx_to_atom[atom.GetIdx()] = omm_atom
 
         for bond in mol.GetBonds():
@@ -533,11 +536,11 @@ def save_pdb_selection(input_pdb_path, atom_indices, output_pdb_path):
 
     Parameters
     ----------
-    input_pdb_path : str
+    input_pdb_path : str or os.PathLike
         Path to the input PDB file.
     atom_indices : iterable of int
         0-based indices of the atoms to keep, as numbered in the input.
-    output_pdb_path : str
+    output_pdb_path : str or os.PathLike
         Path to write the selection to.
 
     Notes
@@ -545,7 +548,7 @@ def save_pdb_selection(input_pdb_path, atom_indices, output_pdb_path):
     A selection matching nothing is warned about rather than raised, and
     produces an empty PDB.
     """
-    pdb = app.PDBFile(input_pdb_path)
+    pdb = app.PDBFile(os.fspath(input_pdb_path))
     modeller = app.Modeller(pdb.topology, pdb.positions)
     keep_indices = set(atom_indices)
     atoms_to_delete = []
@@ -603,16 +606,16 @@ def move_pdb_to_origin(input_pdb, output_filename):
 
     Parameters
     ----------
-    input_pdb : str
+    input_pdb : str or os.PathLike
         Path to the input PDB file.
-    output_filename : str
+    output_filename : str or os.PathLike
         Path to write the shifted structure to.
 
     See Also
     --------
     center_in_box : Centres in a periodic box rather than on the origin.
     """
-    pdb = PDBFile(input_pdb)
+    pdb = PDBFile(os.fspath(input_pdb))
     positions = pdb.getPositions(asNumpy=True)
     center = np.mean(positions, axis=0)
     new_positions = positions - center
@@ -716,7 +719,7 @@ def fix_pdb_atom_labels(input_file, output_file):
     with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
         for line in infile:
             if line.startswith(("ATOM  ", "HETATM")):
-                res_id = line[22:27]
+                res_id = (line[21], line[22:27])
                 if res_id != current_residue:
                     current_residue = res_id
                     element_counts = {}
@@ -762,5 +765,3 @@ def save_only_index_atoms(modeller, idx_list, file_idx='index_atoms.pdb'):
     modeller_new.delete([atom for atom in modeller_new.topology.atoms() if atom not in atoms_to_keep])
     with open(file_idx, 'w') as f:
         app.PDBFile.writeFile(modeller_new.topology, modeller_new.positions, f)
-
-

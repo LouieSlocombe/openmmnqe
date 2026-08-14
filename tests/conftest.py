@@ -1,35 +1,62 @@
-"""Shared setup for the test suite.
+"""Shared paths, output isolation, and ligand parameterisation fixtures."""
 
-Two things every test module relies on and none of them should have to arrange
-for itself.
-
-**Working directory.**  The tests name their inputs as ``tests/data/...`` and
-write their outputs into the current directory, so they only work when pytest
-is launched from the repository root.  Running the session from there makes
-that true however pytest was invoked.
-
-**Ligand force fields.**  Every workflow that starts from a PDB with a ligand
-in it needs the same two objects, built the same way; :func:`ligand_forcefield`
-is that, and the reason none of them build it by hand is written on the
-fixture.
-"""
+import itertools
 import os
 import shutil
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
 import forcefill as ff
 import openmm.app as app
+import openmm.unit as unit
 import pytest
+from openmm import Vec3, openmm
+
+TEST_DATA = Path(__file__).resolve().parent / "data"
 
 #: The force fields a ligand system is built on top of, unless a test says
 #: otherwise.  Matches what the examples use.
 BASE_FORCEFIELD = ("amber14-all.xml", "amber14/tip3pfb.xml")
 
 
-def pytest_configure(config):
-    os.chdir(REPO_ROOT)
+class OneParticleForceField:
+    """Deterministic force field for cheap public-workflow tests."""
+
+    def createSystem(self, topology, **kwargs):
+        system = openmm.System()
+        system.addParticle(39.9 * unit.dalton)
+        restraint = openmm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
+        restraint.addGlobalParameter(
+            "k",
+            100.0 * unit.kilojoule_per_mole / unit.nanometer**2,
+        )
+        restraint.addParticle(0, [])
+        system.addForce(restraint)
+        return system
+
+
+@pytest.fixture(scope="session")
+def data_dir():
+    """Return the absolute path to immutable test inputs."""
+    return TEST_DATA
+
+
+@pytest.fixture(autouse=True)
+def isolated_working_directory(tmp_path, monkeypatch):
+    """Contain every test's generated files in its own temporary directory."""
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture
+def one_particle_system():
+    """Return a one-argon Modeller and deterministic harmonic force field."""
+    topology = app.Topology()
+    residue = topology.addResidue("AR", topology.addChain())
+    topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
+    modeller = app.Modeller(
+        topology,
+        [Vec3(0.1, 0.0, 0.0)] * unit.nanometer,
+    )
+    return modeller, OneParticleForceField()
 
 
 @pytest.fixture
@@ -52,19 +79,27 @@ def ligand_forcefield(tmp_path):
     plausible-but-wrong AM1-BCC charges.
 
     The AmberTools guard lives here rather than on each test, where it would
-    drift.  conda-forge's openmmforcefields depends on ambertools, so these run
-    in CI and in any environment built from build_tools/; a pip-only install
-    has neither executable and skips instead of failing inside a subprocess.
+    drift. A pip-only install without the executables skips these integration
+    checks instead of failing inside a subprocess.
     """
     if shutil.which("antechamber") is None or shutil.which("parmchk2") is None:
+        if os.environ.get("CI"):
+            pytest.fail(
+                "CI must provide AmberTools (antechamber and parmchk2) for "
+                "forcefield integration tests"
+            )
         pytest.skip("forcefill's gaff backend needs AmberTools "
                     "(antechamber, parmchk2) on PATH")
 
+    build_number = itertools.count()
+
     def _build(input_pdb, base_forcefield=BASE_FORCEFIELD, **kwargs):
+        build_dir = tmp_path / f"forcefill-{next(build_number)}"
+        build_dir.mkdir()
         result = ff.build_forcefield_xml(input_pdb,
-                                         tmp_path / "ligands.xml",
+                                         build_dir / "ligands.xml",
                                          base_forcefield=base_forcefield,
-                                         workdir=tmp_path / "forcefill",
+                                         workdir=build_dir / "work",
                                          **kwargs)
         # A skipped residue also suppresses forcefill's own whole-structure
         # check, so without this the failure surfaces at createSystem instead

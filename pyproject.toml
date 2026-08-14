@@ -48,9 +48,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["--strict-config", "--strict-markers"]
 markers = [
-    "pipeline: full MD/ML pipeline; needs a CUDA GPU, MACE model downloads, or long walltime",
-    "orca: needs an external ORCA installation (ORCA_PATH)",
     "forcefield: parameterises a ligand through forcefill; needs AmberTools (antechamber, parmchk2) on PATH",
 ]
 

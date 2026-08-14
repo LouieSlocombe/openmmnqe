@@ -91,6 +91,8 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
         cases the ML region is undefined, and ``ForceField.createSystem``
         absorbs unknown keywords into ``**args``, so passing a calculator
         through would quietly run the whole simulation at pure MM instead.
+        Also raised when *ml_idx* is empty or is supplied without either an ML
+        potential or calculator.
     """
     if potential is not None and ml_idx is None:
         raise ValueError(
@@ -106,6 +108,14 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
             "Pass ml_idx to define an ML/MM region, or pass MLPotential('ase') "
             "as forcefield to run pure ML."
         )
+    if ml_idx is not None and potential is None and calculator is None:
+        raise ValueError(
+            "ml_idx was given without an ML potential or calculator. Pass a "
+            "potential/calculator for a mixed system, or omit ml_idx for pure MM."
+        )
+    if (potential is not None or calculator is not None) and ml_idx is not None:
+        if len(ml_idx) == 0:
+            raise ValueError("ml_idx is empty; a mixed system needs at least one ML atom.")
 
     run_mixed = ml_idx is not None and (potential is not None or calculator is not None)
     if run_mixed:

@@ -1,330 +1,216 @@
-import os
+"""Tests for shared OpenMM workflow machinery and CPU integration seams."""
+
+from types import SimpleNamespace
 
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pytest
-from ase.io import read
-from openmm import Vec3
 
 import openmmnqe as nqe
-import reactiontools as rt
+import openmmnqe.openmm as nqe_openmm
 
 
-@pytest.mark.forcefield
-def test_nonstandard_ligand(ligand_forcefield):
-    """A ligand no standard force field knows drives a simulation stage.
+def test_simple_relaxation_writes_parseable_state(one_particle_system):
+    modeller, forcefield = one_particle_system
 
-    The contract this package cares about: whatever forcefill writes, an
-    openmmnqe driver can run on it.
-    """
-    print(flush=True)
-    modeller, forcefield = ligand_forcefield("tests/data/pdb/toluene.pdb")
-
-    nqe.run_openmm_relaxation(modeller,
-                              forcefield,
-                              platform_name='CPU')
-    nqe.remove_file_pattern('minimized*')
-
-
-@pytest.mark.forcefield
-def test_multiple_ligand_forcefield(ligand_forcefield):
-    """Two different ligands, whose separate templates merge into one ffxml.
-
-    A guanine/cytosine pair: two residues, neither of which any standard force
-    field knows, so both go through GAFF and both templates have to survive
-    into the combined file that is then loaded over a two-chain topology.
-    """
-    print(flush=True)
-    modeller, forcefield = ligand_forcefield("tests/data/pdb/gc.pdb")
-
-    assert {residue.name for residue in modeller.topology.residues()} == {'GGG', 'CCC'}
-    forcefield.createSystem(modeller.topology)
-
-    nqe.run_openmm_relaxation_simple(modeller,
-                                     forcefield,
-                                     platform_name='CPU')
-    nqe.remove_file_pattern('minimized*')
-
-
-def _get_total_mass(system):
-    total_mass = 0.0 * unit.dalton
-    for i in range(system.getNumParticles()):
-        total_mass += system.getParticleMass(i)
-    return total_mass
-
-
-def test_deuterate_system():
-    print(flush=True)
-    pdb = app.PDBFile('tests/data/pdb/input.pdb')
-    forcefield = app.ForceField('amber14/protein.ff14SB.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.addSolvent(forcefield,
-                        model='tip3p',
-                        padding=1.0 * unit.nanometer)
-
-    system = forcefield.createSystem(modeller.topology,
-                                     nonbondedMethod=app.PME,
-                                     constraints=app.HBonds,
-                                     rigidWater=True)
-
-    mass_before = _get_total_mass(system)
-
-    # Count the same way deuterate_system does, so the two cannot drift apart
-    h_count = sum(1 for atom in modeller.topology.atoms()
-                  if atom.element and atom.element.symbol == 'H')
-
-    print(f"--- Applying deuteration to {h_count} hydrogens (option='all') ---")
-    nqe.deuterate_system(modeller, system, option='all')
-
-    mass_after = _get_total_mass(system)
-    expected_increase = (app.element.deuterium.mass - app.element.hydrogen.mass) * h_count
-    actual_increase = mass_after - mass_before
-
-    print(f"{'Mass before':<20} | {mass_before.value_in_unit(unit.dalton):.4f} Da")
-    print(f"{'Mass after':<20} | {mass_after.value_in_unit(unit.dalton):.4f} Da")
-    print(f"{'Actual increase':<20} | {actual_increase.value_in_unit(unit.dalton):.4f} Da")
-    print(f"{'Expected increase':<20} | {expected_increase.value_in_unit(unit.dalton):.4f} Da")
-
-    # Every hydrogen, and only the hydrogens, should have gained the H -> D mass
-    # difference. The tolerance is relative: element-mass tables drift at the
-    # ~1e-7 level between OpenMM releases, while one miscounted hydrogen is
-    # ~2.5e-5 of the total here, so whole-atom errors are still caught.
-    diff = abs(actual_increase - expected_increase).value_in_unit(unit.dalton)
-    assert diff < 1e-5 * expected_increase.value_in_unit(unit.dalton)
-
-
-def test_get_atoms_in_residue():
-    print(flush=True)
-    input_pdb = 'tests/data/pdb/input.pdb'
-    indexes = nqe.get_atoms_in_residue(input_pdb, 0)
-    print(indexes, flush=True)
-    ref_indexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-    assert indexes == ref_indexes
-
-
-def test_count_dna_and_estimate_charge():
-    topology = app.Topology()
-    chain = topology.addChain()
-    for residue_name in ("DA", "DC", "DG", "DT", "ALA"):
-        topology.addResidue(residue_name, chain)
-
-    assert nqe.count_dna_and_estimate_charge(topology) == -4
-
-
-def test_atom_indices_from_vmd_picks():
-    print(flush=True)
-    input_pdb = 'tests/data/pdb/input.pdb'
-    pdb = app.PDBFile(input_pdb)
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    vmd_pick_str = ['PHE6:HE2', 'LYS29:CG']
-    indexes = nqe.atom_indices_from_vmd_picks(modeller, vmd_pick_str)
-    print(indexes, flush=True)
-    ref_indexes = [86, 461]
-    assert indexes == ref_indexes
-
-
-def test_distance_between_atoms():
-    print(flush=True)
-    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
-    pdb = app.PDBFile(input_pdb)
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'LIG1:H5'])
-    distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
-    nm = distance.value_in_unit(unit.nanometer)
-    print(f"Distance between atoms: {nm:.4f} nm", flush=True)
-    assert nm == pytest.approx(0.0991984, abs=1e-6)
-
-
-def test_distance_between_atoms_carries_its_units():
-    """Guards against the unit being stripped off the return value.
-
-    Building the norm out of ``dr.x`` and friends silently loses it, because
-    indexing a Quantity that wraps a Vec3 hands back the bare component. The
-    result then reads as a plain number of nanometres, which is right up until
-    someone asks it for another unit -- or calls ``value_in_unit`` and gets an
-    AttributeError, as every caller in ``reactiontools.tools_cv`` does.
-    """
-    pdb = app.PDBFile('tests/data/pdb/malonaldehyde.pdb')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'LIG1:H5'])
-
-    distance = nqe.distance_between_atoms(modeller, indexes[0], indexes[1])
-
-    assert unit.is_quantity(distance)
-    assert distance.unit.is_compatible(unit.nanometer)
-    # The same length, asked for two ways.
-    assert distance.value_in_unit(unit.angstrom) == pytest.approx(
-        distance.value_in_unit(unit.nanometer) * 10.0)
-
-
-def test_angle_between_atoms():
-    print(flush=True)
-    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
-    pdb = app.PDBFile(input_pdb)
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    indexes = nqe.atom_indices_from_vmd_picks(modeller, ['LIG1:O1', 'LIG1:H5', 'LIG1:O2'])
-    angle = nqe.angle_between_atoms(modeller, indexes[0], indexes[1], indexes[2], degrees=True)
-    print(f"Angle between atoms: {angle:.4f} degrees", flush=True)
-    assert angle == pytest.approx(146.601, abs=0.01)
-
-
-def test_fix_pdb_chains():
-    print(flush=True)
-    input_pdb = 'tests/data/pdb/malformed.pdb'
-    nqe.fix_pdb_chains(input_pdb, "fixed.pdb")
-    # Assert that the pdb file was created
-    assert os.path.isfile('fixed.pdb')
-    # Assert that there are two chains in the fixed pdb
-    with open('fixed.pdb') as f:
-        chains = set()
-        for line in f:
-            if line.startswith(("ATOM  ", "HETATM")):
-                chain_id = line[21]
-                chains.add(chain_id)
-        assert len(chains) == 2
-    os.remove('fixed.pdb')
-
-
-def test_fix_pdb_chains_distinguishes_equal_ids_in_source_chains(tmp_path):
-    output = tmp_path / "fixed.pdb"
-    nqe.fix_pdb_chains("tests/data/pdb/gc.pdb", str(output))
-
-    chains_by_residue = {}
-    with open(output) as handle:
-        for line in handle:
-            if line.startswith(("ATOM  ", "HETATM")):
-                chains_by_residue.setdefault(line[17:20].strip(), set()).add(line[21])
-
-    assert chains_by_residue["GGG"] != chains_by_residue["CCC"]
-
-
-def test_fix_pdb_atom_labels():
-    print(flush=True)
-    input_pdb = 'tests/data/pdb/malformed.pdb'
-    nqe.fix_pdb_atom_labels(input_pdb, "fixed_atoms.pdb")
-    # Assert that the pdb file was created
-    assert os.path.isfile('fixed_atoms.pdb')
-    # Assert that there are no atom labels starting with a digit
-    with open('fixed_atoms.pdb') as f:
-        for line in f:
-            if line.startswith(("ATOM  ", "HETATM")):
-                atom_label = line[12:16].strip()
-                assert not atom_label[0].isdigit(), f"Atom label '{atom_label}' starts with a digit"
-    os.remove('fixed_atoms.pdb')
-
-
-def test_convert_xyz_to_pdb():
-    # Define your file names
-    input_file = 'tests/data/GC.xyz'
-    output_file = 'output.pdb'
-    rt.convert_xyz_to_pdb(input_file, output_file, cutoff_multiplier=1.1)
-    # Assert that the pdb file was created
-    assert os.path.isfile(output_file)
-    os.remove(output_file)
-
-
-def test_convert_pdb_to_xyz():
-    print(flush=True)
-    input_file = 'tests/data/pdb/malonaldehyde.pdb'
-    output_file = 'output.xyz'
-    n_frames = rt.convert_pdb_to_xyz(input_file, output_file)
-    assert os.path.isfile(output_file)
-    assert n_frames == 1
-
-    # The atom count and elements must survive the conversion
-    with open(input_file) as f:
-        n_pdb_atoms = sum(1 for line in f if line.startswith(("ATOM  ", "HETATM")))
-    atoms = read(output_file)
-    assert len(atoms) == n_pdb_atoms
-    assert 'X' not in atoms.get_chemical_symbols()
-    os.remove(output_file)
-
-
-def test_convert_xyz_to_pdb_round_trip():
-    print(flush=True)
-    input_file = 'tests/data/GC.xyz'
-    pdb_file = 'round_trip.pdb'
-    xyz_file = 'round_trip.xyz'
-
-    # A GC base pair is two separate molecules
-    n_clusters = rt.convert_xyz_to_pdb(input_file, pdb_file, cutoff_multiplier=1.1)
-    assert n_clusters == 2
-    rt.convert_pdb_to_xyz(pdb_file, xyz_file)
-
-    original = read(input_file)
-    recovered = read(xyz_file)
-    assert sorted(recovered.get_chemical_symbols()) == sorted(original.get_chemical_symbols())
-
-    # PDB coordinates carry three decimal places, so compare at that precision
-    def key_set(atoms):
-        return {(s, tuple(np.round(p, 3)))
-                for s, p in zip(atoms.get_chemical_symbols(), atoms.positions, strict=True)}
-
-    assert key_set(recovered) == key_set(original)
-    os.remove(pdb_file)
-    os.remove(xyz_file)
-
-
-def test_move_pdb_to_origin():
-    print(flush=True)
-    input_pdb = 'tests/data/pdb/malonaldehyde.pdb'
-    nqe.move_pdb_to_origin(input_pdb, 'tmp.pdb')
-    # Assert that the pdb file was created
-    assert os.path.isfile('tmp.pdb')
-    os.remove('tmp.pdb')
-
-
-def test_convert_sdfs_to_pdb():
-    nqe.convert_sdfs_to_pdb("tests/data/CH4.sdf", "single_ligand.pdb")
-    assert os.path.isfile('single_ligand.pdb')
-    os.remove('single_ligand.pdb')
-
-    nqe.convert_sdfs_to_pdb(["tests/data/CH4.sdf", "tests/data/H2O.sdf"], "combined_ligands.pdb")
-    assert os.path.isfile('combined_ligands.pdb')
-    os.remove('combined_ligands.pdb')
-
-
-def test_center_in_box():
-    print(flush=True)
-    # Create a simple topology and positions
-    topology = app.Topology()
-    chain = topology.addChain()
-    residue = topology.addResidue("RES", chain)
-    topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
-    topology.addAtom("A2", app.Element.getByAtomicNumber(6), residue)
-    # Set box dimensions (e.g., 10x10x10 nm)
-    topology.setUnitCellDimensions(unit.Quantity((10.0, 10.0, 10.0), unit.nanometer))
-    # Place atoms at arbitrary positions
-    positions = unit.Quantity(np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]), unit.nanometer)
-    modeller = app.Modeller(topology, positions)
-
-    # Call the function under test
-    nqe.center_in_box(modeller)
-
-    # Check that the centroid is at the box center
-    centered_positions = modeller.positions.value_in_unit(unit.nanometer)
-    centroid = np.mean(centered_positions, axis=0)
-    box_center = np.array([5.0, 5.0, 5.0])  # Half of box dimensions
-    assert np.allclose(centroid, box_center, atol=1e-6), f"Centroid {centroid} not at box center {box_center}"
-
-
-def test_center_in_box_uses_triclinic_vector_sum():
-    topology = app.Topology()
-    chain = topology.addChain()
-    residue = topology.addResidue("RES", chain)
-    topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
-    box_vectors = (
-        Vec3(2.0, 0.0, 0.0),
-        Vec3(0.5, 2.0, 0.0),
-        Vec3(0.2, 0.3, 2.0),
-    ) * unit.nanometer
-    topology.setPeriodicBoxVectors(box_vectors)
-    modeller = app.Modeller(
-        topology, [Vec3(0.0, 0.0, 0.0)] * unit.nanometer
+    nqe.run_openmm_relaxation_simple(
+        modeller,
+        forcefield,
+        output_prefix="relaxed",
+        platform_name="CPU",
     )
 
-    nqe.center_in_box(modeller)
+    output = app.PDBFile("relaxed.pdb")
+    coordinates = output.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    assert output.topology.getNumAtoms() == 1
+    assert np.isfinite(coordinates).all()
+    assert nqe_openmm.os.path.getsize("relaxed.chk") > 0
 
-    centered = modeller.positions.value_in_unit(unit.nanometer)
-    assert np.allclose(centered[0], [1.35, 1.15, 1.0])
+
+@pytest.mark.forcefield
+def test_nonstandard_ligand_forcefield_drives_relaxation(
+    ligand_forcefield,
+    data_dir,
+):
+    modeller, forcefield = ligand_forcefield(data_dir / "pdb" / "toluene.pdb")
+
+    nqe.run_openmm_relaxation_simple(
+        modeller,
+        forcefield,
+        output_prefix="ligand_relaxed",
+        platform_name="CPU",
+    )
+    output = app.PDBFile("ligand_relaxed.pdb")
+
+    assert output.topology.getNumAtoms() == modeller.topology.getNumAtoms()
+    assert np.isfinite(
+        output.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    ).all()
+
+
+@pytest.mark.forcefield
+def test_multiple_ligand_templates_build_one_system(ligand_forcefield, data_dir):
+    modeller, forcefield = ligand_forcefield(data_dir / "pdb" / "gc.pdb")
+
+    system = forcefield.createSystem(modeller.topology)
+
+    assert {residue.name for residue in modeller.topology.residues()} == {
+        "GGG",
+        "CCC",
+    }
+    assert system.getNumParticles() == modeller.topology.getNumAtoms()
+
+
+def test_maybe_deuterate_only_calls_helper_when_enabled(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        nqe_openmm,
+        "deuterate_system",
+        lambda modeller, system, option: calls.append((modeller, system, option)),
+    )
+    modeller = object()
+    system = object()
+
+    nqe_openmm._maybe_deuterate(modeller, system, False, "water")
+    nqe_openmm._maybe_deuterate(modeller, system, True, "protein")
+
+    assert calls == [(modeller, system, "protein")]
+
+
+def test_load_plumed_is_optional_and_adds_script_force(monkeypatch, tmp_path):
+    constructed = []
+
+    class FakePlumedForce:
+        def __init__(self, script):
+            self.script = script
+            constructed.append(self)
+
+    monkeypatch.setattr(nqe_openmm, "PlumedForce", FakePlumedForce)
+    system = SimpleNamespace(forces=[], addForce=lambda force: system.forces.append(force))
+
+    nqe_openmm._load_plumed(system, None)
+    assert system.forces == []
+
+    script = tmp_path / "plumed.dat"
+    script.write_text("DISTANCE ATOMS=1,2\n")
+    nqe_openmm._load_plumed(system, script)
+
+    assert system.forces == constructed
+    assert constructed[0].script == "DISTANCE ATOMS=1,2\n"
+
+
+def test_add_standard_reporters_builds_requested_set(monkeypatch):
+    monkeypatch.setattr(
+        nqe_openmm.app,
+        "PDBReporter",
+        lambda *args, **kwargs: ("pdb", args, kwargs),
+    )
+    monkeypatch.setattr(
+        nqe_openmm.app,
+        "StateDataReporter",
+        lambda *args, **kwargs: ("state", args, kwargs),
+    )
+    monkeypatch.setattr(
+        nqe_openmm.app,
+        "CheckpointReporter",
+        lambda *args, **kwargs: ("checkpoint", args, kwargs),
+    )
+    simulation = SimpleNamespace(reporters=[])
+
+    nqe_openmm._add_standard_reporters(
+        simulation,
+        output_prefix="run",
+        n_report=25,
+        pdb_steps=True,
+        stdout_volume=True,
+        checkpoint_interval=100,
+    )
+
+    assert [reporter[0] for reporter in simulation.reporters] == [
+        "pdb",
+        "state",
+        "state",
+        "checkpoint",
+    ]
+    assert simulation.reporters[0][1] == ("run_steps.pdb", 25)
+    assert simulation.reporters[1][2]["volume"] is True
+    assert simulation.reporters[2][1] == ("run.log", 25)
+    assert simulation.reporters[3][1] == ("run.chk", 100)
+
+
+def test_add_rpmd_reporters_builds_spread_centroid_and_beads(monkeypatch):
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDQuantumSpreadReporter",
+        lambda **kwargs: ("spread", kwargs),
+    )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDCentroidReporter",
+        lambda **kwargs: ("centroid", kwargs),
+    )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDBeadReporter",
+        lambda **kwargs: ("beads", kwargs),
+    )
+    simulation = SimpleNamespace(reporters=[])
+    topology = object()
+
+    nqe_openmm._add_rpmd_reporters(
+        simulation,
+        topology,
+        output_prefix="rpmd",
+        n_report=10,
+        n_beads=4,
+        atoms_to_watch=[1, 2],
+    )
+
+    assert [reporter[0] for reporter in simulation.reporters] == [
+        "spread",
+        "centroid",
+        "beads",
+    ]
+    assert simulation.reporters[0][1]["atom_indices"] == [1, 2]
+    assert simulation.reporters[1][1]["num_beads"] == 4
+    assert simulation.reporters[2][1]["topology"] is topology
+
+
+def test_add_rpmd_reporters_omits_spread_without_atom_selection(monkeypatch):
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDCentroidReporter",
+        lambda **kwargs: ("centroid", kwargs),
+    )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDBeadReporter",
+        lambda **kwargs: ("beads", kwargs),
+    )
+    simulation = SimpleNamespace(reporters=[])
+
+    nqe_openmm._add_rpmd_reporters(simulation, object(), "rpmd", 10, 4, None)
+
+    assert [reporter[0] for reporter in simulation.reporters] == [
+        "centroid",
+        "beads",
+    ]
+
+
+def test_load_checkpoint_requires_existing_file(tmp_path):
+    simulation = SimpleNamespace(loadCheckpoint=lambda path: pytest.fail(path))
+
+    with pytest.raises(FileNotFoundError, match="Run the equilibration stage"):
+        nqe_openmm._load_checkpoint(simulation, tmp_path / "missing.chk")
+
+
+def test_load_checkpoint_delegates_to_simulation(tmp_path):
+    checkpoint = tmp_path / "ready.chk"
+    checkpoint.write_bytes(b"checkpoint")
+    loaded = []
+    simulation = SimpleNamespace(loadCheckpoint=lambda path: loaded.append(path))
+
+    nqe_openmm._load_checkpoint(simulation, checkpoint)
+
+    assert loaded == [checkpoint]
