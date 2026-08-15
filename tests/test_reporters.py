@@ -13,6 +13,7 @@ from openmmnqe.reporters import (
     RPMDCentroidReporter,
     RPMDQuantumSpreadReporter,
     _calculate_quantum_spread,
+    track_rpmd_atom_expansion,
 )
 import openmmnqe.reporters as reporters
 
@@ -88,6 +89,57 @@ def test_quantum_spread_reporter_writes_header_and_values(tmp_path):
         "Step\tRg_H(nm)\tRg_O(nm)",
         "7\t1.000000\t2.000000",
     ]
+
+
+def test_track_rpmd_atom_expansion_attaches_single_atom_reporter(tmp_path):
+    output = tmp_path / "atom_expansion.tsv"
+    simulation = SimpleNamespace(
+        currentStep=12,
+        reporters=[],
+        integrator=_Integrator(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                [[8.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+            ]
+        ),
+    )
+
+    reporter = track_rpmd_atom_expansion(
+        simulation,
+        atom_index=1,
+        file=output,
+        report_interval=5,
+        name="target",
+    )
+
+    assert simulation.reporters == [reporter]
+    assert reporter.describeNextReport(simulation) == (3, False, False, False, False)
+
+    reporter.report(simulation, state=None)
+    reporter._out.close()
+    assert output.read_text().splitlines() == [
+        "Step\tRg_target(nm)",
+        "12\t1.000000",
+    ]
+
+
+@pytest.mark.parametrize("atom_index", [-1, 1.5, True])
+def test_track_rpmd_atom_expansion_rejects_invalid_atom_index(
+    tmp_path, atom_index,
+):
+    simulation = SimpleNamespace(reporters=[])
+    error = ValueError if atom_index == -1 else TypeError
+
+    with pytest.raises(error, match="atom_index"):
+        track_rpmd_atom_expansion(
+            simulation,
+            atom_index=atom_index,
+            file=tmp_path / "spread.tsv",
+            report_interval=1,
+        )
+
+    assert simulation.reporters == []
+    assert not (tmp_path / "spread.tsv").exists()
 
 
 @pytest.mark.parametrize(

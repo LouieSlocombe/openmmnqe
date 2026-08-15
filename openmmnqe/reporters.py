@@ -9,7 +9,11 @@ reporters do.  They are attached by the ``run_openmm_rpmd_*`` drivers in
 
 All three follow OpenMM's reporter protocol: ``describeNextReport`` says when
 the next report is due and what state it needs, and ``report`` writes it.
+Use :func:`track_rpmd_atom_expansion` to attach the quantum-spread reporter
+for one target atom without constructing it directly.
 """
+from numbers import Integral
+
 import numpy as np
 import openmm.unit as unit
 
@@ -140,6 +144,78 @@ class RPMDQuantumSpreadReporter(object):
         out = getattr(self, "_out", None)
         if out is not None:
             out.close()
+
+
+def track_rpmd_atom_expansion(simulation, atom_index, file, report_interval,
+                              name=None):
+    r"""
+    Track one atom's ring-polymer radius of gyration during an RPMD run.
+
+    The returned reporter is appended to ``simulation.reporters``. At every
+    reporting interval it writes the current simulation step and
+
+    .. math::
+
+        R_g = \sqrt{\frac{1}{P}\sum_{i=1}^{P}
+              \left|\mathbf{r}_i-\bar{\mathbf{r}}\right|^2}
+
+    where ``P`` is the number of beads, ``r_i`` is the target atom's position
+    in bead ``i``, and ``r_bar`` is its ring-polymer centroid. The output is a
+    tab-separated time series with the radius in nanometres.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation driven by an ``openmm.RPMDIntegrator``. The reporter is
+        attached to this object but the simulation is not advanced.
+    atom_index : int
+        Zero-based topology index of the atom whose bead expansion to track.
+    file : str or os.PathLike
+        Output path for the tab-separated time series.
+    report_interval : int
+        Number of integration steps between samples.
+    name : str or None, optional
+        Optional label for the radius-of-gyration column. By default the atom
+        index is used.
+
+    Returns
+    -------
+    RPMDQuantumSpreadReporter
+        The reporter appended to ``simulation.reporters``.
+
+    Raises
+    ------
+    TypeError
+        If ``atom_index`` is not an integer.
+    ValueError
+        If ``atom_index`` is negative or ``report_interval`` is not positive.
+
+    Examples
+    --------
+    Track atom 17 every 100 steps before starting the simulation::
+
+        track_rpmd_atom_expansion(
+            simulation,
+            atom_index=17,
+            file="proton_expansion.tsv",
+            report_interval=100,
+            name="proton",
+        )
+        simulation.step(10_000)
+    """
+    if isinstance(atom_index, bool) or not isinstance(atom_index, Integral):
+        raise TypeError("atom_index must be an integer")
+    if atom_index < 0:
+        raise ValueError("atom_index must be non-negative")
+
+    reporter = RPMDQuantumSpreadReporter(
+        file=file,
+        reportInterval=report_interval,
+        atom_indices=[int(atom_index)],
+        names=None if name is None else [name],
+    )
+    simulation.reporters.append(reporter)
+    return reporter
 
 
 class RPMDBeadReporter(object):

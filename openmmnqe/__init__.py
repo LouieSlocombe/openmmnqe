@@ -86,6 +86,7 @@ from .openmm import (run_openmm_relaxation,
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
+                        track_rpmd_atom_expansion,
                         )
 from .tools import (zero_velocities,
                     write_multimodel_pdb,
