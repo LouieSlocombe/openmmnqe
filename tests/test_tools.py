@@ -97,6 +97,24 @@ def test_zero_velocities_returns_unit_bearing_vectors():
     )
 
 
+def test_write_multimodel_pdb_delegates_model_index(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        nqe_tools.app.PDBFile,
+        "writeModel",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    topology = object()
+    positions = object()
+    handle = object()
+
+    nqe.write_multimodel_pdb(topology, positions, handle, model_index=4)
+
+    assert calls == [
+        ((topology, positions, handle), {"modelIndex": 4})
+    ]
+
+
 def test_thermal_de_broglie_wavelength_accepts_numbers_and_quantities():
     bare = nqe.get_thermal_de_broglie_wavelength(1.0, 300.0)
     quantified = nqe.get_thermal_de_broglie_wavelength(

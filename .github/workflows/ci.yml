@@ -36,4 +36,4 @@ jobs:
           cache-environment: true
       - run: pip install -e . --no-deps
       - run: python -c "import openmmnqe; print(openmmnqe.__version__)"
-      - run: pytest tests --cov=openmmnqe --cov-branch --cov-report=term-missing -q
+      - run: pytest tests --cov=openmmnqe --cov-branch --cov-report=term-missing --cov-fail-under=90 -q

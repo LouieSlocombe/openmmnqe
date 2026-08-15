@@ -61,6 +61,59 @@ def test_xyz_to_sdf_writes_readable_molecule(data_dir, tmp_path):
     assert molecules[0].GetNumBonds() > 0
 
 
+def test_xyz_to_sdf_parses_documented_charge_formats_across_frames(
+    monkeypatch,
+    tmp_path,
+):
+    source = tmp_path / "charges.xyz"
+    source.write_text(
+        "\n".join(
+            [
+                "1",
+                "anion charge=-1",
+                "H 0 0 0",
+                "1",
+                "cation q: +2",
+                "H 0 0 0",
+                "1",
+                "state +3 selected",
+                "H 0 0 0",
+                "1",
+                "no charge here",
+                "H 0 0 0",
+                "1",
+                "",
+                "H 0 0 0",
+            ]
+        )
+    )
+    output = tmp_path / "charges.sdf"
+    charges = []
+    monkeypatch.setattr(
+        nqe_io.rdDetermineBonds,
+        "DetermineBonds",
+        lambda molecule, charge: charges.append(charge),
+    )
+
+    count = nqe.xyz_to_sdf(
+        source,
+        output,
+        default_charge=7,
+        sanitize=False,
+    )
+    molecules = list(Chem.SDMolSupplier(str(output), removeHs=False, sanitize=False))
+
+    assert count == 5
+    assert charges == [-1, 2, 3, 7, 7]
+    assert [molecule.GetProp("_Name") for molecule in molecules] == [
+        "anion charge=-1",
+        "cation q: +2",
+        "state +3 selected",
+        "no charge here",
+        "charges_5",
+    ]
+
+
 @pytest.mark.parametrize(
     ("contents", "message"),
     [

@@ -198,6 +198,78 @@ def test_add_rpmd_reporters_omits_spread_without_atom_selection(monkeypatch):
     ]
 
 
+def test_save_final_state_checkpoints_and_uses_context_positions(monkeypatch, tmp_path):
+    saved_checkpoints = []
+    state_requests = []
+    written = []
+    final_positions = object()
+    topology = object()
+
+    def get_state(**kwargs):
+        state_requests.append(kwargs)
+        return SimpleNamespace(getPositions=lambda: final_positions)
+
+    def write_file(actual_topology, positions, handle):
+        written.append((actual_topology, positions, handle.name))
+        handle.write("final state")
+
+    monkeypatch.setattr(nqe_openmm.app.PDBFile, "writeFile", write_file)
+    simulation = SimpleNamespace(
+        topology=topology,
+        context=SimpleNamespace(getState=get_state),
+        saveCheckpoint=lambda path: saved_checkpoints.append(path),
+    )
+    prefix = tmp_path / "classical"
+
+    nqe_openmm._save_final_state(simulation, str(prefix))
+
+    assert saved_checkpoints == [str(prefix) + ".chk"]
+    assert state_requests == [{"getPositions": True}]
+    assert written == [(topology, final_positions, str(prefix) + ".pdb")]
+    assert prefix.with_suffix(".pdb").read_text() == "final state"
+
+
+def test_save_final_rpmd_state_uses_centroid_and_custom_suffix(monkeypatch, tmp_path):
+    centroid_positions = object()
+    centroid_calls = []
+    written = []
+    topology = SimpleNamespace(getNumAtoms=lambda: 2)
+    simulation = SimpleNamespace(
+        topology=topology,
+        context=SimpleNamespace(
+            getState=lambda **kwargs: pytest.fail("context positions are bead 0")
+        ),
+        saveCheckpoint=lambda path: pytest.fail("checkpoint was disabled"),
+    )
+
+    monkeypatch.setattr(
+        nqe_openmm,
+        "centroid_positions",
+        lambda *args: centroid_calls.append(args) or centroid_positions,
+    )
+    monkeypatch.setattr(
+        nqe_openmm.app.PDBFile,
+        "writeFile",
+        lambda actual_topology, positions, handle: written.append(
+            (actual_topology, positions, handle.name)
+        ),
+    )
+    prefix = tmp_path / "rpmd"
+
+    nqe_openmm._save_final_state(
+        simulation,
+        str(prefix),
+        pdb_suffix="_centroid.pdb",
+        save_checkpoint=False,
+        n_beads=8,
+    )
+
+    assert centroid_calls == [(simulation, 2, 8)]
+    assert written == [
+        (topology, centroid_positions, str(prefix) + "_centroid.pdb")
+    ]
+
+
 def test_load_checkpoint_requires_existing_file(tmp_path):
     simulation = SimpleNamespace(loadCheckpoint=lambda path: pytest.fail(path))
 
