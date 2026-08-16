@@ -40,6 +40,43 @@ def zero_velocities(n_atoms):
     return [openmm.Vec3(0, 0, 0) for _ in range(n_atoms)] * (unit.nanometer / unit.picosecond)
 
 
+def _sample_maxwell_boltzmann_velocities(system, temperature, n_copies, rng):
+    """Draw independent particle velocities for *n_copies* at *temperature*."""
+    if n_copies <= 0:
+        raise ValueError("n_copies must be positive")
+    if unit.is_quantity(temperature):
+        temperature_k = temperature.value_in_unit(unit.kelvin)
+    else:
+        temperature_k = float(temperature)
+    if not np.isfinite(temperature_k) or temperature_k <= 0:
+        raise ValueError("temperature must be finite and positive")
+
+    masses_amu = np.asarray([
+        system.getParticleMass(index).value_in_unit(unit.dalton)
+        for index in range(system.getNumParticles())
+    ])
+    if not np.isfinite(masses_amu).all() or np.any(masses_amu < 0):
+        raise ValueError("particle masses must be finite and non-negative")
+
+    # OpenMM's RPMD Hamiltonian thermalizes each bead with n_copies*k_B*T
+    # (``nkT`` in its PILE implementation).  Therefore a bead velocity has
+    # sigma=sqrt(n_copies*k_B*T/m), not the classical sqrt(k_B*T/m).  The
+    # result below is in m/s; one m/s is 0.001 nm/ps.  Massless particles
+    # (typically virtual sites) do not carry momenta and remain at zero.
+    sigma_nm_per_ps = np.zeros_like(masses_amu, dtype=float)
+    massive = masses_amu > 0
+    sigma_nm_per_ps[massive] = (
+        np.sqrt(
+            n_copies * constants.k * temperature_k
+            / (masses_amu[massive] * constants.atomic_mass)
+        )
+        * 1.0e-3
+    )
+    velocities = rng.normal(size=(n_copies, len(masses_amu), 3))
+    velocities *= sigma_nm_per_ps[np.newaxis, :, np.newaxis]
+    return velocities * (unit.nanometer / unit.picosecond)
+
+
 def write_multimodel_pdb(topology, positions, fh, model_index):
     """
     Append one model to an open multi-model PDB file.
@@ -205,14 +242,18 @@ def init_beads_scaled(simulation, positions, n_beads, temperature, scale_factor=
     simulation.context.setVelocitiesToTemperature(temperature)
 
 
-def init_beads(modeller, simulation, n_beads, perturb=0.002):
+def init_beads(modeller, simulation, n_beads, perturb=0.002,
+               temperature=None, seed=0):
     """
-    Seed RPMD bead positions with a uniform jiggle and zero velocities.
+    Seed RPMD bead positions and independent thermal velocities.
 
     Beads that all start at the same point stay collapsed on top of one
     another, so each is displaced by a small random amount.  The displacement
     is the same size for every atom; :func:`init_beads_scaled` sizes it per
-    atom instead, at the cost of needing a temperature.
+    atom instead. Each copy receives an independent Maxwell-Boltzmann velocity
+    sample based on the particle masses and RPMD temperature. Following
+    OpenMM's RPMD Hamiltonian convention, each copy's velocity variance is
+    ``n_beads*k_B*T/m``. Massless particles receive zero velocity.
 
     Parameters
     ----------
@@ -225,16 +266,44 @@ def init_beads(modeller, simulation, n_beads, perturb=0.002):
     perturb : float, optional
         Standard deviation of the displacement, in nanometres. Default is
         0.002.
+    temperature : openmm.unit.Quantity or float or None, optional
+        Temperature for velocity sampling. A bare number is interpreted as
+        kelvin. If None, use the RPMD integrator temperature. Default is None.
+    seed : int or None, optional
+        NumPy random seed used for both position and velocity sampling. Pass
+        None for entropy-based seeding. Default is 0 for reproducibility.
     """
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
+    if n_beads <= 0:
+        raise ValueError("n_beads must be positive")
+    if hasattr(simulation.integrator, "getNumCopies"):
+        integrator_beads = simulation.integrator.getNumCopies()
+        if integrator_beads != n_beads:
+            raise ValueError(
+                f"n_beads={n_beads} does not match RPMDIntegrator "
+                f"copies={integrator_beads}"
+            )
     pos0 = modeller.positions
     n_atoms = len(pos0)
+    if simulation.system.getNumParticles() != n_atoms:
+        raise ValueError(
+            f"Modeller has {n_atoms} positions, but the System has "
+            f"{simulation.system.getNumParticles()} particles"
+        )
+    if temperature is None:
+        temperature = simulation.integrator.getTemperature()
+    jiggles = perturb * rng.normal(size=(n_beads, n_atoms, 3))
+    velocities = _sample_maxwell_boltzmann_velocities(
+        simulation.system,
+        temperature,
+        n_beads,
+        rng,
+    )
     for b in range(n_beads):
-        jiggle = perturb * rng.normal(size=(n_atoms, 3))
         bead_pos = [openmm.Vec3(p.x + dx, p.y + dy, p.z + dz)
-                    for p, (dx, dy, dz) in zip(pos0, jiggle)]
+                    for p, (dx, dy, dz) in zip(pos0, jiggles[b])]
         simulation.integrator.setPositions(b, bead_pos * unit.nanometer)
-        simulation.integrator.setVelocities(b, zero_velocities(n_atoms))
+        simulation.integrator.setVelocities(b, velocities[b])
 
 
 def count_dna_and_estimate_charge(topology):

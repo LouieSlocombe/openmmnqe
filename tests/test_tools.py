@@ -25,7 +25,8 @@ class _State:
 
 
 class _Integrator:
-    def __init__(self, bead_positions=(), box_vectors=None):
+    def __init__(self, bead_positions=(), box_vectors=None,
+                 temperature=300.0 * unit.kelvin):
         box_vectors = np.eye(3) if box_vectors is None else box_vectors
         self._states = [
             _State(positions, box_vectors)
@@ -34,6 +35,7 @@ class _Integrator:
         self.positions = {}
         self.velocities = {}
         self.particle_types = {}
+        self.temperature = temperature
 
     def getState(self, bead, **kwargs):
         return self._states[bead]
@@ -43,6 +45,9 @@ class _Integrator:
 
     def setVelocities(self, bead, velocities):
         self.velocities[bead] = velocities
+
+    def getTemperature(self):
+        return self.temperature
 
     def setParticleType(self, particle, particle_type):
         self.particle_types[particle] = particle_type
@@ -132,13 +137,21 @@ def test_thermal_de_broglie_wavelength_accepts_numbers_and_quantities():
     )
 
 
-def test_init_beads_is_deterministic_and_sets_zero_velocities():
+def test_init_beads_is_deterministic_and_sets_independent_thermal_velocities():
     modeller = _single_atom_modeller((1.0, 2.0, 3.0))
     first = _Integrator()
     second = _Integrator()
+    first_simulation = SimpleNamespace(
+        integrator=first,
+        system=_System(masses=[1.0]),
+    )
+    second_simulation = SimpleNamespace(
+        integrator=second,
+        system=_System(masses=[1.0]),
+    )
 
-    nqe.init_beads(modeller, SimpleNamespace(integrator=first), 2, perturb=0.01)
-    nqe.init_beads(modeller, SimpleNamespace(integrator=second), 2, perturb=0.01)
+    nqe.init_beads(modeller, first_simulation, 2, perturb=0.01)
+    nqe.init_beads(modeller, second_simulation, 2, perturb=0.01)
 
     assert set(first.positions) == {0, 1}
     for bead in (0, 1):
@@ -150,8 +163,94 @@ def test_init_beads_is_deterministic_and_sets_zero_velocities():
             first.velocities[bead].value_in_unit(
                 unit.nanometer / unit.picosecond
             ),
+            second.velocities[bead].value_in_unit(
+                unit.nanometer / unit.picosecond
+            ),
+        )
+        assert not np.allclose(
+            first.velocities[bead].value_in_unit(
+                unit.nanometer / unit.picosecond
+            ),
             0.0,
         )
+    assert not np.allclose(
+        first.velocities[0].value_in_unit(unit.nanometer / unit.picosecond),
+        first.velocities[1].value_in_unit(unit.nanometer / unit.picosecond),
+    )
+
+
+def test_init_beads_velocity_scale_tracks_mass_and_skips_massless_particles():
+    masses = [1.0, 4.0, 0.0]
+    modeller = SimpleNamespace(
+        positions=[openmm.Vec3(0.0, 0.0, 0.0) for _ in masses]
+        * unit.nanometer,
+    )
+    integrator = _Integrator()
+    simulation = SimpleNamespace(
+        integrator=integrator,
+        system=_System(masses=masses),
+    )
+
+    n_beads = 2_000
+    temperature = 300.0 * unit.kelvin
+    nqe.init_beads(
+        modeller,
+        simulation,
+        n_beads=n_beads,
+        perturb=0.0,
+        temperature=temperature,
+        seed=123,
+    )
+    velocities = np.asarray([
+        integrator.velocities[bead].value_in_unit(
+            unit.nanometer / unit.picosecond
+        )
+        for bead in range(n_beads)
+    ])
+
+    light_std = velocities[:, 0].std()
+    heavy_std = velocities[:, 1].std()
+    expected_light_std = np.sqrt(
+        (
+            unit.MOLAR_GAS_CONSTANT_R
+            * n_beads
+            * temperature
+            / (masses[0] * unit.dalton)
+        ).value_in_unit((unit.nanometer / unit.picosecond) ** 2)
+    )
+    assert light_std == pytest.approx(expected_light_std, rel=0.03)
+    assert light_std / heavy_std == pytest.approx(2.0, rel=0.05)
+    assert np.allclose(velocities[:, 2], 0.0)
+
+
+def test_init_beads_sets_velocities_on_real_rpmd_copies():
+    modeller = _single_atom_modeller()
+    system = openmm.System()
+    system.addParticle(1.0 * unit.dalton)
+    integrator = openmm.RPMDIntegrator(
+        2,
+        300.0 * unit.kelvin,
+        1.0 / unit.picosecond,
+        0.1 * unit.femtosecond,
+    )
+    simulation = app.Simulation(
+        modeller.topology,
+        system,
+        integrator,
+        openmm.Platform.getPlatformByName("Reference"),
+    )
+
+    nqe.init_beads(modeller, simulation, n_beads=2, seed=7)
+    velocities = [
+        integrator.getState(bead, getVelocities=True)
+        .getVelocities(asNumpy=True)
+        .value_in_unit(unit.nanometer / unit.picosecond)
+        for bead in range(2)
+    ]
+
+    assert not np.allclose(velocities[0], 0.0)
+    assert not np.allclose(velocities[1], 0.0)
+    assert not np.allclose(velocities[0], velocities[1])
 
 
 def test_init_beads_scaled_spreads_light_atoms_further():

@@ -1209,8 +1209,6 @@ def run_openmm_rpmd_equilibration(modeller,
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    simulation.context.setPositions(modeller.positions)
-    simulation.context.setVelocitiesToTemperature(temperature)
 
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)

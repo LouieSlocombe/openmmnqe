@@ -447,6 +447,8 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
         0.6,
     ]
     assert simulation.steps == [2, 5]
+    assert simulation.context.positions == []
+    assert simulation.context.velocity_temperatures == []
     assert runtime.calls.bead_initializations == [
         (runtime.modeller, simulation, 8)
     ]
