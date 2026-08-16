@@ -140,6 +140,40 @@ def test_add_standard_reporters_builds_requested_set(monkeypatch):
     assert simulation.reporters[3][1] == ("run.chk", 100)
 
 
+def test_add_rpmd_progress_reporters_omit_context_thermodynamics(monkeypatch):
+    monkeypatch.setattr(
+        nqe_openmm.app,
+        "StateDataReporter",
+        lambda *args, **kwargs: ("state", args, kwargs),
+    )
+    simulation = SimpleNamespace(reporters=[])
+
+    nqe_openmm._add_rpmd_progress_reporters(
+        simulation,
+        output_prefix="rpmd",
+        n_report=25,
+    )
+
+    assert [reporter[1] for reporter in simulation.reporters] == [
+        (nqe_openmm.sys.stdout, 25),
+        ("rpmd.log", 25),
+    ]
+    assert simulation.reporters[0][2] == {"step": True, "speed": True}
+    assert simulation.reporters[1][2] == {
+        "step": True,
+        "time": True,
+        "speed": True,
+        "volume": True,
+    }
+    for _, _, options in simulation.reporters:
+        assert not {
+            "potentialEnergy",
+            "kineticEnergy",
+            "totalEnergy",
+            "temperature",
+        }.intersection(options)
+
+
 def test_add_rpmd_reporters_builds_spread_centroid_and_beads(monkeypatch):
     monkeypatch.setattr(
         nqe_openmm,
@@ -295,13 +329,18 @@ def test_load_checkpoint_delegates_to_simulation(tmp_path):
     assert loaded == [checkpoint]
 
 
-def _make_rpmd_restart_simulation(num_beads=2):
+def _make_rpmd_restart_simulation(
+    num_beads=2,
+    particle_mass=39.9,
+    atom_name="Ar",
+    temperature=300.0,
+):
     topology = app.Topology()
     residue = topology.addResidue("AR", topology.addChain())
-    topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
+    topology.addAtom(atom_name, app.Element.getBySymbol("Ar"), residue)
 
     system = openmm.System()
-    system.addParticle(39.9 * unit.dalton)
+    system.addParticle(particle_mass * unit.dalton)
     system.setDefaultPeriodicBoxVectors(
         Vec3(2.0, 0.0, 0.0),
         Vec3(0.0, 2.0, 0.0),
@@ -315,7 +354,7 @@ def _make_rpmd_restart_simulation(num_beads=2):
 
     integrator = openmm.RPMDIntegrator(
         num_beads,
-        300.0 * unit.kelvin,
+        temperature * unit.kelvin,
         1.0 / unit.picosecond,
         0.1 * unit.femtosecond,
     )
@@ -327,6 +366,102 @@ def _make_rpmd_restart_simulation(num_beads=2):
         openmm.Platform.getPlatformByName("Reference"),
     )
     return simulation
+
+
+def _write_test_rpmd_restart(checkpoint):
+    simulation = _make_rpmd_restart_simulation()
+    for bead in range(2):
+        simulation.integrator.setPositions(
+            bead,
+            np.asarray([[0.1 + bead, 0.2, 0.3]]) * unit.nanometer,
+        )
+        simulation.integrator.setVelocities(
+            bead,
+            np.asarray([[0.4 + bead, 0.5, 0.6]])
+            * unit.nanometer
+            / unit.picosecond,
+        )
+    nqe_openmm._save_rpmd_restart(simulation, checkpoint, n_beads=2)
+    return simulation
+
+
+def _replace_test_restart_fields(checkpoint, **updates):
+    with np.load(checkpoint, allow_pickle=False) as archive:
+        fields = {name: np.array(archive[name]) for name in archive.files}
+    fields.update(updates)
+    with checkpoint.open("wb") as handle:
+        np.savez(handle, **fields)
+
+
+def test_rpmd_topology_signature_tracks_atom_order():
+    def topology_with_order(names):
+        topology = app.Topology()
+        residue = topology.addResidue("MIX", topology.addChain())
+        for name in names:
+            topology.addAtom(name, app.Element.getBySymbol(name), residue)
+        return topology
+
+    hydrogen_then_oxygen = topology_with_order(["H", "O"])
+    oxygen_then_hydrogen = topology_with_order(["O", "H"])
+
+    assert nqe_openmm._topology_identity_signature(
+        hydrogen_then_oxygen
+    ) != nqe_openmm._topology_identity_signature(oxygen_then_hydrogen)
+
+
+def test_rpmd_topology_signature_survives_pdb_round_trip(tmp_path):
+    topology = app.Topology()
+    chain = topology.addChain("X")
+    residue = topology.addResidue("HOH", chain, id="42")
+    oxygen = topology.addAtom(
+        "O", app.Element.getBySymbol("O"), residue, id="9"
+    )
+    hydrogen_1 = topology.addAtom(
+        "H1", app.Element.getBySymbol("H"), residue, id="12"
+    )
+    hydrogen_2 = topology.addAtom(
+        "H2", app.Element.getBySymbol("H"), residue, id="14"
+    )
+    topology.addBond(oxygen, hydrogen_1, type=app.Single, order=1)
+    topology.addBond(oxygen, hydrogen_2, type=app.Single, order=1)
+    positions = np.asarray([
+        [0.0, 0.0, 0.0],
+        [0.0957, 0.0, 0.0],
+        [-0.0240, 0.0927, 0.0],
+    ]) * unit.nanometer
+
+    pdb_path = tmp_path / "round_trip.pdb"
+    with pdb_path.open("w") as handle:
+        app.PDBFile.writeFile(topology, positions, handle)
+    reloaded_topology = app.PDBFile(str(pdb_path)).topology
+
+    assert nqe_openmm._topology_identity_signature(
+        topology
+    ) == nqe_openmm._topology_identity_signature(reloaded_topology)
+
+
+@pytest.mark.parametrize(
+    ("residue_name", "atom_name", "description"),
+    [
+        ("LONG", "C", "residue 0"),
+        ("LIG", "CARBO", "atom 0"),
+        ("LIG", "C Å", "atom 0"),
+    ],
+)
+def test_rpmd_topology_signature_rejects_non_pdb_identity_names(
+    residue_name,
+    atom_name,
+    description,
+):
+    topology = app.Topology()
+    residue = topology.addResidue(residue_name, topology.addChain())
+    topology.addAtom(atom_name, app.Element.getBySymbol("C"), residue)
+
+    with pytest.raises(
+        ValueError,
+        match=rf"{description} name .* is not representable",
+    ):
+        nqe_openmm._topology_identity_signature(topology)
 
 
 def test_rpmd_restart_round_trip_preserves_every_copy(tmp_path):
@@ -352,6 +487,12 @@ def test_rpmd_restart_round_trip_preserves_every_copy(tmp_path):
     checkpoint = tmp_path / "rpmd_ready.chk"
     nqe_openmm._save_rpmd_restart(source, checkpoint, n_beads=2)
 
+    with np.load(checkpoint, allow_pickle=False) as archive:
+        assert archive["format_version"].item() == 2
+        assert archive["particle_masses_dalton"] == pytest.approx([39.9])
+        assert archive["temperature_kelvin"].item() == pytest.approx(300.0)
+        assert len(archive["topology_signature_sha256"].item()) == 64
+
     restored = _make_rpmd_restart_simulation()
     nqe_openmm._load_checkpoint(restored, checkpoint, n_beads=2)
 
@@ -374,10 +515,11 @@ def test_rpmd_restart_round_trip_preserves_every_copy(tmp_path):
             source_velocities[bead],
         )
 
-    # Use the integrator directly: OpenMM 8.5's RPMD plugin advances time but
-    # does not update Context.stepCount, which makes Simulation.step() loop.
-    # The integrator step still exercises RPMD's first-step state handling.
-    restored.integrator.step(1)
+    # Continue from the restored nonzero step through the RPMD-compatible
+    # stepper, exercising both first-step state handling and reporter-count
+    # bookkeeping on OpenMM versions whose RPMD kernel leaves it unchanged.
+    nqe.step_rpmd(restored, 1)
+    assert restored.currentStep == 18
     stepped_positions = [
         restored.integrator.getState(bead, getPositions=True)
         .getPositions(asNumpy=True)
@@ -385,6 +527,132 @@ def test_rpmd_restart_round_trip_preserves_every_copy(tmp_path):
         for bead in range(2)
     ]
     assert not np.allclose(stepped_positions[0], stepped_positions[1])
+
+
+def test_rpmd_load_rejects_particle_mass_mismatch(tmp_path):
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+
+    restored = _make_rpmd_restart_simulation(particle_mass=40.0)
+    with pytest.raises(ValueError, match="particle mass 0 does not match"):
+        nqe_openmm._load_checkpoint(restored, checkpoint, n_beads=2)
+
+
+def test_rpmd_load_rejects_ordered_atom_identity_mismatch(tmp_path):
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+
+    restored = _make_rpmd_restart_simulation(atom_name="XAr")
+    with pytest.raises(ValueError, match="atom/topology identity does not match"):
+        nqe_openmm._load_checkpoint(restored, checkpoint, n_beads=2)
+
+
+def test_rpmd_load_rejects_temperature_mismatch(tmp_path):
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+
+    restored = _make_rpmd_restart_simulation(temperature=310.0)
+    with pytest.raises(ValueError, match="temperature 300.0 K does not match"):
+        nqe_openmm._load_checkpoint(restored, checkpoint, n_beads=2)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("format_version", np.asarray(2.9), "scalar integer"),
+        ("num_beads", np.asarray(True), "scalar integer"),
+        ("num_particles", np.asarray(1.9), "scalar integer"),
+        ("periodic", np.asarray("False"), "scalar boolean"),
+        ("step_count", np.asarray(17.9), "scalar integer"),
+        ("temperature_kelvin", np.asarray(300), "scalar float"),
+        (
+            "topology_signature_sha256",
+            np.asarray(["a" * 64]),
+            "must be a scalar",
+        ),
+    ],
+)
+def test_rpmd_restart_rejects_malformed_scalar_schema(
+    tmp_path,
+    field,
+    value,
+    message,
+):
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+    _replace_test_restart_fields(checkpoint, **{field: value})
+
+    with pytest.raises(ValueError, match=rf"{field}.*{message}"):
+        nqe_openmm._read_rpmd_restart(checkpoint)
+
+
+@pytest.mark.parametrize("n_beads", [True, np.bool_(False), 0, -1, 2.0])
+def test_rpmd_restart_requires_positive_integer_n_beads(tmp_path, n_beads):
+    simulation = _make_rpmd_restart_simulation()
+
+    with pytest.raises(ValueError, match="n_beads must be a positive integer"):
+        nqe_openmm._save_rpmd_restart(
+            simulation,
+            tmp_path / "rpmd_ready.chk",
+            n_beads=n_beads,
+        )
+    with pytest.raises(ValueError, match="n_beads must be a positive integer"):
+        nqe_openmm._load_rpmd_restart(
+            SimpleNamespace(),
+            tmp_path / "unused.chk",
+            n_beads=n_beads,
+        )
+
+
+def test_rpmd_restart_wraps_initial_bad_zip(monkeypatch, tmp_path):
+    checkpoint = tmp_path / "corrupt.chk"
+    checkpoint.touch()
+
+    def raise_bad_zip(*args, **kwargs):
+        raise nqe_openmm.zipfile.BadZipFile("broken central directory")
+
+    monkeypatch.setattr(nqe_openmm.np, "load", raise_bad_zip)
+
+    with pytest.raises(ValueError, match="corrupt or unreadable.*rerun"):
+        nqe_openmm._read_rpmd_restart(checkpoint)
+
+
+def test_rpmd_restart_wraps_lazy_bad_zip(monkeypatch, tmp_path):
+    class CorruptArchive:
+        files = ["kind", "format_version"]
+
+        def __init__(self):
+            self.closed = False
+
+        def __getitem__(self, name):
+            raise nqe_openmm.zipfile.BadZipFile(f"bad CRC for {name}")
+
+        def close(self):
+            self.closed = True
+
+    archive = CorruptArchive()
+    monkeypatch.setattr(nqe_openmm.np, "load", lambda *args, **kwargs: archive)
+
+    with pytest.raises(ValueError, match="corrupt or unreadable.*rerun"):
+        nqe_openmm._read_rpmd_restart(tmp_path / "corrupt.chk")
+    assert archive.closed
+
+
+def test_rpmd_load_rejects_version_one_restart_with_rerun_message(tmp_path):
+    checkpoint = tmp_path / "rpmd_v1.chk"
+    with checkpoint.open("wb") as handle:
+        np.savez(
+            handle,
+            kind=np.asarray(nqe_openmm._RPMD_RESTART_KIND),
+            format_version=np.asarray(1, dtype=np.int64),
+        )
+
+    with pytest.raises(ValueError, match="version 1.*Rerun RPMD equilibration"):
+        nqe_openmm._load_checkpoint(
+            SimpleNamespace(),
+            checkpoint,
+            n_beads=2,
+        )
 
 
 def test_rpmd_load_rejects_legacy_context_checkpoint(tmp_path):

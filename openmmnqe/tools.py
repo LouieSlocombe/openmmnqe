@@ -14,6 +14,7 @@ and daltons respectively.
 import math
 import os
 import re
+from numbers import Integral
 from typing import Dict, Sequence, Any, List, Union, Literal, Optional
 
 import numpy as np
@@ -75,6 +76,74 @@ def _sample_maxwell_boltzmann_velocities(system, temperature, n_copies, rng):
     velocities = rng.normal(size=(n_copies, len(masses_amu), 3))
     velocities *= sigma_nm_per_ps[np.newaxis, :, np.newaxis]
     return velocities * (unit.nanometer / unit.picosecond)
+
+
+def _sample_free_ring_polymer_displacements(
+    masses_amu,
+    temperature,
+    n_copies,
+    rng,
+    scale_factor=1.0,
+):
+    """Draw free-ring-polymer coordinates with a fixed zero centroid.
+
+    OpenMM evolves mode ``k`` at angular frequency
+    ``2*P*k_B*T/hbar*sin(pi*k/P)`` and thermalizes its RPMD Hamiltonian at
+    ``P*T``.  In an orthonormal normal-mode basis, each non-centroid real
+    coordinate therefore has variance ``P*k_B*T/(m*omega_k**2)``.
+    """
+    if unit.is_quantity(temperature):
+        temperature_k = temperature.value_in_unit(unit.kelvin)
+    else:
+        temperature_k = float(temperature)
+    if not np.isfinite(temperature_k) or temperature_k <= 0:
+        raise ValueError("temperature must be finite and positive")
+
+    masses_amu = np.asarray(masses_amu, dtype=float)
+    n_atoms = len(masses_amu)
+    coefficients = np.zeros(
+        (n_copies // 2 + 1, n_atoms, 3),
+        dtype=np.complex128,
+    )
+    massive = masses_amu > 0
+    mass_kg = masses_amu[massive] * constants.atomic_mass
+    omega_p = n_copies * constants.k * temperature_k / constants.hbar
+
+    for mode in range(1, n_copies // 2 + 1):
+        omega_k = 2.0 * omega_p * np.sin(np.pi * mode / n_copies)
+        sigma_nm = np.zeros(n_atoms)
+        sigma_nm[massive] = (
+            np.sqrt(
+                n_copies * constants.k * temperature_k
+                / (mass_kg * omega_k**2)
+            )
+            * 1.0e9
+        )
+
+        is_nyquist = n_copies % 2 == 0 and mode == n_copies // 2
+        if is_nyquist:
+            coefficients[mode].real = (
+                rng.normal(size=(n_atoms, 3)) * sigma_nm[:, np.newaxis]
+            )
+        else:
+            component_sigma = sigma_nm / np.sqrt(2.0)
+            coefficients[mode] = (
+                rng.normal(size=(n_atoms, 3))
+                + 1j * rng.normal(size=(n_atoms, 3))
+            ) * component_sigma[:, np.newaxis]
+
+    # NumPy's inverse transform has a 1/P normalization. Multiplication by
+    # sqrt(P) converts the orthonormal Fourier coefficients above back to
+    # bead coordinates. The zero coefficient fixes the supplied centroid.
+    displacements = (
+        np.fft.irfft(coefficients, n=n_copies, axis=0)
+        * np.sqrt(n_copies)
+        * scale_factor
+    )
+    # Remove the last few bits of roundoff from the inverse FFT so that the
+    # supplied coordinates remain the centroid to machine precision.
+    displacements -= displacements.mean(axis=0, keepdims=True)
+    return displacements
 
 
 def write_multimodel_pdb(topology, positions, fh, model_index):
@@ -158,8 +227,7 @@ def get_thermal_de_broglie_wavelength(mass, temperature):
     Compute the thermal de Broglie wavelength of a particle.
 
     This length sets the scale over which a particle behaves as a wave rather
-    than a point, and so how far apart the beads of its ring polymer should
-    start; see :func:`init_beads`.
+    than a point and characterizes the spatial extent of its ring polymer.
 
     Parameters
     ----------
@@ -191,18 +259,19 @@ def get_thermal_de_broglie_wavelength(mass, temperature):
     return lambda_meters * unit.meter
 
 
-def init_beads(modeller, simulation, n_beads, scale_factor=0.1,
-               temperature=None, seed=0):
+def init_beads(modeller, simulation, n_beads, scale_factor=1.0,
+               temperature=None, seed=None):
     """
     Seed RPMD bead positions and velocities at the simulation temperature.
 
-    Every bead starts at the Modeller positions plus Gaussian noise scaled by
-    each atom's thermal de Broglie wavelength, so light atoms open out further
-    than heavy ones. The displacements are centered over the copies for each
-    atom, preserving the Modeller positions as the ring-polymer centroid. Each
-    copy receives an independent Maxwell-Boltzmann velocity sample based on
-    the particle masses and RPMD temperature. Following OpenMM's RPMD
-    Hamiltonian convention, each copy's velocity variance is
+    Every bead starts at the Modeller positions plus an equilibrium free-ring-
+    polymer displacement. Non-centroid normal mode ``k`` has variance
+    ``n_beads*k_B*T/(m*omega_k**2)``, where OpenMM uses
+    ``omega_k = 2*n_beads*k_B*T/hbar*sin(pi*k/n_beads)``. The centroid mode is
+    held at zero, preserving the Modeller positions as the ring-polymer
+    centroid. Each copy receives an independent Maxwell-Boltzmann velocity
+    sample based on the particle masses and RPMD temperature. Following
+    OpenMM's RPMD Hamiltonian convention, each copy's velocity variance is
     ``n_beads*k_B*T/m``. Massless particles remain at the supplied position
     and receive zero velocity.
 
@@ -215,17 +284,38 @@ def init_beads(modeller, simulation, n_beads, scale_factor=0.1,
     n_beads : int
         Number of beads in the ring polymer.
     scale_factor : float, optional
-        Fraction of each atom's thermal de Broglie wavelength used as the
-        position-displacement standard deviation. Default is 0.1.
+        Multiplier applied to the equilibrium free-ring-polymer mode
+        amplitudes. The default, 1.0, gives their exact free-particle thermal
+        distribution. Values other than 1.0 deliberately contract or expand
+        the ring polymer.
     temperature : openmm.unit.Quantity or float or None, optional
-        Temperature for velocity sampling. A bare number is interpreted as
-        kelvin. If None, use the RPMD integrator temperature. Default is None.
+        Temperature for position and velocity sampling. A bare number is
+        interpreted as kelvin. If specified, it must match the RPMD
+        integrator temperature. If None, use the integrator temperature.
+        Default is None.
     seed : int or None, optional
         NumPy random seed used for both position and velocity sampling. Pass
-        None for entropy-based seeding. Default is 0 for reproducibility.
+        an integer for reproducible initialization. Default is None for
+        entropy-based seeding.
     """
-    if n_beads <= 0:
-        raise ValueError("n_beads must be positive")
+    if (
+        isinstance(n_beads, (bool, np.bool_))
+        or not isinstance(n_beads, (int, np.integer))
+        or n_beads <= 0
+    ):
+        raise ValueError("n_beads must be a positive integer")
+    n_beads = int(n_beads)
+    if (
+        seed is not None
+        and (
+            isinstance(seed, (bool, np.bool_))
+            or not isinstance(seed, (int, np.integer))
+            or seed < 0
+        )
+    ):
+        raise ValueError("seed must be a non-negative integer or None")
+    if seed is not None:
+        seed = int(seed)
     if not np.isfinite(scale_factor) or scale_factor < 0:
         raise ValueError("scale_factor must be finite and non-negative")
 
@@ -248,8 +338,41 @@ def init_beads(modeller, simulation, n_beads, scale_factor=0.1,
         raise ValueError(
             f"positions must have shape ({n_atoms}, 3), got {pos0.shape}"
         )
+    if not np.isfinite(pos0).all():
+        raise ValueError("positions must be finite")
+
+    integrator_temperature = integrator.getTemperature()
+    if unit.is_quantity(integrator_temperature):
+        integrator_temperature_k = integrator_temperature.value_in_unit(
+            unit.kelvin
+        )
+    else:
+        integrator_temperature_k = float(integrator_temperature)
+    if (
+        not np.isfinite(integrator_temperature_k)
+        or integrator_temperature_k <= 0
+    ):
+        raise ValueError(
+            "RPMDIntegrator temperature must be finite and positive"
+        )
     if temperature is None:
-        temperature = integrator.getTemperature()
+        temperature = integrator_temperature
+    if unit.is_quantity(temperature):
+        temperature_k = temperature.value_in_unit(unit.kelvin)
+    else:
+        temperature_k = float(temperature)
+    if not np.isfinite(temperature_k) or temperature_k <= 0:
+        raise ValueError("temperature must be finite and positive")
+    if not np.isclose(
+        temperature_k,
+        integrator_temperature_k,
+        rtol=1.0e-12,
+        atol=0.0,
+    ):
+        raise ValueError(
+            "temperature must match the RPMDIntegrator temperature "
+            f"({integrator_temperature_k} K)"
+        )
 
     masses_amu = np.asarray([
         system.getParticleMass(index).value_in_unit(unit.dalton)
@@ -257,19 +380,14 @@ def init_beads(modeller, simulation, n_beads, scale_factor=0.1,
     ])
     if not np.isfinite(masses_amu).all() or np.any(masses_amu < 0):
         raise ValueError("particle masses must be finite and non-negative")
-    wavelengths_nm = np.zeros(n_atoms)
-    massive = masses_amu > 0
-    wavelengths_nm[massive] = get_thermal_de_broglie_wavelength(
-        masses_amu[massive] * unit.dalton,
-        temperature,
-    ).value_in_unit(unit.nanometer)
-
     rng = np.random.default_rng(seed)
-    displacements = rng.normal(size=(n_beads, n_atoms, 3))
-    displacements *= (
-        wavelengths_nm[np.newaxis, :, np.newaxis] * scale_factor
+    displacements = _sample_free_ring_polymer_displacements(
+        masses_amu,
+        temperature,
+        n_beads,
+        rng,
+        scale_factor,
     )
-    displacements -= displacements.mean(axis=0, keepdims=True)
     velocities = _sample_maxwell_boltzmann_velocities(
         system,
         temperature,
@@ -282,6 +400,66 @@ def init_beads(modeller, simulation, n_beads, scale_factor=0.1,
             (pos0 + displacements[b]) * unit.nanometer,
         )
         integrator.setVelocities(b, velocities[b])
+
+
+def step_rpmd(simulation, steps):
+    """Advance an RPMD Simulation while keeping its step count synchronized.
+
+    OpenMM 8.5 advances an :class:`openmm.RPMDIntegrator`'s time but does not
+    advance its Context step count.  :meth:`openmm.app.Simulation.step` uses
+    that count to stop and schedule reporters, so it otherwise loops forever.
+    This compatibility helper temporarily wraps the integrator's ``step()``
+    method, repairs the count only when OpenMM did not update it, and delegates
+    reporter scheduling to ``Simulation.step()``.  On OpenMM versions that do
+    update the count, the wrapper leaves it untouched.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation driven by an ``RPMDIntegrator``.
+    steps : int
+        Number of integration steps to run.
+
+    Raises
+    ------
+    TypeError
+        If *steps* is not an integer or the Simulation does not use an
+        RPMD-style integrator.
+    ValueError
+        If *steps* is negative.
+    RuntimeError
+        If OpenMM changes the Context step count by an unexpected amount.
+    """
+    if isinstance(steps, (bool, np.bool_)) or not isinstance(steps, Integral):
+        raise TypeError("steps must be a non-negative integer")
+    if steps < 0:
+        raise ValueError("steps must be a non-negative integer")
+    steps = int(steps)
+
+    integrator = simulation.integrator
+    if not hasattr(integrator, "getNumCopies"):
+        raise TypeError("simulation must use an RPMDIntegrator")
+
+    native_step = integrator.step
+
+    def synchronized_step(count):
+        before = simulation.currentStep
+        native_step(count)
+        after = simulation.currentStep
+        expected = before + count
+        if after == before:
+            simulation.currentStep = expected
+        elif after != expected:
+            raise RuntimeError(
+                "RPMDIntegrator changed the Context step count from "
+                f"{before} to {after} while advancing {count} steps"
+            )
+
+    integrator.step = synchronized_step
+    try:
+        simulation.step(steps)
+    finally:
+        integrator.step = native_step
 
 
 def count_dna_and_estimate_charge(topology):

@@ -16,6 +16,32 @@ from openmm import openmm
 WHAM = os.environ.get("WHAM_PATH")
 
 
+def _accumulate_rdf_counts(counts, positions, particles, box_size):
+    """Add pair distances from one configuration to an RDF histogram."""
+    bins = len(counts)
+    for i in range(particles):
+        for j in range(i):
+            delta = positions[i] - positions[j]
+            delta -= np.round(delta / box_size) * box_size
+            distance = unit.norm(delta)
+            bin_index = int(bins * distance / box_size)
+            if bin_index < bins:
+                counts[bin_index] += 1
+
+
+def _normalise_rdf(counts, samples, particles, box_size):
+    """Convert a pair-distance histogram to a radial distribution function."""
+    bins = len(counts)
+    scale = box_size ** 3 / (samples * 0.5 * particles ** 2)
+    rdf = []
+    for i in range(bins // 2):
+        r1 = i * box_size / bins
+        r2 = (i + 1) * box_size / bins
+        volume = (4.0 / 3.0) * np.pi * (r2 ** 3 - r1 ** 3)
+        rdf.append(scale * counts[i] / volume)
+    return rdf
+
+
 def compute_rdf(context, particles, box_size):
     """
     Compute the radial distribution function by sampling an OpenMM context.
@@ -39,24 +65,41 @@ def compute_rdf(context, particles, box_size):
     counts = [0] * bins
     for _ in range(iterations):
         context.getIntegrator().step(20)
+        positions = context.getState(positions=True).getPositions().value_in_unit(
+            unit.nanometer
+        )
+        _accumulate_rdf_counts(counts, positions, particles, box_size)
 
-        pos = context.getState(positions=True).getPositions().value_in_unit(unit.nanometer)
-        for i in range(particles):
-            for j in range(i):
-                delta = pos[i] - pos[j]
-                delta -= np.round(delta / box_size) * box_size  # Minimum-image convention
-                dist = unit.norm(delta)
-                counts[int(bins * dist / box_size)] += 1
+    return _normalise_rdf(counts, iterations, particles, box_size)
 
-    # Convert the histogram of distances to the RDF.
-    scale = (box_size * box_size * box_size) / (iterations * 0.5 * particles * particles)
-    rdf = []
-    for i in range(bins // 2):
-        r1 = i * box_size / bins
-        r2 = (i + 1) * box_size / bins
-        volume = (4.0 / 3.0) * np.pi * (r2 * r2 * r2 - r1 * r1 * r1)
-        rdf.append(scale * counts[i] / volume)
-    return rdf
+
+def compute_rpmd_rdf(integrator, particles, box_size):
+    """
+    Compute a bead-averaged RDF from every copy of an RPMD integrator.
+
+    RPMD state is retrieved directly from ``RPMDIntegrator`` because the
+    ordinary Context state does not represent an individual ring-polymer
+    copy.
+    """
+    bins = 100
+    iterations = 2_000
+    n_beads = integrator.getNumCopies()
+    counts = [0] * bins
+    for _ in range(iterations):
+        integrator.step(20)
+        for bead in range(n_beads):
+            positions = integrator.getState(
+                bead,
+                getPositions=True,
+            ).getPositions().value_in_unit(unit.nanometer)
+            _accumulate_rdf_counts(counts, positions, particles, box_size)
+
+    return _normalise_rdf(
+        counts,
+        iterations * n_beads,
+        particles,
+        box_size,
+    )
 
 
 def run_parahydrogen():
@@ -79,6 +122,13 @@ def run_parahydrogen():
         force.addParticle()
     positions = np.random.rand(particles, 3) * box_size
 
+    topology = app.Topology()
+    chain = topology.addChain()
+    for particle in range(particles):
+        residue = topology.addResidue("PH2", chain)
+        topology.addAtom(f"PH2{particle + 1}", None, residue)
+    topology.setPeriodicBoxVectors(system.getDefaultPeriodicBoxVectors())
+
     integrator = openmm.LangevinIntegrator(temperature,
                                            1.0 / unit.picosecond,
                                            1.0 * unit.femtosecond)
@@ -89,18 +139,22 @@ def run_parahydrogen():
     # Equilibrate before collecting data
     integrator.step(1_000)  # Equilibrate before collecting data
     classical_rdf = compute_rdf(context, particles, box_size)
+    centroid_positions = context.getState(
+        getPositions=True,
+    ).getPositions()
+    del context
 
     n_beads = 4
     integrator = openmm.RPMDIntegrator(n_beads,
                                        temperature,
                                        1.0 / unit.picosecond,
                                        1.0 * unit.femtosecond)
-    context = openmm.Context(system, integrator)
-    context.setPositions(positions)
-    openmm.LocalEnergyMinimizer.minimize(context)
-    context.setVelocitiesToTemperature(temperature)
+    simulation = app.Simulation(topology, system, integrator)
+    modeller = app.Modeller(topology, centroid_positions)
+    nqe.init_beads(modeller, simulation, n_beads)
     integrator.step(1_000)  # Equilibrate before collecting data
-    rpmd_rdf = compute_rdf(context, particles, box_size)
+    rpmd_rdf = compute_rpmd_rdf(integrator, particles, box_size)
+    del simulation
 
     integrator = openmm.QTBIntegrator(temperature,
                                       20.0 / unit.picosecond,

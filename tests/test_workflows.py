@@ -60,6 +60,7 @@ class _Integrator:
         self.step_sizes = []
         self.segment_lengths = []
         self.adaptation_rates = []
+        self.random_seeds = []
 
     def setTemperature(self, temperature):
         self.temperatures.append(temperature)
@@ -72,6 +73,9 @@ class _Integrator:
 
     def setDefaultAdaptationRate(self, rate):
         self.adaptation_rates.append(rate)
+
+    def setRandomNumberSeed(self, seed):
+        self.random_seeds.append(seed)
 
 
 class _Context:
@@ -116,7 +120,9 @@ def workflow_runtime(monkeypatch):
         deuterations=[],
         plumed=[],
         standard_reporters=[],
+        rpmd_progress_reporters=[],
         rpmd_reporters=[],
+        rpmd_steps=[],
         saved=[],
         checkpoints=[],
         bead_initializations=[],
@@ -181,6 +187,20 @@ def workflow_runtime(monkeypatch):
     )
     monkeypatch.setattr(
         nqe_openmm,
+        "_add_rpmd_progress_reporters",
+        lambda *args, **kwargs: calls.rpmd_progress_reporters.append(
+            (args, kwargs)
+        ),
+    )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "step_rpmd",
+        lambda simulation, steps: calls.rpmd_steps.append(
+            (simulation, steps)
+        ),
+    )
+    monkeypatch.setattr(
+        nqe_openmm,
         "_save_final_state",
         lambda *args, **kwargs: calls.saved.append((args, kwargs)),
     )
@@ -192,7 +212,9 @@ def workflow_runtime(monkeypatch):
     monkeypatch.setattr(
         nqe_openmm,
         "init_beads",
-        lambda *args: calls.bead_initializations.append(args),
+        lambda *args, **kwargs: calls.bead_initializations.append(
+            (args, kwargs)
+        ),
     )
     monkeypatch.setattr(nqe_openmm.app, "Simulation", make_simulation)
     monkeypatch.setattr(nqe_openmm.openmm, "CustomExternalForce", _ExternalForce)
@@ -437,6 +459,8 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
         n_1=2,
         n_2=5,
         atoms_to_watch=[1],
+        scale_factor=0.75,
+        seed=1234,
     )
 
     simulation = runtime.calls.simulations[0]
@@ -446,14 +470,21 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
         0.3,
         0.6,
     ]
-    assert simulation.steps == [2, 5]
+    assert simulation.steps == []
+    assert runtime.calls.rpmd_steps == [(simulation, 2), (simulation, 5)]
     assert simulation.context.positions == []
     assert simulation.context.velocity_temperatures == []
-    assert runtime.calls.bead_initializations == [
-        (runtime.modeller, simulation, 8)
-    ]
+    initialization_seed, thermostat_seed = nqe_openmm._split_rpmd_seed(1234)
+    assert integrator.random_seeds == [thermostat_seed]
+    assert runtime.calls.bead_initializations == [(
+        (runtime.modeller, simulation, 8),
+        {"scale_factor": 0.75, "seed": initialization_seed},
+    )]
     assert runtime.calls.rpmd_reporters == [
         ((simulation, runtime.modeller.topology, "rpmd_ready", 9, 8, [1]), {})
+    ]
+    assert runtime.calls.rpmd_progress_reporters == [
+        ((simulation, "rpmd_ready", 9), {})
     ]
     assert runtime.calls.saved == [
         (
@@ -461,6 +492,12 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
             {"pdb_suffix": "_final.pdb", "n_beads": 8},
         )
     ]
+
+
+@pytest.mark.parametrize("seed", [-1, 1.5, True])
+def test_split_rpmd_seed_rejects_invalid_values(seed):
+    with pytest.raises(ValueError, match="seed must be"):
+        nqe_openmm._split_rpmd_seed(seed)
 
 
 def test_rpmd_production_loads_checkpoint_and_saves_centroid(
@@ -486,9 +523,13 @@ def test_rpmd_production_loads_checkpoint_and_saves_centroid(
         ((simulation, "ready.chk"), {"n_beads": 6})
     ]
     assert simulation.context.positions == []
-    assert simulation.steps == [12]
+    assert simulation.steps == []
+    assert runtime.calls.rpmd_steps == [(simulation, 12)]
     assert runtime.calls.rpmd_reporters == [
         ((simulation, runtime.modeller.topology, "rpmd_prod", 5, 6, None), {})
+    ]
+    assert runtime.calls.rpmd_progress_reporters == [
+        ((simulation, "rpmd_prod", 5), {})
     ]
     assert runtime.calls.saved == [
         (
@@ -556,7 +597,11 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     assert runtime.calls.checkpoints == [
         ((simulation, "ready.chk"), {"n_beads": 32})
     ]
-    assert simulation.steps == [4]
+    assert simulation.steps == []
+    assert runtime.calls.rpmd_steps == [(simulation, 4)]
+    assert runtime.calls.rpmd_progress_reporters == [
+        ((simulation, "contracted", 1_000), {})
+    ]
     assert runtime.calls.saved == [
         (
             (simulation, "contracted"),

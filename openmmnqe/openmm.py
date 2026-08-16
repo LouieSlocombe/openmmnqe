@@ -28,9 +28,12 @@ behave the same throughout -- *potential* with *ml_idx* runs an ML/MM mixed
 system and forces the CUDA platform, *plumed_script_path* attaches a bias,
 and *output_prefix* names every file the stage writes.
 """
+import hashlib
+import json
 import os
 import sys
 import tempfile
+import zipfile
 
 import numpy as np
 import openmm.unit as unit
@@ -42,11 +45,130 @@ from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
                         )
-from .tools import deuterate_system, check_platform, init_beads, centroid_positions
+from .tools import (deuterate_system, check_platform, init_beads,
+                    centroid_positions, step_rpmd)
 
 
 _RPMD_RESTART_KIND = "openmmnqe-rpmd-restart"
-_RPMD_RESTART_VERSION = 1
+_RPMD_RESTART_VERSION = 2
+
+
+def _validate_rpmd_n_beads(n_beads):
+    """Require an RPMD bead count to be a positive, non-boolean integer."""
+    if (
+        isinstance(n_beads, (bool, np.bool_))
+        or not isinstance(n_beads, (int, np.integer))
+        or n_beads <= 0
+    ):
+        raise ValueError("n_beads must be a positive integer")
+    return int(n_beads)
+
+
+def _validate_pdb_identity_name(name, description, max_length):
+    """Reject topology identity names that PDB output cannot preserve."""
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > max_length
+        or not name.isascii()
+        or any(character.isspace() for character in name)
+    ):
+        raise ValueError(
+            f"Cannot create a PDB-stable RPMD restart: {description} name "
+            f"{name!r} is not representable in a {max_length}-character "
+            "PDB identity field"
+        )
+
+
+def _topology_identity_signature(topology):
+    """Return a PDB-round-trip-stable ordered topology signature.
+
+    PDB serialization is allowed to renumber atom, residue, and chain IDs and
+    does not reliably preserve bond type/order metadata.  The restart identity
+    therefore uses atom order, chemically meaningful names/elements, the
+    ordered chain/residue grouping, and bond endpoints.
+    """
+    chain_ordinals = {
+        chain: ordinal for ordinal, chain in enumerate(topology.chains())
+    }
+    residue_ordinals = {
+        residue: ordinal for ordinal, residue in enumerate(topology.residues())
+    }
+    for residue in topology.residues():
+        _validate_pdb_identity_name(
+            residue.name,
+            f"residue {residue_ordinals[residue]}",
+            3,
+        )
+    atoms = []
+    for atom in topology.atoms():
+        residue = atom.residue
+        chain = residue.chain
+        element = atom.element
+        _validate_pdb_identity_name(atom.name, f"atom {atom.index}", 4)
+        atoms.append({
+            "name": atom.name,
+            "element": None if element is None else element.symbol,
+            "atomic_number": (
+                None if element is None else element.atomic_number
+            ),
+            "residue_ordinal": residue_ordinals[residue],
+            "residue_name": residue.name,
+            "chain_ordinal": chain_ordinals[chain],
+        })
+
+    bonds = sorted(
+        (
+            min(bond.atom1.index, bond.atom2.index),
+            max(bond.atom1.index, bond.atom2.index),
+        )
+        for bond in topology.bonds()
+    )
+    payload = json.dumps(
+        {"atoms": atoms, "bonds": bonds},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _particle_masses_dalton(system):
+    """Return ordered particle masses as finite, non-negative floats."""
+    masses = np.asarray([
+        system.getParticleMass(index).value_in_unit(unit.dalton)
+        for index in range(system.getNumParticles())
+    ], dtype=np.float64)
+    if not np.isfinite(masses).all() or np.any(masses < 0.0):
+        raise ValueError("RPMD System particle masses must be finite and non-negative")
+    return masses
+
+
+def _rpmd_temperature_kelvin(integrator):
+    """Return an RPMD integrator's finite, positive temperature in kelvin."""
+    temperature = float(integrator.getTemperature().value_in_unit(unit.kelvin))
+    if not np.isfinite(temperature) or temperature <= 0.0:
+        raise ValueError("RPMDIntegrator temperature must be positive and finite")
+    return temperature
+
+
+def _restart_scalar(archive, name, scalar_type):
+    """Read a restart scalar only when its shape and dtype match the schema."""
+    value = archive[name]
+    if value.shape != ():
+        raise ValueError(f"RPMD restart field {name} must be a scalar")
+
+    dtype_kind = value.dtype.kind
+    expected_kinds = {
+        "integer": {"i", "u"},
+        "float": {"f"},
+        "boolean": {"b"},
+        "string": {"U"},
+    }
+    if dtype_kind not in expected_kinds[scalar_type]:
+        raise ValueError(
+            f"RPMD restart field {name} must be a scalar {scalar_type}"
+        )
+    return value.item()
 
 
 def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calculator):
@@ -216,6 +338,30 @@ def _add_standard_reporters(simulation, output_prefix, n_report,
                                                            checkpoint_interval))
 
 
+def _add_rpmd_progress_reporters(simulation, output_prefix, n_report):
+    """Append Context-independent progress reporters for an RPMD run.
+
+    An RPMD integrator's ordinary Context state is not a bead average and is
+    not guaranteed to mirror any particular copy.  Step, time, speed, and box
+    volume remain meaningful, but Context energy and kinetic-temperature
+    fields do not, so they are deliberately omitted here.
+    """
+    simulation.reporters.append(app.StateDataReporter(
+        sys.stdout,
+        n_report,
+        step=True,
+        speed=True,
+    ))
+    simulation.reporters.append(app.StateDataReporter(
+        f'{output_prefix}.log',
+        n_report,
+        step=True,
+        time=True,
+        speed=True,
+        volume=True,
+    ))
+
+
 def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
                         atoms_to_watch):
     """Append the RPMD reporter trio (optional spread, centroid, beads)."""
@@ -248,11 +394,11 @@ def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
     mirrored into the Context.  The other copies live in private arrays owned
     by ``RPMDIntegrator``, so they must be collected through its copy-specific
     API.  Positions are stored in nanometres and velocities in nanometres per
-    picosecond.  The archive also carries the box, time, and step count needed
-    to continue reporter schedules in a new ``Simulation``.
+    picosecond.  The archive also carries the ordered particle masses, atom
+    and topology signature, source temperature, box, time, and step count
+    needed to validate and continue in a new ``Simulation``.
     """
-    if n_beads <= 0:
-        raise ValueError("n_beads must be positive")
+    n_beads = _validate_rpmd_n_beads(n_beads)
 
     integrator = simulation.integrator
     actual_beads = integrator.getNumCopies()
@@ -262,6 +408,14 @@ def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
         )
 
     n_particles = simulation.system.getNumParticles()
+    if simulation.topology.getNumAtoms() != n_particles:
+        raise ValueError(
+            "Cannot save RPMD restart: Topology atom count does not match "
+            "System particle count"
+        )
+    particle_masses = _particle_masses_dalton(simulation.system)
+    topology_signature = _topology_identity_signature(simulation.topology)
+    temperature_kelvin = _rpmd_temperature_kelvin(integrator)
     positions = []
     velocities = []
     first_state = None
@@ -321,6 +475,11 @@ def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
                 format_version=np.asarray(_RPMD_RESTART_VERSION, dtype=np.int64),
                 num_beads=np.asarray(n_beads, dtype=np.int64),
                 num_particles=np.asarray(n_particles, dtype=np.int64),
+                particle_masses_dalton=particle_masses,
+                topology_signature_sha256=np.asarray(topology_signature),
+                temperature_kelvin=np.asarray(
+                    temperature_kelvin, dtype=np.float64
+                ),
                 positions_nm=positions,
                 velocities_nm_per_ps=velocities,
                 periodic=np.asarray(periodic, dtype=np.bool_),
@@ -341,6 +500,11 @@ def _read_rpmd_restart(checkpoint_file):
     """Read and validate the format-independent portion of an RPMD restart."""
     try:
         archive = np.load(checkpoint_file, allow_pickle=False)
+    except zipfile.BadZipFile as exc:
+        raise ValueError(
+            f"RPMD restart {checkpoint_file} is corrupt or unreadable; "
+            "rerun RPMD equilibration to create a new checkpoint."
+        ) from exc
     except (OSError, ValueError, EOFError) as exc:
         raise ValueError(
             f"{checkpoint_file} is not a bead-aware openmmnqe RPMD restart. "
@@ -349,47 +513,111 @@ def _read_rpmd_restart(checkpoint_file):
         ) from exc
 
     try:
-        if not hasattr(archive, "files"):
-            raise ValueError("restart is not an NPZ archive")
-        required = {
-            "kind",
-            "format_version",
-            "num_beads",
-            "num_particles",
-            "positions_nm",
-            "velocities_nm_per_ps",
-            "periodic",
-            "box_vectors_nm",
-            "time_ps",
-            "step_count",
-        }
-        missing = required.difference(archive.files)
-        if missing:
-            raise ValueError(
-                "RPMD restart is missing fields: " + ", ".join(sorted(missing))
+        try:
+            if not hasattr(archive, "files"):
+                raise ValueError("restart is not an NPZ archive")
+            header = {"kind", "format_version"}
+            missing_header = header.difference(archive.files)
+            if missing_header:
+                raise ValueError(
+                    "RPMD restart is missing fields: "
+                    + ", ".join(sorted(missing_header))
+                )
+            kind = _restart_scalar(archive, "kind", "string")
+            if kind != _RPMD_RESTART_KIND:
+                raise ValueError("checkpoint is not an openmmnqe RPMD restart")
+            version = _restart_scalar(archive, "format_version", "integer")
+            if version == 1:
+                raise ValueError(
+                    "RPMD restart version 1 lacks particle identity, mass, and "
+                    "temperature metadata. Rerun RPMD equilibration to create a "
+                    "compatible checkpoint."
+                )
+            if version != _RPMD_RESTART_VERSION:
+                raise ValueError(
+                    f"Unsupported RPMD restart version {version}; "
+                    f"expected {_RPMD_RESTART_VERSION}. Rerun RPMD equilibration "
+                    "to create a compatible checkpoint."
+                )
+
+            required = header | {
+                "num_beads",
+                "num_particles",
+                "particle_masses_dalton",
+                "topology_signature_sha256",
+                "temperature_kelvin",
+                "positions_nm",
+                "velocities_nm_per_ps",
+                "periodic",
+                "box_vectors_nm",
+                "time_ps",
+                "step_count",
+            }
+            missing = required.difference(archive.files)
+            if missing:
+                raise ValueError(
+                    "RPMD restart is missing fields: "
+                    + ", ".join(sorted(missing))
+                )
+            num_beads = _validate_rpmd_n_beads(
+                _restart_scalar(archive, "num_beads", "integer")
             )
-        if str(archive["kind"].item()) != _RPMD_RESTART_KIND:
-            raise ValueError("checkpoint is not an openmmnqe RPMD restart")
-        version = int(archive["format_version"].item())
-        if version != _RPMD_RESTART_VERSION:
-            raise ValueError(
-                f"Unsupported RPMD restart version {version}; "
-                f"expected {_RPMD_RESTART_VERSION}"
+            num_particles = _restart_scalar(
+                archive, "num_particles", "integer"
             )
-        return {
-            "num_beads": int(archive["num_beads"].item()),
-            "num_particles": int(archive["num_particles"].item()),
-            "positions_nm": np.array(archive["positions_nm"], dtype=np.float64),
-            "velocities_nm_per_ps": np.array(
-                archive["velocities_nm_per_ps"], dtype=np.float64
-            ),
-            "periodic": bool(archive["periodic"].item()),
-            "box_vectors_nm": np.array(
-                archive["box_vectors_nm"], dtype=np.float64
-            ),
-            "time_ps": float(archive["time_ps"].item()),
-            "step_count": int(archive["step_count"].item()),
-        }
+            if num_particles < 0:
+                raise ValueError(
+                    "RPMD restart num_particles cannot be negative"
+                )
+            step_count = _restart_scalar(archive, "step_count", "integer")
+            if step_count < 0:
+                raise ValueError("RPMD restart step count cannot be negative")
+            topology_signature = _restart_scalar(
+                archive, "topology_signature_sha256", "string"
+            )
+            if (
+                len(topology_signature) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in topology_signature
+                )
+            ):
+                raise ValueError(
+                    "RPMD restart topology signature must be 64 lowercase "
+                    "hexadecimal characters"
+                )
+            return {
+                "num_beads": num_beads,
+                "num_particles": int(num_particles),
+                "particle_masses_dalton": np.array(
+                    archive["particle_masses_dalton"], dtype=np.float64
+                ),
+                "topology_signature_sha256": topology_signature,
+                "temperature_kelvin": float(
+                    _restart_scalar(archive, "temperature_kelvin", "float")
+                ),
+                "positions_nm": np.array(
+                    archive["positions_nm"], dtype=np.float64
+                ),
+                "velocities_nm_per_ps": np.array(
+                    archive["velocities_nm_per_ps"], dtype=np.float64
+                ),
+                "periodic": bool(
+                    _restart_scalar(archive, "periodic", "boolean")
+                ),
+                "box_vectors_nm": np.array(
+                    archive["box_vectors_nm"], dtype=np.float64
+                ),
+                "time_ps": float(
+                    _restart_scalar(archive, "time_ps", "float")
+                ),
+                "step_count": int(step_count),
+            }
+        except (OSError, EOFError, zipfile.BadZipFile) as exc:
+            raise ValueError(
+                f"RPMD restart {checkpoint_file} is corrupt or unreadable; "
+                "rerun RPMD equilibration to create a new checkpoint."
+            ) from exc
     finally:
         if hasattr(archive, "close"):
             archive.close()
@@ -397,11 +625,19 @@ def _read_rpmd_restart(checkpoint_file):
 
 def _load_rpmd_restart(simulation, checkpoint_file, n_beads):
     """Restore every RPMD copy before the integrator takes its first step."""
+    n_beads = _validate_rpmd_n_beads(n_beads)
     restart = _read_rpmd_restart(checkpoint_file)
     integrator = simulation.integrator
     integrator_beads = integrator.getNumCopies()
     n_particles = simulation.system.getNumParticles()
     periodic = simulation.system.usesPeriodicBoundaryConditions()
+    if simulation.topology.getNumAtoms() != n_particles:
+        raise ValueError(
+            "Current Topology atom count does not match System particle count"
+        )
+    current_masses = _particle_masses_dalton(simulation.system)
+    current_signature = _topology_identity_signature(simulation.topology)
+    current_temperature = _rpmd_temperature_kelvin(integrator)
 
     if restart["num_beads"] != n_beads:
         raise ValueError(
@@ -416,6 +652,49 @@ def _load_rpmd_restart(simulation, checkpoint_file, n_beads):
         raise ValueError(
             f"RPMD restart contains {restart['num_particles']} particles, but "
             f"the current System contains {n_particles}"
+        )
+    if restart["particle_masses_dalton"].shape != (n_particles,):
+        raise ValueError(
+            "RPMD restart particle masses have shape "
+            f"{restart['particle_masses_dalton'].shape}; expected {(n_particles,)}"
+        )
+    if not np.isfinite(restart["particle_masses_dalton"]).all():
+        raise ValueError("RPMD restart particle masses contain non-finite values")
+    if np.any(restart["particle_masses_dalton"] < 0.0):
+        raise ValueError("RPMD restart particle masses cannot be negative")
+    if not np.allclose(
+        restart["particle_masses_dalton"],
+        current_masses,
+        rtol=1e-12,
+        atol=1e-12,
+    ):
+        mismatch = int(np.flatnonzero(~np.isclose(
+            restart["particle_masses_dalton"],
+            current_masses,
+            rtol=1e-12,
+            atol=1e-12,
+        ))[0])
+        raise ValueError(
+            f"RPMD restart particle mass {mismatch} does not match the current "
+            "System; check atom ordering and deuteration settings"
+        )
+    if restart["topology_signature_sha256"] != current_signature:
+        raise ValueError(
+            "RPMD restart atom/topology identity does not match the current "
+            "Topology; check atom ordering and source structure"
+        )
+    if not np.isfinite(restart["temperature_kelvin"]):
+        raise ValueError("RPMD restart temperature is not finite")
+    if not np.isclose(
+        restart["temperature_kelvin"],
+        current_temperature,
+        rtol=1e-12,
+        atol=1e-12,
+    ):
+        raise ValueError(
+            f"RPMD restart temperature {restart['temperature_kelvin']} K does "
+            f"not match the current RPMDIntegrator temperature "
+            f"{current_temperature} K"
         )
     expected_shape = (n_beads, n_particles, 3)
     if restart["positions_nm"].shape != expected_shape:
@@ -437,8 +716,6 @@ def _load_rpmd_restart(simulation, checkpoint_file, n_beads):
         raise ValueError(
             "RPMD restart periodicity does not match the current System"
         )
-    if restart["step_count"] < 0:
-        raise ValueError("RPMD restart step count cannot be negative")
     for name in ("positions_nm", "velocities_nm_per_ps", "box_vectors_nm"):
         if not np.isfinite(restart[name]).all():
             raise ValueError(f"RPMD restart field {name} contains non-finite values")
@@ -508,7 +785,7 @@ def _load_checkpoint(simulation, checkpoint_file, n_beads=None):
         batch job exit successfully having run no simulation at all.
     ValueError
         If an RPMD restart is legacy, corrupt, or incompatible with the current
-        bead or particle count.
+        bead count, ordered topology, particle masses, or temperature.
     """
     if not os.path.exists(checkpoint_file):
         raise FileNotFoundError(
@@ -1139,6 +1416,33 @@ def run_openmm_steered(modeller,
     return traj_file
 
 
+def _split_rpmd_seed(seed):
+    """Derive independent NumPy and OpenMM seeds from one master seed."""
+    if seed is None:
+        return None, None
+    if (
+        isinstance(seed, (bool, np.bool_))
+        or not isinstance(seed, (int, np.integer))
+        or seed < 0
+    ):
+        raise ValueError("seed must be a non-negative integer or None")
+
+    initialization_sequence, thermostat_sequence = np.random.SeedSequence(
+        int(seed)
+    ).spawn(2)
+    initialization_seed = int(
+        initialization_sequence.generate_state(1, dtype=np.uint32)[0]
+    )
+    thermostat_seed = int(
+        thermostat_sequence.generate_state(1, dtype=np.uint32)[0]
+    ) % 2_147_483_647
+    # OpenMM assigns a non-deterministic seed when given 0, so reserve zero for
+    # the seed=None path and keep every explicit master seed reproducible.
+    if thermostat_seed == 0:
+        thermostat_seed = 1
+    return initialization_seed, thermostat_seed
+
+
 def run_openmm_rpmd_equilibration(modeller,
                                   forcefield,
                                   output_prefix='rpmd_ready',
@@ -1155,7 +1459,9 @@ def run_openmm_rpmd_equilibration(modeller,
                                   potential=None,
                                   ml_idx=None,
                                   calculator=None,
-                                  atoms_to_watch=None):
+                                  atoms_to_watch=None,
+                                  scale_factor=1.0,
+                                  seed=None):
     """
     Equilibrate a ring-polymer molecular dynamics (RPMD) simulation.
 
@@ -1201,28 +1507,44 @@ def run_openmm_rpmd_equilibration(modeller,
         Optional calculator object to pass to the ML potential. Default is None.
     atoms_to_watch : list of int or None, optional
         Atom indices for quantum spread monitoring. Default is None.
+    scale_factor : float, optional
+        Multiplier applied to the exact free-ring-polymer normal-mode position
+        amplitudes. Default is 1.0.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for initial positions/velocities and the PILE thermostat. If None,
+        NumPy and OpenMM select independent seeds. Default is None.
     """
+    initialization_seed, thermostat_seed = _split_rpmd_seed(seed)
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep)
+    if thermostat_seed is not None:
+        integrator.setRandomNumberSeed(thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)
-    _add_standard_reporters(simulation, output_prefix, n_report)
+    _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
-    init_beads(modeller, simulation, n_beads)
+    init_beads(
+        modeller,
+        simulation,
+        n_beads,
+        scale_factor=scale_factor,
+        seed=initialization_seed,
+    )
 
     print("\n--- Stage 1: Bead Expansion  ---", flush=True)
     integrator.setStepSize(timestep * 0.5)
-    simulation.step(n_1)
+    step_rpmd(simulation, n_1)
 
     print(f"\n--- Stage 2: Relaxation at full timestep ({timestep}) ---", flush=True)
     integrator.setStepSize(timestep)
-    simulation.step(n_2)
+    step_rpmd(simulation, n_2)
 
     print("\n--- Saving State ---", flush=True)
     # Not '_centroid.pdb': RPMDCentroidReporter owns that name and is still
@@ -1369,10 +1691,10 @@ def run_openmm_rpmd_contracted(modeller,
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)
 
-    _add_standard_reporters(simulation, output_prefix, n_report)
+    _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
     print(f"\nStarting Production Run ({steps} steps)...")
-    simulation.step(steps)
+    step_rpmd(simulation, steps)
     print("Done.", flush=True)
 
     print("\n--- Saving State ---", flush=True)
@@ -1481,10 +1803,10 @@ def run_openmm_rpmd_prod(modeller,
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)
 
-    _add_standard_reporters(simulation, output_prefix, n_report)
+    _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
     print(f"Starting production run for {steps} steps...", flush=True)
-    simulation.step(steps)
+    step_rpmd(simulation, steps)
     print("Production run complete.", flush=True)
 
     _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)

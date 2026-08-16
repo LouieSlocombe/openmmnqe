@@ -50,12 +50,11 @@ def run_openmm_rpmd():
     simulation.reporters.append(app.StateDataReporter(stdout,
                                                       report_every,
                                                       step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
+                                                      time=True,
                                                       speed=True))
 
     nqe.init_beads(modeller, simulation, n_beads)
-    simulation.step(n_steps)
+    nqe.step_rpmd(simulation, n_steps)
 
 
 def run_openmm_rpmd_solvated():
@@ -96,12 +95,11 @@ def run_openmm_rpmd_solvated():
     simulation.reporters.append(app.StateDataReporter(stdout,
                                                       report_every,
                                                       step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
+                                                      time=True,
                                                       speed=True))
 
     nqe.init_beads(modeller, simulation, n_beads)
-    simulation.step(n_steps)
+    nqe.step_rpmd(simulation, n_steps)
 
 
 def run_openmm_rpmd_ml():
@@ -138,12 +136,11 @@ def run_openmm_rpmd_ml():
     simulation.reporters.append(app.StateDataReporter(stdout,
                                                       report_every,
                                                       step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
+                                                      time=True,
                                                       speed=True))
 
     nqe.init_beads(modeller, simulation, n_beads)
-    simulation.step(n_steps)
+    nqe.step_rpmd(simulation, n_steps)
 
 
 def run_openmm_rpmd_mixed():
@@ -199,12 +196,11 @@ def run_openmm_rpmd_mixed():
     simulation.reporters.append(app.StateDataReporter(stdout,
                                                       report_every,
                                                       step=True,
-                                                      potentialEnergy=True,
-                                                      temperature=True,
+                                                      time=True,
                                                       speed=True))
 
     nqe.init_beads(modeller, simulation, n_beads)
-    simulation.step(n_steps)
+    nqe.step_rpmd(simulation, n_steps)
 
 
 def run_rpmd_quantum_spread_reporter():
@@ -235,8 +231,6 @@ def run_rpmd_quantum_spread_reporter():
 
     platform = openmm.Platform.getPlatformByName(device)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    for i in range(n_beads):
-        integrator.setPositions(i, modeller.positions)
     nqe.init_beads(modeller, simulation, n_beads)
 
     atoms_to_watch = [0, 1]
@@ -250,7 +244,7 @@ def run_rpmd_quantum_spread_reporter():
     ))
 
     print("Running RPMD with Quantum Spread reporting...")
-    simulation.step(500)
+    nqe.step_rpmd(simulation, 500)
     print("Done. Check 'quantum_spread.txt'.")
     data = np.loadtxt("quantum_spread.txt", skiprows=1, delimiter='\t')
 
@@ -302,7 +296,7 @@ def run_rpmd_bead_reporter():
         num_beads=n_beads,
     ))
 
-    simulation.step(100)
+    nqe.step_rpmd(simulation, 100)
     for i in range(n_beads):
         nqe.remove_file(f'out_bead_{i}.pdb')
 
@@ -345,7 +339,7 @@ def run_rpmd_centroid_reporter():
         num_beads=n_beads,
     ))
 
-    simulation.step(100)
+    nqe.step_rpmd(simulation, 100)
     nqe.remove_file('centroid.pdb')
 
 

@@ -194,6 +194,8 @@ def track_rpmd_atom_expansion(simulation, atom_index, file, report_interval,
     --------
     Track atom 17 every 100 steps before starting the simulation::
 
+        from openmmnqe import step_rpmd, track_rpmd_atom_expansion
+
         track_rpmd_atom_expansion(
             simulation,
             atom_index=17,
@@ -201,7 +203,7 @@ def track_rpmd_atom_expansion(simulation, atom_index, file, report_interval,
             report_interval=100,
             name="proton",
         )
-        simulation.step(10_000)
+        step_rpmd(simulation, 10_000)
     """
     if isinstance(atom_index, bool) or not isinstance(atom_index, Integral):
         raise TypeError("atom_index must be an integer")
