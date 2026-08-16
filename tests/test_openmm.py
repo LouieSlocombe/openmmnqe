@@ -6,6 +6,7 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pytest
+from openmm import Vec3, openmm
 
 import openmmnqe as nqe
 import openmmnqe.openmm as nqe_openmm
@@ -232,6 +233,7 @@ def test_save_final_state_checkpoints_and_uses_context_positions(monkeypatch, tm
 def test_save_final_rpmd_state_uses_centroid_and_custom_suffix(monkeypatch, tmp_path):
     centroid_positions = object()
     centroid_calls = []
+    restart_calls = []
     written = []
     topology = SimpleNamespace(getNumAtoms=lambda: 2)
     simulation = SimpleNamespace(
@@ -248,6 +250,11 @@ def test_save_final_rpmd_state_uses_centroid_and_custom_suffix(monkeypatch, tmp_
         lambda *args: centroid_calls.append(args) or centroid_positions,
     )
     monkeypatch.setattr(
+        nqe_openmm,
+        "_save_rpmd_restart",
+        lambda *args: restart_calls.append(args),
+    )
+    monkeypatch.setattr(
         nqe_openmm.app.PDBFile,
         "writeFile",
         lambda actual_topology, positions, handle: written.append(
@@ -260,10 +267,10 @@ def test_save_final_rpmd_state_uses_centroid_and_custom_suffix(monkeypatch, tmp_
         simulation,
         str(prefix),
         pdb_suffix="_centroid.pdb",
-        save_checkpoint=False,
         n_beads=8,
     )
 
+    assert restart_calls == [(simulation, str(prefix) + ".chk", 8)]
     assert centroid_calls == [(simulation, 2, 8)]
     assert written == [
         (topology, centroid_positions, str(prefix) + "_centroid.pdb")
@@ -286,3 +293,107 @@ def test_load_checkpoint_delegates_to_simulation(tmp_path):
     nqe_openmm._load_checkpoint(simulation, checkpoint)
 
     assert loaded == [checkpoint]
+
+
+def _make_rpmd_restart_simulation(num_beads=2):
+    topology = app.Topology()
+    residue = topology.addResidue("AR", topology.addChain())
+    topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
+
+    system = openmm.System()
+    system.addParticle(39.9 * unit.dalton)
+    system.setDefaultPeriodicBoxVectors(
+        Vec3(2.0, 0.0, 0.0),
+        Vec3(0.0, 2.0, 0.0),
+        Vec3(0.0, 0.0, 2.0),
+    )
+    nonbonded = openmm.NonbondedForce()
+    nonbonded.setNonbondedMethod(openmm.NonbondedForce.CutoffPeriodic)
+    nonbonded.setCutoffDistance(0.5 * unit.nanometer)
+    nonbonded.addParticle(0.0, 0.1, 0.0)
+    system.addForce(nonbonded)
+
+    integrator = openmm.RPMDIntegrator(
+        num_beads,
+        300.0 * unit.kelvin,
+        1.0 / unit.picosecond,
+        0.1 * unit.femtosecond,
+    )
+    integrator.setApplyThermostat(False)
+    simulation = app.Simulation(
+        topology,
+        system,
+        integrator,
+        openmm.Platform.getPlatformByName("Reference"),
+    )
+    return simulation
+
+
+def test_rpmd_restart_round_trip_preserves_every_copy(tmp_path):
+    source = _make_rpmd_restart_simulation()
+    source_positions = np.asarray(
+        [[[0.1, 0.2, 0.3]], [[1.1, 1.2, 1.3]]]
+    )
+    source_velocities = np.asarray(
+        [[[0.4, 0.5, 0.6]], [[1.4, 1.5, 1.6]]]
+    )
+    for bead in range(2):
+        source.integrator.setPositions(
+            bead,
+            source_positions[bead] * unit.nanometer,
+        )
+        source.integrator.setVelocities(
+            bead,
+            source_velocities[bead] * unit.nanometer / unit.picosecond,
+        )
+    source.context.setTime(1.25 * unit.picosecond)
+    source.currentStep = 17
+
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    nqe_openmm._save_rpmd_restart(source, checkpoint, n_beads=2)
+
+    restored = _make_rpmd_restart_simulation()
+    nqe_openmm._load_checkpoint(restored, checkpoint, n_beads=2)
+
+    assert restored.currentStep == 17
+    for bead in range(2):
+        state = restored.integrator.getState(
+            bead,
+            getPositions=True,
+            getVelocities=True,
+        )
+        assert state.getTime().value_in_unit(unit.picosecond) == pytest.approx(1.25)
+        assert np.allclose(
+            state.getPositions(asNumpy=True).value_in_unit(unit.nanometer),
+            source_positions[bead],
+        )
+        assert np.allclose(
+            state.getVelocities(asNumpy=True).value_in_unit(
+                unit.nanometer / unit.picosecond
+            ),
+            source_velocities[bead],
+        )
+
+    # Use the integrator directly: OpenMM 8.5's RPMD plugin advances time but
+    # does not update Context.stepCount, which makes Simulation.step() loop.
+    # The integrator step still exercises RPMD's first-step state handling.
+    restored.integrator.step(1)
+    stepped_positions = [
+        restored.integrator.getState(bead, getPositions=True)
+        .getPositions(asNumpy=True)
+        .value_in_unit(unit.nanometer)
+        for bead in range(2)
+    ]
+    assert not np.allclose(stepped_positions[0], stepped_positions[1])
+
+
+def test_rpmd_load_rejects_legacy_context_checkpoint(tmp_path):
+    checkpoint = tmp_path / "legacy.chk"
+    checkpoint.write_bytes(b"ordinary OpenMM Context checkpoint")
+
+    with pytest.raises(ValueError, match="generic OpenMM checkpoint"):
+        nqe_openmm._load_checkpoint(
+            SimpleNamespace(),
+            checkpoint,
+            n_beads=2,
+        )

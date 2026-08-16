@@ -187,7 +187,7 @@ def workflow_runtime(monkeypatch):
     monkeypatch.setattr(
         nqe_openmm,
         "_load_checkpoint",
-        lambda *args: calls.checkpoints.append(args),
+        lambda *args, **kwargs: calls.checkpoints.append((args, kwargs)),
     )
     monkeypatch.setattr(
         nqe_openmm,
@@ -480,7 +480,9 @@ def test_rpmd_production_loads_checkpoint_and_saves_centroid(
     simulation = runtime.calls.simulations[0]
 
     assert runtime.calls.barostats == []
-    assert runtime.calls.checkpoints == [(simulation, "ready.chk")]
+    assert runtime.calls.checkpoints == [
+        ((simulation, "ready.chk"), {"n_beads": 6})
+    ]
     assert simulation.context.positions == []
     assert simulation.steps == [12]
     assert runtime.calls.rpmd_reporters == [
@@ -549,7 +551,9 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     assert bonded.force_groups == [0]
     assert other.force_groups == [0]
     assert integrator.args[-1] == {1: 8, 2: 1}
-    assert runtime.calls.checkpoints == [(simulation, "ready.chk")]
+    assert runtime.calls.checkpoints == [
+        ((simulation, "ready.chk"), {"n_beads": 32})
+    ]
     assert simulation.steps == [4]
     assert runtime.calls.saved == [
         (

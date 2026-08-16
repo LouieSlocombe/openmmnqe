@@ -21,15 +21,18 @@ pulls a collective variable to generate a reference path (see
 :mod:`reactiontools.tools_path`).
 
 Every stage takes the same shape: build the system, optionally deuterate it,
-attach a PLUMED bias and the reporters, run, then save a checkpoint and a
-structure for the next stage to start from. The shared arguments behave the
-same throughout -- *potential* with *ml_idx* runs an ML/MM mixed system and
-forces the CUDA platform, *plumed_script_path* attaches a bias, and
-*output_prefix* names every file the stage writes.
+attach a PLUMED bias and the reporters, run, then save restart data and a
+structure for the next stage to start from. RPMD restart files contain every
+bead rather than an ordinary single-Context checkpoint. The shared arguments
+behave the same throughout -- *potential* with *ml_idx* runs an ML/MM mixed
+system and forces the CUDA platform, *plumed_script_path* attaches a bias,
+and *output_prefix* names every file the stage writes.
 """
 import os
 import sys
+import tempfile
 
+import numpy as np
 import openmm.unit as unit
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
@@ -40,6 +43,10 @@ from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDCentroidReporter,
                         )
 from .tools import deuterate_system, check_platform, init_beads, centroid_positions
+
+
+_RPMD_RESTART_KIND = "openmmnqe-rpmd-restart"
+_RPMD_RESTART_VERSION = 1
 
 
 def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calculator):
@@ -234,18 +241,248 @@ def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
     ))
 
 
+def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
+    """Atomically save every RPMD copy to a portable restart archive.
+
+    OpenMM's ordinary ``Context`` checkpoint only sees the copy currently
+    mirrored into the Context.  The other copies live in private arrays owned
+    by ``RPMDIntegrator``, so they must be collected through its copy-specific
+    API.  Positions are stored in nanometres and velocities in nanometres per
+    picosecond.  The archive also carries the box, time, and step count needed
+    to continue reporter schedules in a new ``Simulation``.
+    """
+    if n_beads <= 0:
+        raise ValueError("n_beads must be positive")
+
+    integrator = simulation.integrator
+    actual_beads = integrator.getNumCopies()
+    if actual_beads != n_beads:
+        raise ValueError(
+            f"n_beads={n_beads} does not match RPMDIntegrator copies={actual_beads}"
+        )
+
+    n_particles = simulation.system.getNumParticles()
+    positions = []
+    velocities = []
+    first_state = None
+    for bead in range(n_beads):
+        state = integrator.getState(
+            bead,
+            getPositions=True,
+            getVelocities=True,
+        )
+        if first_state is None:
+            first_state = state
+        bead_positions = state.getPositions(asNumpy=True).value_in_unit(
+            unit.nanometer
+        )
+        bead_velocities = state.getVelocities(asNumpy=True).value_in_unit(
+            unit.nanometer / unit.picosecond
+        )
+        if bead_positions.shape != (n_particles, 3):
+            raise ValueError(
+                f"Bead {bead} has position shape {bead_positions.shape}; "
+                f"expected {(n_particles, 3)}"
+            )
+        if bead_velocities.shape != (n_particles, 3):
+            raise ValueError(
+                f"Bead {bead} has velocity shape {bead_velocities.shape}; "
+                f"expected {(n_particles, 3)}"
+            )
+        positions.append(np.asarray(bead_positions, dtype=np.float64))
+        velocities.append(np.asarray(bead_velocities, dtype=np.float64))
+
+    positions = np.stack(positions)
+    velocities = np.stack(velocities)
+    if not np.isfinite(positions).all():
+        raise ValueError("Cannot save RPMD restart: bead positions are not finite")
+    if not np.isfinite(velocities).all():
+        raise ValueError("Cannot save RPMD restart: bead velocities are not finite")
+
+    box_vectors = first_state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(
+        unit.nanometer
+    )
+    time_ps = first_state.getTime().value_in_unit(unit.picosecond)
+    step_count = simulation.currentStep
+    periodic = simulation.system.usesPeriodicBoundaryConditions()
+
+    checkpoint_file = os.fspath(checkpoint_file)
+    checkpoint_dir = os.path.dirname(os.path.abspath(checkpoint_file))
+    file_descriptor, temporary_file = tempfile.mkstemp(
+        prefix=f".{os.path.basename(checkpoint_file)}.",
+        suffix=".tmp",
+        dir=checkpoint_dir,
+    )
+    try:
+        with os.fdopen(file_descriptor, "wb") as handle:
+            np.savez(
+                handle,
+                kind=np.asarray(_RPMD_RESTART_KIND),
+                format_version=np.asarray(_RPMD_RESTART_VERSION, dtype=np.int64),
+                num_beads=np.asarray(n_beads, dtype=np.int64),
+                num_particles=np.asarray(n_particles, dtype=np.int64),
+                positions_nm=positions,
+                velocities_nm_per_ps=velocities,
+                periodic=np.asarray(periodic, dtype=np.bool_),
+                box_vectors_nm=np.asarray(box_vectors, dtype=np.float64),
+                time_ps=np.asarray(time_ps, dtype=np.float64),
+                step_count=np.asarray(step_count, dtype=np.int64),
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_file, checkpoint_file)
+    except BaseException:
+        if os.path.exists(temporary_file):
+            os.remove(temporary_file)
+        raise
+
+
+def _read_rpmd_restart(checkpoint_file):
+    """Read and validate the format-independent portion of an RPMD restart."""
+    try:
+        archive = np.load(checkpoint_file, allow_pickle=False)
+    except (OSError, ValueError, EOFError) as exc:
+        raise ValueError(
+            f"{checkpoint_file} is not a bead-aware openmmnqe RPMD restart. "
+            "A generic OpenMM checkpoint cannot safely restore all RPMD copies; "
+            "rerun RPMD equilibration to create a new checkpoint."
+        ) from exc
+
+    try:
+        if not hasattr(archive, "files"):
+            raise ValueError("restart is not an NPZ archive")
+        required = {
+            "kind",
+            "format_version",
+            "num_beads",
+            "num_particles",
+            "positions_nm",
+            "velocities_nm_per_ps",
+            "periodic",
+            "box_vectors_nm",
+            "time_ps",
+            "step_count",
+        }
+        missing = required.difference(archive.files)
+        if missing:
+            raise ValueError(
+                "RPMD restart is missing fields: " + ", ".join(sorted(missing))
+            )
+        if str(archive["kind"].item()) != _RPMD_RESTART_KIND:
+            raise ValueError("checkpoint is not an openmmnqe RPMD restart")
+        version = int(archive["format_version"].item())
+        if version != _RPMD_RESTART_VERSION:
+            raise ValueError(
+                f"Unsupported RPMD restart version {version}; "
+                f"expected {_RPMD_RESTART_VERSION}"
+            )
+        return {
+            "num_beads": int(archive["num_beads"].item()),
+            "num_particles": int(archive["num_particles"].item()),
+            "positions_nm": np.array(archive["positions_nm"], dtype=np.float64),
+            "velocities_nm_per_ps": np.array(
+                archive["velocities_nm_per_ps"], dtype=np.float64
+            ),
+            "periodic": bool(archive["periodic"].item()),
+            "box_vectors_nm": np.array(
+                archive["box_vectors_nm"], dtype=np.float64
+            ),
+            "time_ps": float(archive["time_ps"].item()),
+            "step_count": int(archive["step_count"].item()),
+        }
+    finally:
+        if hasattr(archive, "close"):
+            archive.close()
+
+
+def _load_rpmd_restart(simulation, checkpoint_file, n_beads):
+    """Restore every RPMD copy before the integrator takes its first step."""
+    restart = _read_rpmd_restart(checkpoint_file)
+    integrator = simulation.integrator
+    integrator_beads = integrator.getNumCopies()
+    n_particles = simulation.system.getNumParticles()
+    periodic = simulation.system.usesPeriodicBoundaryConditions()
+
+    if restart["num_beads"] != n_beads:
+        raise ValueError(
+            f"RPMD restart contains {restart['num_beads']} beads, but "
+            f"n_beads={n_beads} was requested"
+        )
+    if integrator_beads != n_beads:
+        raise ValueError(
+            f"n_beads={n_beads} does not match RPMDIntegrator copies={integrator_beads}"
+        )
+    if restart["num_particles"] != n_particles:
+        raise ValueError(
+            f"RPMD restart contains {restart['num_particles']} particles, but "
+            f"the current System contains {n_particles}"
+        )
+    expected_shape = (n_beads, n_particles, 3)
+    if restart["positions_nm"].shape != expected_shape:
+        raise ValueError(
+            f"RPMD restart positions have shape {restart['positions_nm'].shape}; "
+            f"expected {expected_shape}"
+        )
+    if restart["velocities_nm_per_ps"].shape != expected_shape:
+        raise ValueError(
+            "RPMD restart velocities have shape "
+            f"{restart['velocities_nm_per_ps'].shape}; expected {expected_shape}"
+        )
+    if restart["box_vectors_nm"].shape != (3, 3):
+        raise ValueError(
+            f"RPMD restart box has shape {restart['box_vectors_nm'].shape}; "
+            "expected (3, 3)"
+        )
+    if restart["periodic"] != periodic:
+        raise ValueError(
+            "RPMD restart periodicity does not match the current System"
+        )
+    if restart["step_count"] < 0:
+        raise ValueError("RPMD restart step count cannot be negative")
+    for name in ("positions_nm", "velocities_nm_per_ps", "box_vectors_nm"):
+        if not np.isfinite(restart[name]).all():
+            raise ValueError(f"RPMD restart field {name} contains non-finite values")
+    if not np.isfinite(restart["time_ps"]):
+        raise ValueError("RPMD restart time is not finite")
+
+    if periodic:
+        box_vectors = [
+            openmm.Vec3(*row) * unit.nanometer
+            for row in restart["box_vectors_nm"]
+        ]
+        simulation.context.setPeriodicBoxVectors(*box_vectors)
+    simulation.context.setTime(restart["time_ps"] * unit.picosecond)
+    simulation.currentStep = restart["step_count"]
+    for bead in range(n_beads):
+        integrator.setPositions(
+            bead,
+            restart["positions_nm"][bead] * unit.nanometer,
+        )
+        integrator.setVelocities(
+            bead,
+            restart["velocities_nm_per_ps"][bead]
+            * unit.nanometer
+            / unit.picosecond,
+        )
+
+
 def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpoint=True,
                       n_beads=None):
     """
     Save an optional checkpoint and write the final structure to PDB.
 
-    Pass *n_beads* for an RPMD run: the context holds a single copy of the
-    system rather than the ring polymer, so the structure it hands back is
-    bead 0 and not the centroid. With a bead count the positions are averaged
-    over the copies via :func:`openmmnqe.tools.centroid_positions` instead.
+    Pass *n_beads* for an RPMD run: all copy positions and velocities are
+    saved in a bead-aware restart archive, and the final PDB positions are
+    averaged over the copies via
+    :func:`openmmnqe.tools.centroid_positions`. Without a bead count, an
+    ordinary OpenMM checkpoint and Context structure are written.
     """
     if save_checkpoint:
-        simulation.saveCheckpoint(f'{output_prefix}.chk')
+        checkpoint_file = f'{output_prefix}.chk'
+        if n_beads is None:
+            simulation.saveCheckpoint(checkpoint_file)
+        else:
+            _save_rpmd_restart(simulation, checkpoint_file, n_beads)
     if n_beads is None:
         positions = simulation.context.getState(getPositions=True).getPositions()
     else:
@@ -256,15 +493,22 @@ def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpo
         app.PDBFile.writeFile(simulation.topology, positions, f)
 
 
-def _load_checkpoint(simulation, checkpoint_file):
+def _load_checkpoint(simulation, checkpoint_file, n_beads=None):
     """
-    Load an equilibration checkpoint into *simulation*.
+    Load equilibration restart data into *simulation*.
+
+    With *n_beads*, require the bead-aware openmmnqe RPMD format and restore
+    every copy. Without it, delegate to OpenMM's ordinary Context checkpoint
+    loader.
 
     Raises
     ------
     FileNotFoundError
         If *checkpoint_file* does not exist. Returning quietly here would let a
         batch job exit successfully having run no simulation at all.
+    ValueError
+        If an RPMD restart is legacy, corrupt, or incompatible with the current
+        bead or particle count.
     """
     if not os.path.exists(checkpoint_file):
         raise FileNotFoundError(
@@ -273,7 +517,10 @@ def _load_checkpoint(simulation, checkpoint_file):
         )
 
     print(f"Loading state from {checkpoint_file}...", flush=True)
-    simulation.loadCheckpoint(checkpoint_file)
+    if n_beads is None:
+        simulation.loadCheckpoint(checkpoint_file)
+    else:
+        _load_rpmd_restart(simulation, checkpoint_file, n_beads)
 
 
 def run_openmm_relaxation(modeller,
@@ -1119,7 +1366,7 @@ def run_openmm_rpmd_contracted(modeller,
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep, contractions)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
-    _load_checkpoint(simulation, checkpoint_file)
+    _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)
@@ -1231,7 +1478,7 @@ def run_openmm_rpmd_prod(modeller,
                                        gamma,
                                        time_step)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    _load_checkpoint(simulation, checkpoint_file)
+    _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
     _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
                         n_beads, atoms_to_watch)
