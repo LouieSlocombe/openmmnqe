@@ -177,6 +177,11 @@ def test_init_beads_is_deterministic_and_sets_independent_thermal_velocities():
         first.velocities[0].value_in_unit(unit.nanometer / unit.picosecond),
         first.velocities[1].value_in_unit(unit.nanometer / unit.picosecond),
     )
+    bead_positions = np.asarray([
+        first.positions[bead].value_in_unit(unit.nanometer)
+        for bead in (0, 1)
+    ])
+    assert np.allclose(bead_positions.mean(axis=0), [[1.0, 2.0, 3.0]])
 
 
 def test_init_beads_velocity_scale_tracks_mass_and_skips_massless_particles():
@@ -259,7 +264,10 @@ def test_init_beads_scaled_spreads_light_atoms_and_sets_copy_velocities():
         system=_System(masses=[1.0, 16.0]),
         integrator=integrator,
     )
-    positions = np.zeros((2, 3))
+    positions = np.asarray([
+        [1.0, 2.0, 3.0],
+        [-2.0, -1.0, 0.5],
+    ])
     n_beads = 200
 
     nqe.init_beads_scaled(
@@ -270,10 +278,11 @@ def test_init_beads_scaled_spreads_light_atoms_and_sets_copy_velocities():
         scale_factor=1.0,
         seed=7,
     )
-    displacements = np.asarray([
+    bead_positions = np.asarray([
         integrator.positions[bead].value_in_unit(unit.nanometer)
         for bead in range(n_beads)
     ])
+    displacements = bead_positions - positions[np.newaxis]
     velocities = [
         integrator.velocities[bead].value_in_unit(
             unit.nanometer / unit.picosecond
@@ -284,6 +293,7 @@ def test_init_beads_scaled_spreads_light_atoms_and_sets_copy_velocities():
     assert displacements[:, 0].std() / displacements[:, 1].std() == (
         pytest.approx(4.0, rel=0.15)
     )
+    assert np.allclose(bead_positions.mean(axis=0), positions)
     assert not np.allclose(velocities[0], 0.0)
     assert not np.allclose(velocities[1], 0.0)
     assert not np.allclose(velocities[0], velocities[1])

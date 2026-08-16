@@ -205,11 +205,13 @@ def init_beads_scaled(
     Every bead starts at the given positions plus Gaussian noise scaled by
     the atom's thermal de Broglie wavelength, so light atoms open out further
     than heavy ones and the ring polymers start closer to their equilibrium
-    extent than the uniform jiggle of :func:`init_beads` manages. Each copy
-    receives an independent Maxwell-Boltzmann velocity sample based on the
-    particle masses and RPMD temperature. Following OpenMM's RPMD Hamiltonian
-    convention, each copy's velocity variance is ``n_beads*k_B*T/m``.
-    Massless particles receive zero velocity.
+    extent than the uniform jiggle of :func:`init_beads` manages. The
+    displacements are centered over the copies for each atom, preserving the
+    supplied positions as the ring-polymer centroid. Each copy receives an
+    independent Maxwell-Boltzmann velocity sample based on the particle masses
+    and RPMD temperature. Following OpenMM's RPMD Hamiltonian convention, each
+    copy's velocity variance is ``n_beads*k_B*T/m``. Massless particles
+    receive zero velocity.
 
     Parameters
     ----------
@@ -267,6 +269,7 @@ def init_beads_scaled(
     rng = np.random.default_rng(seed)
     noise = rng.normal(size=(n_beads, n_atoms, 3))
     noise *= lambdas_nm[np.newaxis, :, np.newaxis] * scale_factor
+    noise -= noise.mean(axis=0, keepdims=True)
     velocities = _sample_maxwell_boltzmann_velocities(
         system,
         temperature,
@@ -291,9 +294,11 @@ def init_beads(modeller, simulation, n_beads, perturb=0.002,
     Beads that all start at the same point stay collapsed on top of one
     another, so each is displaced by a small random amount.  The displacement
     is the same size for every atom; :func:`init_beads_scaled` sizes it per
-    atom instead. Each copy receives an independent Maxwell-Boltzmann velocity
-    sample based on the particle masses and RPMD temperature. Following
-    OpenMM's RPMD Hamiltonian convention, each copy's velocity variance is
+    atom instead. The displacements are centered over the copies for each
+    atom, preserving the Modeller positions as the ring-polymer centroid.
+    Each copy receives an independent Maxwell-Boltzmann velocity sample based
+    on the particle masses and RPMD temperature. Following OpenMM's RPMD
+    Hamiltonian convention, each copy's velocity variance is
     ``n_beads*k_B*T/m``. Massless particles receive zero velocity.
 
     Parameters
@@ -334,6 +339,7 @@ def init_beads(modeller, simulation, n_beads, perturb=0.002,
     if temperature is None:
         temperature = simulation.integrator.getTemperature()
     jiggles = perturb * rng.normal(size=(n_beads, n_atoms, 3))
+    jiggles -= jiggles.mean(axis=0, keepdims=True)
     velocities = _sample_maxwell_boltzmann_velocities(
         simulation.system,
         temperature,
