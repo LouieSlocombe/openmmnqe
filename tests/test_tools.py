@@ -253,31 +253,76 @@ def test_init_beads_sets_velocities_on_real_rpmd_copies():
     assert not np.allclose(velocities[0], velocities[1])
 
 
-def test_init_beads_scaled_spreads_light_atoms_further():
+def test_init_beads_scaled_spreads_light_atoms_and_sets_copy_velocities():
     integrator = _Integrator()
-    temperatures = []
     simulation = SimpleNamespace(
         system=_System(masses=[1.0, 16.0]),
         integrator=integrator,
-        context=SimpleNamespace(
-            setVelocitiesToTemperature=lambda temperature: temperatures.append(temperature)
-        ),
     )
     positions = np.zeros((2, 3))
+    n_beads = 200
 
     nqe.init_beads_scaled(
         simulation,
         positions,
-        n_beads=1,
+        n_beads=n_beads,
         temperature=300.0 * unit.kelvin,
         scale_factor=1.0,
+        seed=7,
     )
-    displacement = np.abs(
-        integrator.positions[0].value_in_unit(unit.nanometer)
+    displacements = np.asarray([
+        integrator.positions[bead].value_in_unit(unit.nanometer)
+        for bead in range(n_beads)
+    ])
+    velocities = [
+        integrator.velocities[bead].value_in_unit(
+            unit.nanometer / unit.picosecond
+        )
+        for bead in range(2)
+    ]
+
+    assert displacements[:, 0].std() / displacements[:, 1].std() == (
+        pytest.approx(4.0, rel=0.15)
+    )
+    assert not np.allclose(velocities[0], 0.0)
+    assert not np.allclose(velocities[1], 0.0)
+    assert not np.allclose(velocities[0], velocities[1])
+
+
+def test_init_beads_scaled_sets_velocities_on_real_rpmd_copies():
+    modeller = _single_atom_modeller()
+    system = openmm.System()
+    system.addParticle(1.0 * unit.dalton)
+    integrator = openmm.RPMDIntegrator(
+        2,
+        300.0 * unit.kelvin,
+        1.0 / unit.picosecond,
+        0.1 * unit.femtosecond,
+    )
+    simulation = app.Simulation(
+        modeller.topology,
+        system,
+        integrator,
+        openmm.Platform.getPlatformByName("Reference"),
     )
 
-    assert displacement[0].mean() > displacement[1].mean()
-    assert temperatures == [300.0 * unit.kelvin]
+    nqe.init_beads_scaled(
+        simulation,
+        modeller.positions,
+        n_beads=2,
+        temperature=300.0 * unit.kelvin,
+        seed=7,
+    )
+    velocities = [
+        integrator.getState(bead, getVelocities=True)
+        .getVelocities(asNumpy=True)
+        .value_in_unit(unit.nanometer / unit.picosecond)
+        for bead in range(2)
+    ]
+
+    assert not np.allclose(velocities[0], 0.0)
+    assert not np.allclose(velocities[1], 0.0)
+    assert not np.allclose(velocities[0], velocities[1])
 
 
 def test_centroid_positions_unwraps_beads_across_box_boundary():

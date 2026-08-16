@@ -191,15 +191,25 @@ def get_thermal_de_broglie_wavelength(mass, temperature):
     return lambda_meters * unit.meter
 
 
-def init_beads_scaled(simulation, positions, n_beads, temperature, scale_factor=0.1):
+def init_beads_scaled(
+    simulation,
+    positions,
+    n_beads,
+    temperature,
+    scale_factor=0.1,
+    seed=0,
+):
     """
     Seed RPMD bead positions, spread by each atom's thermal wavelength.
 
     Every bead starts at the given positions plus Gaussian noise scaled by
     the atom's thermal de Broglie wavelength, so light atoms open out further
     than heavy ones and the ring polymers start closer to their equilibrium
-    extent than the uniform jiggle of :func:`init_beads` manages.  Velocities
-    are then drawn from the Maxwell-Boltzmann distribution.
+    extent than the uniform jiggle of :func:`init_beads` manages. Each copy
+    receives an independent Maxwell-Boltzmann velocity sample based on the
+    particle masses and RPMD temperature. Following OpenMM's RPMD Hamiltonian
+    convention, each copy's velocity variance is ``n_beads*k_B*T/m``.
+    Massless particles receive zero velocity.
 
     Parameters
     ----------
@@ -213,33 +223,64 @@ def init_beads_scaled(simulation, positions, n_beads, temperature, scale_factor=
         Temperature the wavelengths and velocities are drawn at.
     scale_factor : float, optional
         Fraction of the thermal wavelength to perturb by. Default is 0.1.
+    seed : int or None, optional
+        NumPy random seed used for both position and velocity sampling. Pass
+        None for entropy-based seeding. Default is 0 for reproducibility.
     """
+    if n_beads <= 0:
+        raise ValueError("n_beads must be positive")
+    if not np.isfinite(scale_factor) or scale_factor < 0:
+        raise ValueError("scale_factor must be finite and non-negative")
+
     system = simulation.system
+    integrator = simulation.integrator
+    if hasattr(integrator, "getNumCopies"):
+        integrator_beads = integrator.getNumCopies()
+        if integrator_beads != n_beads:
+            raise ValueError(
+                f"n_beads={n_beads} does not match RPMDIntegrator "
+                f"copies={integrator_beads}"
+            )
     n_atoms = system.getNumParticles()
 
-    masses_val = np.array([system.getParticleMass(i).value_in_unit(unit.dalton)
-                           for i in range(n_atoms)])
-    masses_quantity = masses_val * unit.dalton
-
-    lambdas = get_thermal_de_broglie_wavelength(masses_quantity, temperature)
-    lambdas_nm = lambdas.value_in_unit(unit.nanometer)
+    masses_val = np.asarray([
+        system.getParticleMass(i).value_in_unit(unit.dalton)
+        for i in range(n_atoms)
+    ])
+    if not np.isfinite(masses_val).all() or np.any(masses_val < 0):
+        raise ValueError("particle masses must be finite and non-negative")
+    lambdas_nm = np.zeros(n_atoms)
+    massive = masses_val > 0
+    lambdas_nm[massive] = get_thermal_de_broglie_wavelength(
+        masses_val[massive] * unit.dalton,
+        temperature,
+    ).value_in_unit(unit.nanometer)
 
     if not unit.is_quantity(positions):
         positions = positions * unit.nanometer
-    pos0 = positions.value_in_unit(unit.nanometer)
+    pos0 = np.asarray(positions.value_in_unit(unit.nanometer))
+    if pos0.shape != (n_atoms, 3):
+        raise ValueError(
+            f"positions must have shape ({n_atoms}, 3), got {pos0.shape}"
+        )
 
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
+    noise = rng.normal(size=(n_beads, n_atoms, 3))
+    noise *= lambdas_nm[np.newaxis, :, np.newaxis] * scale_factor
+    velocities = _sample_maxwell_boltzmann_velocities(
+        system,
+        temperature,
+        n_beads,
+        rng,
+    )
 
     print(f"Initializing {n_beads} beads scaled by thermal wavelengths...")
     print(f"Max Lambda (lightest atom): {np.max(lambdas_nm):.4f} nm")
     print(f"Min Lambda (heaviest atom): {np.min(lambdas_nm):.4f} nm")
 
     for b in range(n_beads):
-        noise = rng.normal(size=(n_atoms, 3)) * lambdas_nm[:, np.newaxis] * scale_factor
-        bead_pos = pos0 + noise
-        simulation.integrator.setPositions(b, bead_pos * unit.nanometer)
-
-    simulation.context.setVelocitiesToTemperature(temperature)
+        integrator.setPositions(b, (pos0 + noise[b]) * unit.nanometer)
+        integrator.setVelocities(b, velocities[b])
 
 
 def init_beads(modeller, simulation, n_beads, perturb=0.002,
