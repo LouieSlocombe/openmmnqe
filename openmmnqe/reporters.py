@@ -81,8 +81,7 @@ def _calculate_quantum_spread(integrator, atom_indices=None):
 def _calculate_bead_expansion(integrator, atom_indices=None):
     r"""Compute the mean bead-centroid distance for selected atoms.
 
-    This is the proton ring-polymer degree of expansion used in Equation (1)
-    and Figure 7 of Tao, Giese, and York, *Molecules* 29, 2703 (2024):
+    The proton ring-polymer degree of expansion is
 
     .. math::
 
@@ -268,7 +267,7 @@ class RPMDQuantumSpreadReporter(object):
     metric : {"rms", "mean"}, optional
         ``"rms"`` records the existing quantum radius of gyration.
         ``"mean"`` records the mean bead-centroid distance used as the degree
-        of expansion in Figure 7 of Tao et al. Default is ``"rms"``.
+        of expansion. Default is ``"rms"``.
     distance_pairs : iterable of pair of int or None, optional
         Zero-based atom-index pairs whose centroid distances are written in
         the same row as the expansion values. Default is None.
@@ -388,9 +387,9 @@ def track_rpmd_atom_expansion(simulation, atom_index, file, report_interval,
     where ``P`` is the number of beads, ``r_i`` is the target atom's position
     in bead ``i``, and ``r_bar`` is its ring-polymer centroid. This is the
     default ``metric="rms"``. Set ``metric="mean"`` to record
-    ``mean(|r_i-r_bar|)``, the degree of expansion used in Figure 7 of Tao et
-    al. Optional centroid atom-pair distances are sampled into the same row,
-    which keeps the reaction coordinate aligned with the expansion.
+    ``mean(|r_i-r_bar|)``, the mean bead-centroid degree of expansion. Optional
+    centroid atom-pair distances are sampled into the same row, which keeps
+    the reaction coordinate aligned with the expansion.
 
     Parameters
     ----------
@@ -574,9 +573,8 @@ def plot_rpmd_atom_expansion(file, *, expansion_columns=None,
     With no *path_progress*, one selected centroid-distance column is used on
     the x axis and a direct expansion-versus-distance scatter is produced. With
     *path_progress*, expansion and all selected distances are drawn in stacked
-    panels sharing that coordinate, following the layout of Figure 7 in Tao,
-    Giese, and York (2024). Repeated progress values are averaged and sorted;
-    *progress_bins* can aggregate a continuous path coordinate.
+    panels sharing that coordinate. Repeated progress values are averaged and
+    sorted; *progress_bins* can aggregate a continuous path coordinate.
 
     Parameters
     ----------

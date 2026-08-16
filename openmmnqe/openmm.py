@@ -1528,10 +1528,9 @@ def run_openmm_rpmd_equilibration(modeller,
         for initial positions/velocities and the PILE thermostat. If None,
         NumPy and OpenMM select independent seeds. Default is None.
     expansion_metric : {"rms", "mean"}, optional
-        Spread metric written for *atoms_to_watch*. ``"mean"`` is the
-        bead-centroid degree of expansion used in Figure 7 of Tao et al.;
-        ``"rms"`` preserves the existing radius-of-gyration output. Default
-        is ``"rms"``.
+        Spread metric written for *atoms_to_watch*. ``"mean"`` is the mean
+        bead-centroid degree of expansion; ``"rms"`` preserves the existing
+        radius-of-gyration output. Default is ``"rms"``.
     distance_pairs_to_watch : iterable of pair of int or None, optional
         Atom pairs whose centroid distances are written alongside the spread
         values. Requires *atoms_to_watch*. Default is None.

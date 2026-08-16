@@ -76,8 +76,8 @@ suite remains under `tests/` and runs with `pytest`.
 
 RPMD spread logs can include centroid atom-pair distances sampled on the same
 steps as a transferring atom's ring-polymer expansion. Use `"mean"` for the
-mean bead-centroid radius from Equation (1) of Tao, Giese, and York (2024);
-the default `"rms"` preserves the package's earlier radius-of-gyration output.
+mean bead-centroid radius; the default `"rms"` preserves the package's earlier
+radius-of-gyration output.
 
 ```python
 nqe.run_openmm_rpmd_prod(
