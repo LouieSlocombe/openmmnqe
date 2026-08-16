@@ -159,7 +159,7 @@ def get_thermal_de_broglie_wavelength(mass, temperature):
 
     This length sets the scale over which a particle behaves as a wave rather
     than a point, and so how far apart the beads of its ring polymer should
-    start; see :func:`init_beads_scaled`.
+    start; see :func:`init_beads`.
 
     Parameters
     ----------
@@ -191,40 +191,35 @@ def get_thermal_de_broglie_wavelength(mass, temperature):
     return lambda_meters * unit.meter
 
 
-def init_beads_scaled(
-    simulation,
-    positions,
-    n_beads,
-    temperature,
-    scale_factor=0.1,
-    seed=0,
-):
+def init_beads(modeller, simulation, n_beads, scale_factor=0.1,
+               temperature=None, seed=0):
     """
-    Seed RPMD bead positions, spread by each atom's thermal wavelength.
+    Seed RPMD bead positions and velocities at the simulation temperature.
 
-    Every bead starts at the given positions plus Gaussian noise scaled by
-    the atom's thermal de Broglie wavelength, so light atoms open out further
-    than heavy ones and the ring polymers start closer to their equilibrium
-    extent than the uniform jiggle of :func:`init_beads` manages. The
-    displacements are centered over the copies for each atom, preserving the
-    supplied positions as the ring-polymer centroid. Each copy receives an
-    independent Maxwell-Boltzmann velocity sample based on the particle masses
-    and RPMD temperature. Following OpenMM's RPMD Hamiltonian convention, each
-    copy's velocity variance is ``n_beads*k_B*T/m``. Massless particles
-    receive zero velocity.
+    Every bead starts at the Modeller positions plus Gaussian noise scaled by
+    each atom's thermal de Broglie wavelength, so light atoms open out further
+    than heavy ones. The displacements are centered over the copies for each
+    atom, preserving the Modeller positions as the ring-polymer centroid. Each
+    copy receives an independent Maxwell-Boltzmann velocity sample based on
+    the particle masses and RPMD temperature. Following OpenMM's RPMD
+    Hamiltonian convention, each copy's velocity variance is
+    ``n_beads*k_B*T/m``. Massless particles remain at the supplied position
+    and receive zero velocity.
 
     Parameters
     ----------
+    modeller : openmm.app.Modeller
+        Modeller the initial positions are taken from.
     simulation : openmm.app.Simulation
         Simulation driven by an ``RPMDIntegrator``, modified in place.
-    positions : openmm.unit.Quantity or numpy.ndarray
-        Initial atomic positions. A bare array is taken to be in nanometres.
     n_beads : int
         Number of beads in the ring polymer.
-    temperature : openmm.unit.Quantity
-        Temperature the wavelengths and velocities are drawn at.
     scale_factor : float, optional
-        Fraction of the thermal wavelength to perturb by. Default is 0.1.
+        Fraction of each atom's thermal de Broglie wavelength used as the
+        position-displacement standard deviation. Default is 0.1.
+    temperature : openmm.unit.Quantity or float or None, optional
+        Temperature for velocity sampling. A bare number is interpreted as
+        kelvin. If None, use the RPMD integrator temperature. Default is None.
     seed : int or None, optional
         NumPy random seed used for both position and velocity sampling. Pass
         None for entropy-based seeding. Default is 0 for reproducibility.
@@ -245,19 +240,7 @@ def init_beads_scaled(
             )
     n_atoms = system.getNumParticles()
 
-    masses_val = np.asarray([
-        system.getParticleMass(i).value_in_unit(unit.dalton)
-        for i in range(n_atoms)
-    ])
-    if not np.isfinite(masses_val).all() or np.any(masses_val < 0):
-        raise ValueError("particle masses must be finite and non-negative")
-    lambdas_nm = np.zeros(n_atoms)
-    massive = masses_val > 0
-    lambdas_nm[massive] = get_thermal_de_broglie_wavelength(
-        masses_val[massive] * unit.dalton,
-        temperature,
-    ).value_in_unit(unit.nanometer)
-
+    positions = modeller.positions
     if not unit.is_quantity(positions):
         positions = positions * unit.nanometer
     pos0 = np.asarray(positions.value_in_unit(unit.nanometer))
@@ -265,92 +248,40 @@ def init_beads_scaled(
         raise ValueError(
             f"positions must have shape ({n_atoms}, 3), got {pos0.shape}"
         )
+    if temperature is None:
+        temperature = integrator.getTemperature()
+
+    masses_amu = np.asarray([
+        system.getParticleMass(index).value_in_unit(unit.dalton)
+        for index in range(n_atoms)
+    ])
+    if not np.isfinite(masses_amu).all() or np.any(masses_amu < 0):
+        raise ValueError("particle masses must be finite and non-negative")
+    wavelengths_nm = np.zeros(n_atoms)
+    massive = masses_amu > 0
+    wavelengths_nm[massive] = get_thermal_de_broglie_wavelength(
+        masses_amu[massive] * unit.dalton,
+        temperature,
+    ).value_in_unit(unit.nanometer)
 
     rng = np.random.default_rng(seed)
-    noise = rng.normal(size=(n_beads, n_atoms, 3))
-    noise *= lambdas_nm[np.newaxis, :, np.newaxis] * scale_factor
-    noise -= noise.mean(axis=0, keepdims=True)
+    displacements = rng.normal(size=(n_beads, n_atoms, 3))
+    displacements *= (
+        wavelengths_nm[np.newaxis, :, np.newaxis] * scale_factor
+    )
+    displacements -= displacements.mean(axis=0, keepdims=True)
     velocities = _sample_maxwell_boltzmann_velocities(
         system,
         temperature,
         n_beads,
         rng,
     )
-
-    print(f"Initializing {n_beads} beads scaled by thermal wavelengths...")
-    print(f"Max Lambda (lightest atom): {np.max(lambdas_nm):.4f} nm")
-    print(f"Min Lambda (heaviest atom): {np.min(lambdas_nm):.4f} nm")
-
     for b in range(n_beads):
-        integrator.setPositions(b, (pos0 + noise[b]) * unit.nanometer)
-        integrator.setVelocities(b, velocities[b])
-
-
-def init_beads(modeller, simulation, n_beads, perturb=0.002,
-               temperature=None, seed=0):
-    """
-    Seed RPMD bead positions and independent thermal velocities.
-
-    Beads that all start at the same point stay collapsed on top of one
-    another, so each is displaced by a small random amount.  The displacement
-    is the same size for every atom; :func:`init_beads_scaled` sizes it per
-    atom instead. The displacements are centered over the copies for each
-    atom, preserving the Modeller positions as the ring-polymer centroid.
-    Each copy receives an independent Maxwell-Boltzmann velocity sample based
-    on the particle masses and RPMD temperature. Following OpenMM's RPMD
-    Hamiltonian convention, each copy's velocity variance is
-    ``n_beads*k_B*T/m``. Massless particles receive zero velocity.
-
-    Parameters
-    ----------
-    modeller : openmm.app.Modeller
-        Modeller the initial positions are taken from.
-    simulation : openmm.app.Simulation
-        Simulation driven by an ``RPMDIntegrator``, modified in place.
-    n_beads : int
-        Number of beads in the ring polymer.
-    perturb : float, optional
-        Standard deviation of the displacement, in nanometres. Default is
-        0.002.
-    temperature : openmm.unit.Quantity or float or None, optional
-        Temperature for velocity sampling. A bare number is interpreted as
-        kelvin. If None, use the RPMD integrator temperature. Default is None.
-    seed : int or None, optional
-        NumPy random seed used for both position and velocity sampling. Pass
-        None for entropy-based seeding. Default is 0 for reproducibility.
-    """
-    rng = np.random.default_rng(seed)
-    if n_beads <= 0:
-        raise ValueError("n_beads must be positive")
-    if hasattr(simulation.integrator, "getNumCopies"):
-        integrator_beads = simulation.integrator.getNumCopies()
-        if integrator_beads != n_beads:
-            raise ValueError(
-                f"n_beads={n_beads} does not match RPMDIntegrator "
-                f"copies={integrator_beads}"
-            )
-    pos0 = modeller.positions
-    n_atoms = len(pos0)
-    if simulation.system.getNumParticles() != n_atoms:
-        raise ValueError(
-            f"Modeller has {n_atoms} positions, but the System has "
-            f"{simulation.system.getNumParticles()} particles"
+        integrator.setPositions(
+            b,
+            (pos0 + displacements[b]) * unit.nanometer,
         )
-    if temperature is None:
-        temperature = simulation.integrator.getTemperature()
-    jiggles = perturb * rng.normal(size=(n_beads, n_atoms, 3))
-    jiggles -= jiggles.mean(axis=0, keepdims=True)
-    velocities = _sample_maxwell_boltzmann_velocities(
-        simulation.system,
-        temperature,
-        n_beads,
-        rng,
-    )
-    for b in range(n_beads):
-        bead_pos = [openmm.Vec3(p.x + dx, p.y + dy, p.z + dz)
-                    for p, (dx, dy, dz) in zip(pos0, jiggles[b])]
-        simulation.integrator.setPositions(b, bead_pos * unit.nanometer)
-        simulation.integrator.setVelocities(b, velocities[b])
+        integrator.setVelocities(b, velocities[b])
 
 
 def count_dna_and_estimate_charge(topology):
