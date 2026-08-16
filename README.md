@@ -72,6 +72,64 @@ These examples can require a CUDA GPU, downloaded MACE models, PLUMED, ORCA,
 or AmberTools depending on the selected workflow. The focused regression
 suite remains under `tests/` and runs with `pytest`.
 
+## Bead expansion along a reaction coordinate
+
+RPMD spread logs can include centroid atom-pair distances sampled on the same
+steps as a transferring atom's ring-polymer expansion. Use `"mean"` for the
+mean bead-centroid radius from Equation (1) of Tao, Giese, and York (2024);
+the default `"rms"` preserves the package's earlier radius-of-gyration output.
+
+```python
+nqe.run_openmm_rpmd_prod(
+    modeller,
+    forcefield,
+    atoms_to_watch=[17],
+    expansion_metric="mean",
+    distance_pairs_to_watch=[(4, 17), (9, 17)],
+)
+
+# Direct expansion-versus-distance view.
+nqe.plot_rpmd_atom_expansion(
+    "rpmd_prod_spread.log",
+    distance_columns="Distance_Atom4-Atom17(nm)",
+    length_unit="angstrom",
+    filename="expansion-vs-donor-distance.png",
+)
+```
+
+To make a Figure-7-style diagnostic from a PLUMED `PATHMSD` run, print
+`path.sss` at the same stride as `n_report`, align it to the reporter rows with
+reactiontools, and normalise PLUMED's one-based path-image coordinate:
+
+```python
+import reactiontools as rt
+
+spread_log = "rpmd_prod_spread.log"
+with open(spread_log) as handle:
+    n_samples = sum(1 for _ in handle) - 1
+
+path_image = rt.cv_from_colvar(
+    "COLVAR",
+    n_frames=n_samples,
+    cv_name="path.sss",
+)
+normalised_path_progress = (path_image - 1.0) / (n_images - 1)
+
+figure, axes = nqe.plot_rpmd_atom_expansion(
+    spread_log,
+    path_progress=normalised_path_progress,
+    progress_bins=n_images,
+    length_unit="angstrom",
+    filename="expansion-along-path.png",
+)
+```
+
+Repeated path/window values are averaged automatically, and `progress_bins`
+forms conditional means for a continuous progress coordinate. For separate
+umbrella windows, repeat each window's normalised centre for its reporter rows
+before concatenating the logs. Matplotlib is available through the `plot`
+optional dependency.
+
 ## Installation
 
 Some dependencies (openmm-ml, openmm-plumed) are not installable from PyPI, and openmm-plumed has to be compiled, so

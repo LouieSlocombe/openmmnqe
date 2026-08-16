@@ -44,6 +44,7 @@ from openmm import openmm, app
 from .reporters import (RPMDQuantumSpreadReporter,
                         RPMDBeadReporter,
                         RPMDCentroidReporter,
+                        _validate_observable_indices,
                         )
 from .tools import (deuterate_system, check_platform, init_beads,
                     centroid_positions, step_rpmd)
@@ -363,13 +364,23 @@ def _add_rpmd_progress_reporters(simulation, output_prefix, n_report):
 
 
 def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
-                        atoms_to_watch):
+                        atoms_to_watch, expansion_metric="rms",
+                        distance_pairs=None):
     """Append the RPMD reporter trio (optional spread, centroid, beads)."""
+    if distance_pairs is not None and atoms_to_watch is None:
+        raise ValueError("distance_pairs require atoms_to_watch")
     if atoms_to_watch is not None:
+        atoms_to_watch, distance_pairs = _validate_observable_indices(
+            atoms_to_watch,
+            distance_pairs,
+            n_atoms=topology.getNumAtoms(),
+        )
         simulation.reporters.append(RPMDQuantumSpreadReporter(
             file=f'{output_prefix}_spread.log',
             reportInterval=n_report,
             atom_indices=atoms_to_watch,
+            metric=expansion_metric,
+            distance_pairs=distance_pairs,
         ))
 
     simulation.reporters.append(RPMDCentroidReporter(
@@ -1461,7 +1472,9 @@ def run_openmm_rpmd_equilibration(modeller,
                                   calculator=None,
                                   atoms_to_watch=None,
                                   scale_factor=1.0,
-                                  seed=None):
+                                  seed=None,
+                                  expansion_metric="rms",
+                                  distance_pairs_to_watch=None):
     """
     Equilibrate a ring-polymer molecular dynamics (RPMD) simulation.
 
@@ -1514,6 +1527,14 @@ def run_openmm_rpmd_equilibration(modeller,
         Master random seed. A value derives independent deterministic streams
         for initial positions/velocities and the PILE thermostat. If None,
         NumPy and OpenMM select independent seeds. Default is None.
+    expansion_metric : {"rms", "mean"}, optional
+        Spread metric written for *atoms_to_watch*. ``"mean"`` is the
+        bead-centroid degree of expansion used in Figure 7 of Tao et al.;
+        ``"rms"`` preserves the existing radius-of-gyration output. Default
+        is ``"rms"``.
+    distance_pairs_to_watch : iterable of pair of int or None, optional
+        Atom pairs whose centroid distances are written alongside the spread
+        values. Requires *atoms_to_watch*. Default is None.
     """
     initialization_seed, thermostat_seed = _split_rpmd_seed(seed)
     system, platform = _build_system(modeller, forcefield, platform_name,
@@ -1526,8 +1547,16 @@ def run_openmm_rpmd_equilibration(modeller,
         integrator.setRandomNumberSeed(thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
-    _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
-                        n_beads, atoms_to_watch)
+    _add_rpmd_reporters(
+        simulation,
+        modeller.topology,
+        output_prefix,
+        n_report,
+        n_beads,
+        atoms_to_watch,
+        expansion_metric=expansion_metric,
+        distance_pairs=distance_pairs_to_watch,
+    )
     _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
     init_beads(
@@ -1574,7 +1603,9 @@ def run_openmm_rpmd_contracted(modeller,
                                potential=None,
                                ml_idx=None,
                                atoms_to_watch=None,
-                               calculator=None):
+                               calculator=None,
+                               expansion_metric="rms",
+                               distance_pairs_to_watch=None):
     """
     Run a contracted ring-polymer MD (RPMD) production simulation.
 
@@ -1632,6 +1663,12 @@ def run_openmm_rpmd_contracted(modeller,
         Atom indices for quantum spread monitoring. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    expansion_metric : {"rms", "mean"}, optional
+        Spread metric written for *atoms_to_watch*. Use ``"mean"`` for the
+        Figure-7 degree of expansion. Default is ``"rms"``.
+    distance_pairs_to_watch : iterable of pair of int or None, optional
+        Atom pairs whose centroid distances are written alongside the spread
+        values. Requires *atoms_to_watch*. Default is None.
 
     Raises
     ------
@@ -1688,8 +1725,16 @@ def run_openmm_rpmd_contracted(modeller,
 
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
-    _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
-                        n_beads, atoms_to_watch)
+    _add_rpmd_reporters(
+        simulation,
+        modeller.topology,
+        output_prefix,
+        n_report,
+        n_beads,
+        atoms_to_watch,
+        expansion_metric=expansion_metric,
+        distance_pairs=distance_pairs_to_watch,
+    )
 
     _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
@@ -1722,7 +1767,9 @@ def run_openmm_rpmd_prod(modeller,
                          potential=None,
                          ml_idx=None,
                          atoms_to_watch=None,
-                         calculator=None):
+                         calculator=None,
+                         expansion_metric="rms",
+                         distance_pairs_to_watch=None):
     """
     Run a full ring-polymer MD (RPMD) production simulation.
 
@@ -1776,6 +1823,12 @@ def run_openmm_rpmd_prod(modeller,
         Atom indices for quantum spread monitoring. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    expansion_metric : {"rms", "mean"}, optional
+        Spread metric written for *atoms_to_watch*. Use ``"mean"`` for the
+        Figure-7 degree of expansion. Default is ``"rms"``.
+    distance_pairs_to_watch : iterable of pair of int or None, optional
+        Atom pairs whose centroid distances are written alongside the spread
+        values. Requires *atoms_to_watch*. Default is None.
 
     Raises
     ------
@@ -1800,8 +1853,16 @@ def run_openmm_rpmd_prod(modeller,
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
-    _add_rpmd_reporters(simulation, modeller.topology, output_prefix, n_report,
-                        n_beads, atoms_to_watch)
+    _add_rpmd_reporters(
+        simulation,
+        modeller.topology,
+        output_prefix,
+        n_report,
+        n_beads,
+        atoms_to_watch,
+        expansion_metric=expansion_metric,
+        distance_pairs=distance_pairs_to_watch,
+    )
 
     _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 

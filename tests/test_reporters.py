@@ -12,23 +12,36 @@ from openmmnqe.reporters import (
     RPMDBeadReporter,
     RPMDCentroidReporter,
     RPMDQuantumSpreadReporter,
+    _calculate_bead_expansion,
     _calculate_quantum_spread,
+    _read_expansion_log,
+    plot_rpmd_atom_expansion,
     track_rpmd_atom_expansion,
 )
 import openmmnqe.reporters as reporters
 
 
 class _State:
-    def __init__(self, positions):
+    def __init__(self, positions, box_vectors=None):
         self._positions = np.asarray(positions, dtype=float) * unit.nanometer
+        if box_vectors is None:
+            box_vectors = np.eye(3)
+        self._box_vectors = (
+            np.asarray(box_vectors, dtype=float) * unit.nanometer
+        )
 
     def getPositions(self, asNumpy=False):
         return self._positions
 
+    def getPeriodicBoxVectors(self, asNumpy=False):
+        return self._box_vectors
+
 
 class _Integrator:
-    def __init__(self, bead_positions):
-        self._states = [_State(positions) for positions in bead_positions]
+    def __init__(self, bead_positions, box_vectors=None):
+        self._states = [
+            _State(positions, box_vectors) for positions in bead_positions
+        ]
         self.calls = []
 
     def getNumCopies(self):
@@ -43,6 +56,14 @@ def _topology():
     topology = app.Topology()
     residue = topology.addResidue("AR", topology.addChain())
     topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
+    return topology
+
+
+def _two_atom_topology():
+    topology = app.Topology()
+    residue = topology.addResidue("LIG", topology.addChain())
+    topology.addAtom("H", app.Element.getBySymbol("H"), residue)
+    topology.addAtom("O", app.Element.getBySymbol("O"), residue)
     return topology
 
 
@@ -61,6 +82,22 @@ def test_calculate_quantum_spread_returns_per_atom_rms_radius():
     assert np.allclose(spread.value_in_unit(unit.nanometer), [1.0, 2.0])
     assert np.allclose(selected.value_in_unit(unit.nanometer), [2.0])
     assert all(call[1] == {"getPositions": True} for call in integrator.calls)
+
+
+def test_calculate_bead_expansion_is_mean_radius_not_rms_radius():
+    integrator = _Integrator(
+        [
+            [[0.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0]],
+            [[3.0, 0.0, 0.0]],
+        ]
+    )
+
+    expansion = _calculate_bead_expansion(integrator)
+    rms = _calculate_quantum_spread(integrator)
+
+    assert expansion.value_in_unit(unit.nanometer) == pytest.approx([4 / 3])
+    assert rms.value_in_unit(unit.nanometer) == pytest.approx([np.sqrt(2)])
 
 
 def test_quantum_spread_reporter_writes_header_and_values(tmp_path):
@@ -88,6 +125,73 @@ def test_quantum_spread_reporter_writes_header_and_values(tmp_path):
     assert output.read_text().splitlines() == [
         "Step\tRg_H(nm)\tRg_O(nm)",
         "7\t1.000000\t2.000000",
+    ]
+
+
+def test_expansion_reporter_writes_aligned_centroid_distances(tmp_path):
+    output = tmp_path / "expansion.tsv"
+    reporter = RPMDQuantumSpreadReporter(
+        output,
+        reportInterval=5,
+        atom_indices=[0],
+        names=["H"],
+        metric="mean",
+        distance_pairs=[(0, 1)],
+        distance_names=["H-O"],
+    )
+    simulation = SimpleNamespace(
+        currentStep=15,
+        topology=_two_atom_topology(),
+        system=SimpleNamespace(usesPeriodicBoundaryConditions=lambda: False),
+        integrator=_Integrator(
+            [
+                [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+                [[3.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+            ]
+        ),
+    )
+
+    reporter.report(simulation, state=None)
+    reporter._out.close()
+
+    assert output.read_text().splitlines() == [
+        "Step\tExpansion_H(nm)\tDistance_H-O(nm)",
+        "15\t1.333333\t4.000000",
+    ]
+
+
+@pytest.mark.parametrize(("metric", "prefix"), [("mean", "Expansion"), ("rms", "Rg")])
+def test_expansion_and_centroid_distance_use_periodic_minimum_images(
+    tmp_path, metric, prefix,
+):
+    output = tmp_path / "periodic.tsv"
+    reporter = RPMDQuantumSpreadReporter(
+        output,
+        reportInterval=1,
+        atom_indices=[0],
+        metric=metric,
+        distance_pairs=[(0, 1)],
+    )
+    simulation = SimpleNamespace(
+        currentStep=1,
+        topology=_two_atom_topology(),
+        system=SimpleNamespace(usesPeriodicBoundaryConditions=lambda: True),
+        integrator=_Integrator(
+            [
+                [[0.95, 0.0, 0.0], [0.05, 0.0, 0.0]],
+                [[0.05, 0.0, 0.0], [0.15, 0.0, 0.0]],
+            ],
+            box_vectors=np.eye(3),
+        ),
+    )
+
+    reporter.report(simulation, state=None)
+    reporter._out.close()
+
+    assert output.read_text().splitlines() == [
+        f"Step\t{prefix}_Atom0(nm)\tDistance_Atom0-Atom1(nm)",
+        "1\t0.050000\t0.100000",
     ]
 
 
@@ -165,6 +269,308 @@ def test_quantum_spread_reporter_validates_names(tmp_path):
             atom_indices=[0, 1],
             names=["only-one"],
         )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error", "message"),
+    [
+        ({"metric": "median"}, ValueError, "metric"),
+        ({"distance_pairs": [(0,)]}, ValueError, "exactly two"),
+        ({"distance_pairs": [(0, 1.5)]}, TypeError, "must be integers"),
+        ({"distance_pairs": [(-1, 1)]}, ValueError, "non-negative"),
+        (
+            {"distance_pairs": [(0, 1)], "distance_names": []},
+            ValueError,
+            "one entry per distance pair",
+        ),
+    ],
+)
+def test_expansion_reporter_validates_metric_and_distances(
+    tmp_path, kwargs, error, message,
+):
+    output = tmp_path / "spread.tsv"
+
+    with pytest.raises(error, match=message):
+        RPMDQuantumSpreadReporter(output, 1, [0], **kwargs)
+
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("atom_indices", "error", "message"),
+    [
+        ([], ValueError, "must not be empty"),
+        ([True], TypeError, "must be integers"),
+        ([1.5], TypeError, "must be integers"),
+        ([-1], ValueError, "non-negative"),
+    ],
+)
+def test_expansion_reporter_validates_atom_indices_before_opening(
+    tmp_path, atom_indices, error, message,
+):
+    output = tmp_path / "spread.tsv"
+
+    with pytest.raises(error, match=message):
+        RPMDQuantumSpreadReporter(output, 1, atom_indices)
+
+    assert not output.exists()
+
+
+def test_expansion_reporter_rejects_duplicate_output_columns(tmp_path):
+    output = tmp_path / "spread.tsv"
+
+    with pytest.raises(ValueError, match="must be unique"):
+        RPMDQuantumSpreadReporter(output, 1, [0, 1], names=["H", "H"])
+
+    assert not output.exists()
+
+
+def test_track_expansion_validates_indices_against_topology(tmp_path):
+    output = tmp_path / "spread.tsv"
+    simulation = SimpleNamespace(
+        topology=SimpleNamespace(getNumAtoms=lambda: 1),
+        reporters=[],
+    )
+
+    with pytest.raises(ValueError, match="outside topology"):
+        track_rpmd_atom_expansion(
+            simulation,
+            atom_index=0,
+            file=output,
+            report_interval=1,
+            distance_pairs=[(0, 1)],
+        )
+
+    assert not output.exists()
+
+
+def test_direct_reporter_gives_clear_error_for_late_topology_mismatch(tmp_path):
+    reporter = RPMDQuantumSpreadReporter(tmp_path / "spread.tsv", 1, [1])
+    simulation = SimpleNamespace(
+        currentStep=1,
+        topology=SimpleNamespace(getNumAtoms=lambda: 1),
+        integrator=_Integrator([[[0.0, 0.0, 0.0]]]),
+    )
+
+    with pytest.raises(ValueError, match="outside topology"):
+        reporter.report(simulation, state=None)
+    reporter._out.close()
+
+
+def _write_plot_log(path):
+    path.write_text(
+        "Step\tExpansion_H(nm)\tDistance_D-H(nm)\tDistance_A-H(nm)\n"
+        "0\t0.010\t0.100\t0.300\n"
+        "1\t0.020\t0.200\t0.200\n"
+        "2\t0.015\t0.300\t0.100\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [
+        ("Time\tExpansion_H(nm)\n0\t0.1\n", "start with a Step"),
+        (
+            "Step\tExpansion_H(nm)\tExpansion_H(nm)\n0\t0.1\t0.2\n",
+            "duplicate column",
+        ),
+        ("Step\tExpansion_H(nm)\n0\tbad\n", "could not parse"),
+        ("Step\tExpansion_H(nm)\n", "no data rows"),
+        ("Step\tExpansion_H(nm)\n0\t0.1\t0.2\n", "do not match"),
+    ],
+)
+def test_read_expansion_log_rejects_malformed_input(
+    tmp_path, contents, message,
+):
+    log = tmp_path / "bad.tsv"
+    log.write_text(contents)
+
+    with pytest.raises(ValueError, match=message):
+        _read_expansion_log(log)
+
+
+def test_plot_rpmd_atom_expansion_against_distance(tmp_path, monkeypatch):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    log = tmp_path / "expansion.tsv"
+    image = tmp_path / "distance.png"
+    _write_plot_log(log)
+    shown = []
+    monkeypatch.setattr(plt, "show", lambda: shown.append(True))
+
+    figure, axes = plot_rpmd_atom_expansion(
+        log,
+        expansion_columns=["Expansion_H(nm)"],
+        distance_columns="Distance_D-H(nm)",
+        length_unit="angstrom",
+        filename=image,
+        show=True,
+    )
+
+    assert len(axes) == 1
+    offsets = np.asarray(axes[0].collections[0].get_offsets())
+    assert offsets[:, 0] == pytest.approx([1.0, 2.0, 3.0])
+    assert offsets[:, 1] == pytest.approx([0.1, 0.2, 0.15])
+    assert "Bead expansion" in axes[0].get_ylabel()
+    assert image.stat().st_size > 0
+    assert shown == [True]
+    plt.close(figure)
+
+
+def test_plot_rpmd_atom_expansion_along_path_progress(tmp_path):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    log = tmp_path / "expansion.tsv"
+    _write_plot_log(log)
+
+    figure, axes = plot_rpmd_atom_expansion(
+        log,
+        path_progress=[0.0, 0.5, 1.0],
+        length_unit="angstrom",
+    )
+
+    assert len(axes) == 2
+    assert axes[0].lines[0].get_xdata() == pytest.approx([0.0, 0.5, 1.0])
+    assert len(axes[1].lines) == 2
+    assert axes[1].get_xlabel() == "Path progress (unitless)"
+    plt.close(figure)
+
+
+def test_plot_rpmd_atom_expansion_averages_and_sorts_path_samples(tmp_path):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    log = tmp_path / "expansion.tsv"
+    _write_plot_log(log)
+
+    figure, axes = plot_rpmd_atom_expansion(
+        log,
+        path_progress=[1.0, 0.0, 0.0],
+        progress_bins=2,
+        length_unit="angstrom",
+    )
+
+    assert axes[0].lines[0].get_xdata() == pytest.approx([0.0, 1.0])
+    assert axes[0].lines[0].get_ydata() == pytest.approx([0.175, 0.1])
+    plt.close(figure)
+
+
+def test_plot_rpmd_atom_expansion_handles_constant_binned_progress(tmp_path):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    log = tmp_path / "expansion.tsv"
+    _write_plot_log(log)
+
+    figure, axes = plot_rpmd_atom_expansion(
+        log,
+        path_progress=[0.5, 0.5, 0.5],
+        progress_bins=4,
+    )
+
+    assert axes[0].lines[0].get_xdata() == pytest.approx([0.5])
+    assert axes[0].lines[0].get_ydata() == pytest.approx([0.015])
+    plt.close(figure)
+
+
+def test_plot_rpmd_atom_expansion_supports_progress_without_distances(tmp_path):
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    log = tmp_path / "expansion.tsv"
+    log.write_text(
+        "Step\tExpansion_H(nm)\n"
+        "0\t0.010\n"
+        "1\t0.020\n"
+    )
+
+    figure, axes = plot_rpmd_atom_expansion(
+        log,
+        path_progress=[0.0, 1.0],
+    )
+
+    assert len(axes) == 1
+    assert axes[0].get_xlabel() == "Path progress (unitless)"
+    plt.close(figure)
+
+
+def test_plot_rpmd_atom_expansion_validates_coordinate_selection(tmp_path):
+    pytest.importorskip("matplotlib")
+    log = tmp_path / "expansion.tsv"
+    _write_plot_log(log)
+
+    with pytest.raises(ValueError, match="exactly one distance"):
+        plot_rpmd_atom_expansion(log)
+    with pytest.raises(ValueError, match="one value per"):
+        plot_rpmd_atom_expansion(log, path_progress=[0.0, 1.0])
+    with pytest.raises(ValueError, match="unknown expansion"):
+        plot_rpmd_atom_expansion(
+            log,
+            expansion_columns="Expansion_missing(nm)",
+            distance_columns="Distance_D-H(nm)",
+        )
+    with pytest.raises(ValueError, match="unknown distance"):
+        plot_rpmd_atom_expansion(
+            log,
+            distance_columns="Distance_missing(nm)",
+        )
+    with pytest.raises(ValueError, match="length_unit"):
+        plot_rpmd_atom_expansion(
+            log,
+            distance_columns="Distance_D-H(nm)",
+            length_unit="bohr",
+        )
+    with pytest.raises(ValueError, match="positive integer"):
+        plot_rpmd_atom_expansion(
+            log,
+            path_progress=[0.0, 0.5, 1.0],
+            progress_bins=0,
+        )
+
+    no_expansion = tmp_path / "no_expansion.tsv"
+    no_expansion.write_text(
+        "Step\tDistance_D-H(nm)\n"
+        "0\t0.1\n"
+    )
+    with pytest.raises(ValueError, match="no expansion columns"):
+        plot_rpmd_atom_expansion(no_expansion, path_progress=[0.0])
+
+
+@pytest.mark.parametrize(
+    ("contents", "path_progress", "message"),
+    [
+        (
+            "Step\tExpansion_H(nm)\tDistance_D-H(nm)\n"
+            "0\tnan\t0.1\n",
+            None,
+            "log values must be finite",
+        ),
+        (
+            "Step\tExpansion_H(nm)\n0\t0.1\n1\t0.2\n",
+            [0.0, np.inf],
+            "progress values must be finite",
+        ),
+    ],
+)
+def test_plot_rpmd_atom_expansion_rejects_nonfinite_values(
+    tmp_path, contents, path_progress, message,
+):
+    pytest.importorskip("matplotlib")
+    log = tmp_path / "nonfinite.tsv"
+    log.write_text(contents)
+
+    kwargs = {"path_progress": path_progress}
+    if path_progress is None:
+        kwargs["distance_columns"] = "Distance_D-H(nm)"
+    with pytest.raises(ValueError, match=message):
+        plot_rpmd_atom_expansion(log, **kwargs)
 
 
 def test_bead_reporter_writes_one_model_per_bead(tmp_path):

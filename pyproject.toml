@@ -40,6 +40,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+plot = [
+    "matplotlib",
+]
 dev = [
     "pytest",
     "pytest-cov",

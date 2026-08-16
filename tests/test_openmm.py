@@ -191,7 +191,7 @@ def test_add_rpmd_reporters_builds_spread_centroid_and_beads(monkeypatch):
         lambda **kwargs: ("beads", kwargs),
     )
     simulation = SimpleNamespace(reporters=[])
-    topology = object()
+    topology = SimpleNamespace(getNumAtoms=lambda: 4)
 
     nqe_openmm._add_rpmd_reporters(
         simulation,
@@ -200,6 +200,8 @@ def test_add_rpmd_reporters_builds_spread_centroid_and_beads(monkeypatch):
         n_report=10,
         n_beads=4,
         atoms_to_watch=[1, 2],
+        expansion_metric="mean",
+        distance_pairs=[(0, 1), (3, 2)],
     )
 
     assert [reporter[0] for reporter in simulation.reporters] == [
@@ -208,6 +210,8 @@ def test_add_rpmd_reporters_builds_spread_centroid_and_beads(monkeypatch):
         "beads",
     ]
     assert simulation.reporters[0][1]["atom_indices"] == [1, 2]
+    assert simulation.reporters[0][1]["metric"] == "mean"
+    assert simulation.reporters[0][1]["distance_pairs"] == [(0, 1), (3, 2)]
     assert simulation.reporters[1][1]["num_beads"] == 4
     assert simulation.reporters[2][1]["topology"] is topology
 
@@ -231,6 +235,51 @@ def test_add_rpmd_reporters_omits_spread_without_atom_selection(monkeypatch):
         "centroid",
         "beads",
     ]
+
+
+def test_add_rpmd_reporters_requires_spread_atoms_for_distances():
+    simulation = SimpleNamespace(reporters=[])
+
+    with pytest.raises(ValueError, match="require atoms_to_watch"):
+        nqe_openmm._add_rpmd_reporters(
+            simulation,
+            object(),
+            "rpmd",
+            10,
+            4,
+            None,
+            distance_pairs=[(0, 1)],
+        )
+
+    assert simulation.reporters == []
+
+
+@pytest.mark.parametrize(
+    ("atoms_to_watch", "distance_pairs", "message"),
+    [
+        ([], None, "must not be empty"),
+        ([4], None, "outside topology"),
+        ([0], [(0, 4)], "outside topology"),
+    ],
+)
+def test_add_rpmd_reporters_validates_observable_indices(
+    atoms_to_watch, distance_pairs, message,
+):
+    simulation = SimpleNamespace(reporters=[])
+    topology = SimpleNamespace(getNumAtoms=lambda: 2)
+
+    with pytest.raises(ValueError, match=message):
+        nqe_openmm._add_rpmd_reporters(
+            simulation,
+            topology,
+            "rpmd",
+            10,
+            4,
+            atoms_to_watch,
+            distance_pairs=distance_pairs,
+        )
+
+    assert simulation.reporters == []
 
 
 def test_save_final_state_checkpoints_and_uses_context_positions(monkeypatch, tmp_path):

@@ -461,6 +461,8 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
         atoms_to_watch=[1],
         scale_factor=0.75,
         seed=1234,
+        expansion_metric="mean",
+        distance_pairs_to_watch=[(0, 1)],
     )
 
     simulation = runtime.calls.simulations[0]
@@ -481,7 +483,10 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
         {"scale_factor": 0.75, "seed": initialization_seed},
     )]
     assert runtime.calls.rpmd_reporters == [
-        ((simulation, runtime.modeller.topology, "rpmd_ready", 9, 8, [1]), {})
+        (
+            (simulation, runtime.modeller.topology, "rpmd_ready", 9, 8, [1]),
+            {"expansion_metric": "mean", "distance_pairs": [(0, 1)]},
+        )
     ]
     assert runtime.calls.rpmd_progress_reporters == [
         ((simulation, "rpmd_ready", 9), {})
@@ -526,7 +531,10 @@ def test_rpmd_production_loads_checkpoint_and_saves_centroid(
     assert simulation.steps == []
     assert runtime.calls.rpmd_steps == [(simulation, 12)]
     assert runtime.calls.rpmd_reporters == [
-        ((simulation, runtime.modeller.topology, "rpmd_prod", 5, 6, None), {})
+        (
+            (simulation, runtime.modeller.topology, "rpmd_prod", 5, 6, None),
+            {"expansion_metric": "rms", "distance_pairs": None},
+        )
     ]
     assert runtime.calls.rpmd_progress_reporters == [
         ((simulation, "rpmd_prod", 5), {})
@@ -584,6 +592,9 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
         output_prefix="contracted",
         barostat_freq=None,
         steps=4,
+        atoms_to_watch=[1],
+        expansion_metric="mean",
+        distance_pairs_to_watch=[(0, 1)],
     )
 
     simulation = runtime.calls.simulations[0]
@@ -599,6 +610,12 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     ]
     assert simulation.steps == []
     assert runtime.calls.rpmd_steps == [(simulation, 4)]
+    assert runtime.calls.rpmd_reporters == [
+        (
+            (simulation, runtime.modeller.topology, "contracted", 1_000, 32, [1]),
+            {"expansion_metric": "mean", "distance_pairs": [(0, 1)]},
+        )
+    ]
     assert runtime.calls.rpmd_progress_reporters == [
         ((simulation, "contracted", 1_000), {})
     ]

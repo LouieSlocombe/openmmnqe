@@ -3,10 +3,8 @@
 import argparse
 from sys import stdout
 
-import numpy as np
 import openmm.app as app
 import openmm.unit as unit
-from matplotlib import pyplot as plt
 from openmm import openmm
 from openmmml import MLPotential
 
@@ -235,27 +233,32 @@ def run_rpmd_quantum_spread_reporter():
 
     atoms_to_watch = [0, 1]
     atom_names = ["Atom0", "Atom1"]
+    distance_pair = (0, 1)
+    distance_name = "Atom0-Atom1"
 
     simulation.reporters.append(nqe.RPMDQuantumSpreadReporter(
-        file="quantum_spread.txt",
+        file="quantum_expansion.tsv",
         reportInterval=1,
         atom_indices=atoms_to_watch,
-        names=atom_names
+        names=atom_names,
+        metric="mean",
+        distance_pairs=[distance_pair],
+        distance_names=[distance_name],
     ))
 
-    print("Running RPMD with Quantum Spread reporting...")
+    print("Running RPMD with bead-expansion reporting...")
     nqe.step_rpmd(simulation, 500)
-    print("Done. Check 'quantum_spread.txt'.")
-    data = np.loadtxt("quantum_spread.txt", skiprows=1, delimiter='\t')
+    plot_file = "quantum_expansion_vs_distance.png"
+    nqe.plot_rpmd_atom_expansion(
+        "quantum_expansion.tsv",
+        distance_columns=f"Distance_{distance_name}(nm)",
+        length_unit="angstrom",
+        filename=plot_file,
+        show=True,
+    )
+    print(f"Done. Wrote '{plot_file}'.")
 
-    plt.plot(data[:, 0], data[:, 1], label=atom_names[0])
-    plt.plot(data[:, 0], data[:, 2], label=atom_names[1])
-    plt.xlabel('Step')
-    plt.ylabel('Quantum Rg (nm)')
-    plt.legend()
-    plt.show()
-
-    nqe.remove_file("quantum_spread.txt")
+    nqe.remove_file("quantum_expansion.tsv")
 
 
 def run_rpmd_bead_reporter():
