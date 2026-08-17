@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORK_DIR="${SCRIPT_DIR}/../../openmmnqe_sources"
 
-# Pulls in build_plumed(), along with the PLUMED versions it pins.
+# Pulls in build_plumed() and build_py_plumed(), with the PLUMED versions they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
 
 echo "=== Initializing Conda Environment ==="
@@ -85,6 +85,7 @@ cd openmm-ml
 pip install .
 
 build_plumed "${WORK_DIR}"
+build_py_plumed "${WORK_DIR}"
 
 echo "=== Installing openmmnqe (editable) ==="
 pip install -e "${REPO_DIR}"

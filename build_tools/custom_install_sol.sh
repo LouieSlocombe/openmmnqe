@@ -19,7 +19,7 @@ WORK_DIR="${SCRATCH:?SCRATCH is not set - run this on a Sol node, or set it manu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Pulls in build_plumed(), along with the PLUMED versions it pins.
+# Pulls in build_plumed() and build_py_plumed(), with the PLUMED versions they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
 
 # === Environment Setup ===
@@ -57,6 +57,7 @@ mkdir -p "${WORK_DIR}"
 cd "${WORK_DIR}"
 
 build_plumed "${WORK_DIR}"
+build_py_plumed "${WORK_DIR}"
 
 echo "=== Installing openmmnqe ==="
 pip3 install git+ssh://git@github.com/LouieSlocombe/openmmnqe.git

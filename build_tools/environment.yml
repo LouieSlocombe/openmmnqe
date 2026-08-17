@@ -33,6 +33,8 @@ dependencies:
   - cxx-compiler
   - swig
   - doxygen
+  # build_py_plumed regenerates the py-plumed C extension from its .pyx source.
+  - cython
 
   - pip:
       - torch-dftd
