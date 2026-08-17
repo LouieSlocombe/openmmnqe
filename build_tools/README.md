@@ -148,6 +148,24 @@ All three installers share `build_plumed.sh`, which is where the PLUMED and
 OpenMM-PLUMED versions are pinned, and `editable_repos.sh`, which is where the git
 dependencies are listed.
 
+## One environment for openmmnqe + openmmqmmm
+
+Running the stages on a QM/MM potential (`PreparedSystem`, see the main README) needs
+[openmmqmmm](https://github.com/LouieSlocombe/openmmqmmm) importable from this
+environment. This environment is the superset, so add openmmqmmm to it editable, with
+`--no-deps` because the environment files here are the authority on dependencies:
+
+```bash
+conda activate openmmnqe
+pip install -e /path/to/skunkworks/openmmqmmm --no-deps
+python -c "import openmm, openmmqmmm, openmmnqe; assert hasattr(openmm, 'PythonForce')"
+```
+
+`editable_repos.sh` deliberately does not list openmmqmmm: the packages share no imports
+and are composed by user scripts, so neither installer should provision the other. The
+cross-package tests live in openmmqmmm's `tests/test_nqe_interop.py` and run whenever
+both packages share an environment.
+
 ## reactiontools
 
 Reaction paths (NEB, transition states, IRC), ORCA and free-energy-surface plotting live

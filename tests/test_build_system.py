@@ -5,10 +5,12 @@ from types import SimpleNamespace
 
 from ase.calculators.lj import LennardJones
 import openmm.app as app
+import openmm.unit as unit
 import pytest
+from openmm import openmm
 from openmmml import MLPotential
 
-from openmmnqe.openmm import _build_system
+from openmmnqe.openmm import PreparedSystem, _build_system
 import openmmnqe.openmm as nqe_openmm
 
 TOLUENE = Path(__file__).resolve().parent / "data" / "pdb" / "toluene.pdb"
@@ -185,6 +187,76 @@ def test_explicit_potential_builds_mixed_system_and_forces_cuda(fake_platform):
     assert ml_idx == [1, 3]
     assert kwargs["calculator"] is calculator
     assert kwargs["hydrogenMass"] is None
+
+
+def _one_particle_openmm_system(n_particles=1):
+    system = openmm.System()
+    for _ in range(n_particles):
+        system.addParticle(39.9 * unit.dalton)
+    return system
+
+
+def test_prepared_system_returns_held_system_and_ignores_kwargs(one_particle_system):
+    modeller, _ = one_particle_system
+    system = _one_particle_openmm_system()
+    prepared = PreparedSystem(system)
+
+    built = prepared.createSystem(
+        modeller.topology,
+        nonbondedMethod=app.CutoffNonPeriodic,
+        rigidWater=False,
+        calculator=object(),
+    )
+
+    assert built is system
+    assert prepared.system is system
+
+
+def test_prepared_system_rejects_particle_count_mismatch(one_particle_system):
+    modeller, _ = one_particle_system
+    prepared = PreparedSystem(_one_particle_openmm_system(n_particles=2))
+
+    with pytest.raises(
+        ValueError,
+        match="holds 2 particles but the stage topology has 1 atoms",
+    ):
+        prepared.createSystem(modeller.topology)
+
+
+def test_prepared_system_requires_openmm_system():
+    with pytest.raises(TypeError, match="openmm.System"):
+        PreparedSystem("not-a-system")
+
+
+def test_prepared_system_flows_through_build_system(fake_platform, one_particle_system):
+    modeller, _ = one_particle_system
+    system = _one_particle_openmm_system()
+
+    built, platform = _build_system(
+        modeller,
+        PreparedSystem(system),
+        None,
+        potential=None,
+        ml_idx=None,
+        calculator=None,
+    )
+
+    assert built is system
+    assert platform == "platform:CPU"
+
+
+def test_prepared_system_with_calculator_still_needs_ml_idx(one_particle_system):
+    modeller, _ = one_particle_system
+
+    with pytest.raises(ValueError, match="ml_idx"):
+        _build_system(
+            modeller,
+            PreparedSystem(_one_particle_openmm_system()),
+            "CPU",
+            potential=None,
+            ml_idx=None,
+            calculator=object(),
+        )
 
 
 def test_bare_calculator_uses_ase_potential_fallback(monkeypatch, fake_platform):

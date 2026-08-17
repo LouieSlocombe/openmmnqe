@@ -54,6 +54,28 @@ rt.plot_plumed_fes("fes.dat", filename="fes")
 The reactiontools builders take the `openmm.app.Modeller` and `openmm.unit.Quantity` this package works in, so they
 can be called with whatever is already to hand.
 
+**Pre-built Systems** run through the same stages via `PreparedSystem`. Every stage builds its System by calling
+`forcefield.createSystem(topology, **kwargs)`, and `PreparedSystem` is a force-field stand-in that returns a System
+built elsewhere — the motivating case being a QM/MM System exported by
+[openmmqmmm](https://github.com/LouieSlocombe/openmmqmmm) with its `openmm.PythonForce` already attached (neither
+package imports the other; the seam is plain OpenMM objects):
+
+```python
+export = openmmqmmm.export_rpmd_potential(theory=qm_mm, num_beads=32)
+prepared = nqe.PreparedSystem(export.system)
+
+nqe.run_openmm_rpmd_equilibration(export.modeller, prepared, n_beads=32)
+nqe.run_openmm_rpmd_prod(export.modeller, prepared, checkpoint_file="rpmd_ready.chk",
+                         n_beads=32, barostat_freq=None)
+```
+
+Bridge from the classical preparation stages into RPMD-on-a-prepared-System through the stage-final PDB, not the
+binary `.chk`: an ordinary Context checkpoint only loads into an identical System, while the RPMD bead archive
+validates masses, topology, temperature, and periodicity but not forces, so it survives the System gaining a force.
+Stage options that mutate the System (`deuterate`, a non-None `barostat_freq`, `plumed_script_path`) mutate the held
+instance, so build a fresh `PreparedSystem` per mutating stage, and pass `barostat_freq=None` when the System carries
+a QM/MM force.
+
 ## Examples
 
 The `examples/` directory contains complete simulation workflows. Run the

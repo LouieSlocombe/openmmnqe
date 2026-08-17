@@ -172,6 +172,90 @@ def _restart_scalar(archive, name, scalar_type):
     return value.item()
 
 
+class PreparedSystem:
+    """Stand-in force field that hands a pre-built ``openmm.System`` to a stage.
+
+    Every ``run_openmm_*`` stage builds its System by calling
+    ``forcefield.createSystem(topology, **kwargs)``.  Wrapping an existing
+    System in this class routes it through that seam unchanged, so a System
+    prepared elsewhere -- for example a QM/MM System carrying an
+    ``openmm.PythonForce`` -- runs under the classical, RPMD, and adQTB
+    stages without any stage signature changing.
+
+    Parameters
+    ----------
+    system : openmm.System
+        The System to hand out.
+
+    Raises
+    ------
+    TypeError
+        If *system* is not an ``openmm.System``.
+
+    Notes
+    -----
+    ``createSystem`` returns the held System as-is, never a copy: a copy
+    would sever externally held references (an ``openmm.PythonForce``
+    callback, say) from the System the stage actually runs.  Stage options
+    that mutate the System -- ``deuterate``, a non-None ``barostat_freq``,
+    ``plumed_script_path`` -- therefore mutate this instance too, and
+    re-running a mutating stage against the same ``PreparedSystem``
+    accumulates their forces.  Build a fresh System and ``PreparedSystem``
+    per stage when using those options.
+
+    A ``PreparedSystem`` can also serve as the MM base of an ML/MM mixed
+    system by passing *potential* and *ml_idx* to a stage as usual.
+    """
+
+    def __init__(self, system):
+        if not isinstance(system, openmm.System):
+            raise TypeError(
+                "PreparedSystem wraps an existing openmm.System, got "
+                f"{type(system).__name__}. Build the System first, or pass "
+                "a force field to the stage instead."
+            )
+        self._system = system
+
+    @property
+    def system(self):
+        """openmm.System: The held System that ``createSystem`` returns."""
+        return self._system
+
+    def createSystem(self, topology, **kwargs):
+        """Return the held System after checking it matches *topology*.
+
+        Parameters
+        ----------
+        topology : openmm.app.Topology
+            The topology the stage is about to simulate.
+        **kwargs
+            System-construction options, accepted and ignored: they describe
+            how to build a System, and this one is already built.
+
+        Returns
+        -------
+        openmm.System
+            The held System, as-is.
+
+        Raises
+        ------
+        ValueError
+            If the topology's atom count differs from the held System's
+            particle count, meaning the System was prepared for a different
+            structure than the stage was given.
+        """
+        num_atoms = topology.getNumAtoms()
+        num_particles = self._system.getNumParticles()
+        if num_atoms != num_particles:
+            raise ValueError(
+                f"PreparedSystem holds {num_particles} particles but the "
+                f"stage topology has {num_atoms} atoms; the System was "
+                "prepared for a different structure. Rebuild the System from "
+                "the same structure the Modeller was built from."
+            )
+        return self._system
+
+
 def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calculator):
     """
     Construct the system and platform shared by every ``run_openmm_*`` driver.

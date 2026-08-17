@@ -63,6 +63,46 @@ def test_multiple_ligand_templates_build_one_system(ligand_forcefield, data_dir)
     assert system.getNumParticles() == modeller.topology.getNumAtoms()
 
 
+def test_rpmd_stages_run_on_a_prepared_system(one_particle_system):
+    # The in-repo regression for the pre-built-System seam: a System built
+    # outside the stage runs equilibration, then production restarts from its
+    # bead archive with the same PreparedSystem.
+    modeller, forcefield = one_particle_system
+    prepared = nqe.PreparedSystem(forcefield.createSystem(modeller.topology))
+
+    nqe.run_openmm_rpmd_equilibration(
+        modeller,
+        prepared,
+        n_beads=2,
+        n_1=2,
+        n_2=3,
+        n_report=2,
+        platform_name="Reference",
+        seed=7,
+    )
+
+    with np.load("rpmd_ready.chk", allow_pickle=False) as archive:
+        assert archive["kind"].item() == "openmmnqe-rpmd-restart"
+        assert archive["num_beads"].item() == 2
+        assert archive["step_count"].item() == 5
+        assert np.isfinite(archive["positions_nm"]).all()
+
+    nqe.run_openmm_rpmd_prod(
+        modeller,
+        prepared,
+        checkpoint_file="rpmd_ready.chk",
+        n_beads=2,
+        steps=3,
+        n_report=2,
+        barostat_freq=None,
+        platform_name="Reference",
+    )
+
+    with np.load("rpmd_prod.chk", allow_pickle=False) as archive:
+        assert archive["num_beads"].item() == 2
+        assert archive["step_count"].item() == 8
+
+
 def test_maybe_deuterate_only_calls_helper_when_enabled(monkeypatch):
     calls = []
     monkeypatch.setattr(
