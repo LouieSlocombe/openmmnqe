@@ -5,6 +5,12 @@
 #
 # The environment is recreated from scratch on every run, and sources are cloned
 # into ../../openmmnqe_sources (a sibling of the repo).
+#
+# forcefill, reactiontools, geodesic_interpolate and sella are cloned next to this
+# repository and installed editable. Existing checkouts are used as they are, never
+# wiped. Set SRC_DIR to keep them somewhere else:
+#
+#   SRC_DIR="${HOME}/src" bash custom_install.sh
 
 # Exit immediately on error and fail pipelines cleanly, so a broken build does not
 # fall through to the later steps and report success.
@@ -17,9 +23,14 @@ OPENMM_ML_VERSION="main" # 1.6
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORK_DIR="${SCRIPT_DIR}/../../openmmnqe_sources"
+# Alongside the repository, so the checkouts survive the wipe WORK_DIR gets.
+SRC_DIR="${SRC_DIR:-$(dirname "${REPO_DIR}")}"
 
 # Pulls in build_plumed() and build_py_plumed(), with the PLUMED versions they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
+# Pulls in install_editable_repos() and check_editable_repos(), with the git
+# dependencies they clone.
+source "${SCRIPT_DIR}/editable_repos.sh"
 
 echo "=== Initializing Conda Environment ==="
 source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -90,4 +101,12 @@ build_py_plumed "${WORK_DIR}"
 echo "=== Installing openmmnqe (editable) ==="
 pip install -e "${REPO_DIR}"
 
+# After openmmnqe, which drags its own copies of these in from git.
+install_editable_repos "${SRC_DIR}"
+
+echo "=== Verifying Installation ==="
+check_editable_repos "${SRC_DIR}"
+echo "editable dependencies: OK"
+
 echo "=== Build Complete! ==="
+echo "Checkouts: ${SRC_DIR}"

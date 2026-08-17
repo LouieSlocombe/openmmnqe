@@ -2,6 +2,10 @@
 # no CUDA pins, a CPU PyTorch build, no nnpops, and no PLUMED source-build
 # toolchain -- openmm-plumed comes prebuilt from conda-forge instead of
 # build_plumed.sh. Python is pinned to the oldest supported version.
+#
+# It also keeps the git dependencies that environment.yml drops. A runner has only
+# this repository checked out, so there are no sibling checkouts for
+# editable_repos.sh to install from and CI takes them straight from GitHub instead.
 name: openmmnqe-ci
 
 channels:

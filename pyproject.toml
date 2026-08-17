@@ -28,9 +28,10 @@ dependencies = [
     # OpenMM ffxml, via AmberTools GAFF/AM1-BCC. The antechamber and parmchk2
     # executables it shells out to are conda-only -- see build_tools/.
     "forcefill @ git+https://github.com/LouieSlocombe/forcefill.git",
-    # The [path] extra pulls in mdtraj, which reactiontools needs to read a
-    # steered trajectory back as a reference path -- a step of these workflows.
-    "reactiontools[path] @ git+https://github.com/LouieSlocombe/reactiontools.git",
+    # No extra to ask for: mdtraj, which reactiontools needs to read a steered
+    # trajectory back as a reference path -- a step of these workflows -- is one of
+    # its own hard dependencies.
+    "reactiontools @ git+https://github.com/LouieSlocombe/reactiontools.git",
 ]
 
 classifiers = [
