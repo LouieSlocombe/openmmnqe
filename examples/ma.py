@@ -1,3 +1,10 @@
+"""Malonaldehyde intramolecular proton transfer, in explicit solvent.
+
+The full pipeline in one script: forcefill parameterises the ligand, the
+solute is treated with MACE and the water with the classical force field,
+and a NEB guess of the transfer becomes the reference path a PATH collective
+variable biases. The free-energy surface along that path is the output.
+"""
 import logging
 import os
 

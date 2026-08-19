@@ -114,7 +114,12 @@ class _Simulation:
 
 @pytest.fixture
 def workflow_runtime(monkeypatch):
-    """Replace costly OpenMM objects with recorders while retaining driver logic."""
+    """Replace costly OpenMM objects with recorders while retaining driver logic.
+
+    Returns a namespace of ``calls``, ``modeller``, ``system`` and
+    ``platform``; ``calls`` collects what each patched seam was handed, so a
+    test can assert on the driver's decisions without running any dynamics.
+    """
     calls = SimpleNamespace(
         builds=[],
         deuterations=[],
@@ -253,6 +258,7 @@ def workflow_runtime(monkeypatch):
 
 
 def _temperature_values(temperatures):
+    """Strip units from a sequence of temperatures, giving plain kelvin floats."""
     return [temperature.value_in_unit(unit.kelvin) for temperature in temperatures]
 
 

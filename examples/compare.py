@@ -17,7 +17,21 @@ WHAM = os.environ.get("WHAM_PATH")
 
 
 def _accumulate_rdf_counts(counts, positions, particles, box_size):
-    """Add pair distances from one configuration to an RDF histogram."""
+    """
+    Add pair distances from one configuration to an RDF histogram.
+
+    Parameters
+    ----------
+    counts : list of int
+        Histogram updated in place, one bin per ``box_size / len(counts)``.
+    positions : openmm.unit.Quantity
+        Particle positions for this configuration.
+    particles : int
+        Number of particles to pair up.
+    box_size : float
+        Length of the cubic periodic box, in nanometres. Pair separations are
+        minimum-imaged against it.
+    """
     bins = len(counts)
     for i in range(particles):
         for j in range(i):
@@ -30,7 +44,27 @@ def _accumulate_rdf_counts(counts, positions, particles, box_size):
 
 
 def _normalise_rdf(counts, samples, particles, box_size):
-    """Convert a pair-distance histogram to a radial distribution function."""
+    """
+    Convert a pair-distance histogram to a radial distribution function.
+
+    Parameters
+    ----------
+    counts : list of int
+        Pair-distance histogram accumulated by
+        :func:`_accumulate_rdf_counts`.
+    samples : int
+        Number of configurations that went into *counts*.
+    particles : int
+        Number of particles in the system.
+    box_size : float
+        Length of the cubic periodic box, in nanometres.
+
+    Returns
+    -------
+    list of float
+        RDF value for each of the first half of the bins; beyond that the
+        minimum image no longer samples a full shell.
+    """
     bins = len(counts)
     scale = box_size ** 3 / (samples * 0.5 * particles ** 2)
     rdf = []
@@ -80,6 +114,21 @@ def compute_rpmd_rdf(integrator, particles, box_size):
     RPMD state is retrieved directly from ``RPMDIntegrator`` because the
     ordinary Context state does not represent an individual ring-polymer
     copy.
+
+    Parameters
+    ----------
+    integrator : openmm.RPMDIntegrator
+        Integrator to advance and sample every bead of.
+    particles : int
+        Number of particles in the system.
+    box_size : float
+        Length of the cubic periodic box, in nanometres.
+
+    Returns
+    -------
+    list of float
+        RDF value for each of the first half of the histogram bins, averaged
+        over all beads.
     """
     bins = 100
     iterations = 2_000
@@ -103,6 +152,13 @@ def compute_rpmd_rdf(integrator, particles, box_size):
 
 
 def run_parahydrogen():
+    """
+    Compare classical and RPMD radial distribution functions for para-hydrogen.
+
+    At 25 K the ring polymer spreads far enough to wash out the first peak
+    that the classical simulation shows, which is the quantum effect the two
+    curves are being compared for.
+    """
     particles = 32
     box_size = 1.1896
     temperature = 25 * unit.kelvin
@@ -186,6 +242,13 @@ def run_parahydrogen():
 
 
 def run_smd():
+    """
+    Pull deca-alanine open, then recover the free energy by umbrella sampling.
+
+    A steered run supplies the starting structure for each umbrella window,
+    and the window histograms are combined with WHAM, so ``WHAM_PATH`` has to
+    point at that executable.
+    """
     if WHAM is None:
         raise RuntimeError("set WHAM_PATH to the WHAM executable")
 
@@ -298,6 +361,15 @@ def run_smd():
     plt.show()
 
     def run_window(window_index):
+        """
+        Sample one umbrella window and write its restraint-distance log.
+
+        Parameters
+        ----------
+        window_index : int
+            Which window to run. Selects both the starting structure written
+            by the steered run and the restraint centre it is held at.
+        """
         print('running window', window_index)
 
         pdb = app.PDBFile(f'window_{window_index}.pdb')
@@ -368,6 +440,7 @@ EXAMPLES = {
 
 
 def main():
+    """Run whichever comparison is named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("example", choices=sorted(EXAMPLES))
     args = parser.parse_args()

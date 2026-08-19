@@ -10,6 +10,7 @@ from openmmplumed import PlumedForce
 
 
 def main():
+    """Bias a solvated peptide dihedral with OPES and print the run log."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField("amber14-all.xml", "amber14/tip3p.xml")
     modeller = app.Modeller(pdb.topology, pdb.positions)

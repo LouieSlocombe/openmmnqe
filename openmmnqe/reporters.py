@@ -28,7 +28,23 @@ _SPREAD_METRICS = {"rms", "mean"}
 
 
 def _bead_coordinates(integrator, atom_indices=None):
-    """Return bead coordinates in nanometres, optionally selecting atoms."""
+    """
+    Collect the positions of every bead of the ring polymer.
+
+    Parameters
+    ----------
+    integrator : openmm.RPMDIntegrator
+        The integrator holding the ring polymer.
+    atom_indices : list of int or None, optional
+        Atoms to keep. If None, every atom is returned, which for a solvated
+        system is a lot of memory. Default is None.
+
+    Returns
+    -------
+    numpy.ndarray
+        Bead coordinates in nanometres, with shape
+        ``(n_beads, n_selected_atoms, 3)``.
+    """
     all_bead_positions = []
     for bead in range(integrator.getNumCopies()):
         state = integrator.getState(copy=bead, getPositions=True)
@@ -42,7 +58,23 @@ def _bead_coordinates(integrator, atom_indices=None):
 
 
 def _spread_from_coordinates(coordinates, metric):
-    """Calculate an RMS or mean bead-centroid radius from coordinates."""
+    """
+    Reduce bead coordinates to a per-atom radius about their centroid.
+
+    Parameters
+    ----------
+    coordinates : numpy.ndarray
+        Bead coordinates in nanometres, shaped
+        ``(n_beads, n_atoms, 3)`` as returned by :func:`_bead_coordinates`.
+    metric : {"rms", "mean"}
+        ``"rms"`` gives the root-mean-square radius, ``"mean"`` the mean
+        radius.
+
+    Returns
+    -------
+    openmm.unit.Quantity
+        Radius per atom, in nanometres, with shape ``(n_atoms,)``.
+    """
     centroid = np.mean(coordinates, axis=0)
     radii = np.linalg.norm(coordinates - centroid, axis=2)
     if metric == "rms":
@@ -79,7 +111,8 @@ def _calculate_quantum_spread(integrator, atom_indices=None):
 
 
 def _calculate_bead_expansion(integrator, atom_indices=None):
-    r"""Compute the mean bead-centroid distance for selected atoms.
+    r"""
+    Compute the mean bead-centroid distance for selected atoms.
 
     The proton ring-polymer degree of expansion is
 
@@ -90,13 +123,49 @@ def _calculate_bead_expansion(integrator, atom_indices=None):
 
     Unlike :func:`_calculate_quantum_spread`, this is a mean radius rather
     than a root-mean-square radius.
+
+    Parameters
+    ----------
+    integrator : openmm.RPMDIntegrator
+        The integrator running the simulation.
+    atom_indices : list of int or None, optional
+        Atoms to compute the expansion for. If None, every atom is included.
+        Default is None.
+
+    Returns
+    -------
+    openmm.unit.Quantity
+        Degree of expansion per selected atom, in nanometres, with shape
+        ``(n_selected_atoms,)``.
     """
     coordinates = _bead_coordinates(integrator, atom_indices)
     return _spread_from_coordinates(coordinates, metric="mean")
 
 
 def _simulation_bead_coordinates(simulation, atom_indices):
-    """Return selected bead coordinates and their periodic box."""
+    """
+    Read one bead state per copy, undoing any periodic wrapping.
+
+    Beads of the same ring polymer can land on opposite sides of a periodic
+    box, which would inflate every spread computed from them. Each bead is
+    therefore imaged onto the first one before being returned.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        The simulation whose integrator holds the ring polymer.
+    atom_indices : list of int
+        Atoms to read, in the order the returned array uses.
+
+    Returns
+    -------
+    coordinates : numpy.ndarray
+        Bead coordinates in nanometres, shaped
+        ``(n_beads, len(atom_indices), 3)``.
+    box : numpy.ndarray or None
+        Periodic box vectors in nanometres, or None if the system is not
+        periodic.
+    """
     integrator = simulation.integrator
     system = getattr(simulation, "system", None)
     periodic = (
@@ -134,13 +203,46 @@ def _simulation_bead_coordinates(simulation, atom_indices):
 
 
 def _validate_metric(metric):
+    """
+    Check that a spread metric is one this module implements.
+
+    Parameters
+    ----------
+    metric : str
+        Metric name to check.
+
+    Raises
+    ------
+    ValueError
+        If *metric* is not ``"rms"`` or ``"mean"``.
+    """
     if metric not in _SPREAD_METRICS:
         choices = ", ".join(sorted(_SPREAD_METRICS))
         raise ValueError(f"metric must be one of: {choices}")
 
 
 def _validate_atom_indices(atom_indices):
-    """Validate and normalise selected zero-based atom indices."""
+    """
+    Validate and normalise selected zero-based atom indices.
+
+    Parameters
+    ----------
+    atom_indices : iterable of int
+        Atoms to monitor. Booleans are rejected even though they are
+        integers in Python.
+
+    Returns
+    -------
+    list of int
+        The same indices as plain ints.
+
+    Raises
+    ------
+    ValueError
+        If the selection is empty or holds a negative index.
+    TypeError
+        If any index is not an integer.
+    """
     atom_indices = list(atom_indices)
     if not atom_indices:
         raise ValueError("atom_indices must not be empty")
@@ -155,7 +257,29 @@ def _validate_atom_indices(atom_indices):
 
 
 def _validate_distance_pairs(distance_pairs):
-    """Validate and normalise zero-based atom-index pairs."""
+    """
+    Validate and normalise zero-based atom-index pairs.
+
+    Parameters
+    ----------
+    distance_pairs : iterable of pair of int or None
+        Atom-index pairs whose centroid distance is wanted. None means no
+        pairs.
+
+    Returns
+    -------
+    list of tuple of int
+        One ``(first, second)`` pair per entry, as plain ints. Empty if
+        *distance_pairs* is None.
+
+    Raises
+    ------
+    ValueError
+        If an entry does not hold exactly two indices, or holds a negative
+        one.
+    TypeError
+        If any index is not an integer.
+    """
     if distance_pairs is None:
         return []
 
@@ -179,7 +303,34 @@ def _validate_distance_pairs(distance_pairs):
 
 
 def _validate_observable_indices(atom_indices, distance_pairs, n_atoms=None):
-    """Validate expansion atoms and distance pairs against a topology size."""
+    """
+    Validate expansion atoms and distance pairs together.
+
+    Parameters
+    ----------
+    atom_indices : iterable of int
+        Atoms whose expansion is to be reported.
+    distance_pairs : iterable of pair of int or None
+        Atom-index pairs whose centroid distance is to be reported.
+    n_atoms : int or None, optional
+        Number of atoms in the topology the indices refer to. If given,
+        every index is bounds-checked against it. Default is None.
+
+    Returns
+    -------
+    atom_indices : list of int
+        Normalised expansion atom indices.
+    distance_pairs : list of tuple of int
+        Normalised distance pairs.
+
+    Raises
+    ------
+    ValueError
+        If either selection is invalid, or an index is at or beyond
+        *n_atoms*.
+    TypeError
+        If any index is not an integer.
+    """
     atom_indices = _validate_atom_indices(atom_indices)
     distance_pairs = _validate_distance_pairs(distance_pairs)
     selected = [
@@ -198,7 +349,36 @@ def _validate_observable_indices(atom_indices, distance_pairs, n_atoms=None):
 
 def _calculate_report_observables(simulation, atom_indices, metric,
                                   distance_pairs):
-    """Calculate expansion and centroid distances in one bead-state pass."""
+    """
+    Calculate expansion and centroid distances in one bead-state pass.
+
+    Reading the bead states is the expensive part of a report, so the atoms
+    needed by both observables are gathered once and shared.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        The simulation to read from.
+    atom_indices : list of int
+        Atoms whose expansion is reported.
+    metric : {"rms", "mean"}
+        Spread metric applied to the beads.
+    distance_pairs : list of tuple of int
+        Atom pairs whose centroid distance is reported. May be empty.
+
+    Returns
+    -------
+    spreads : openmm.unit.Quantity
+        Expansion per entry of *atom_indices*, in nanometres.
+    distances : openmm.unit.Quantity
+        Minimum-image centroid distance per entry of *distance_pairs*, in
+        nanometres. Empty if there are no pairs.
+
+    Raises
+    ------
+    ValueError
+        If an index lies outside the simulation topology.
+    """
     selected_atoms = list(dict.fromkeys([
         *atom_indices,
         *(index for pair in distance_pairs for index in pair),
@@ -470,7 +650,27 @@ def track_rpmd_atom_expansion(simulation, atom_index, file, report_interval,
 
 
 def _read_expansion_log(file):
-    """Read a tab-separated expansion reporter log."""
+    """
+    Read a tab-separated expansion reporter log.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log written by :class:`RPMDQuantumSpreadReporter`.
+
+    Returns
+    -------
+    header : list of str
+        Column names, the first of which is ``"Step"``.
+    values : numpy.ndarray
+        Row values, shaped ``(n_rows, len(header))``.
+
+    Raises
+    ------
+    ValueError
+        If the header is malformed or duplicated, the file holds no data
+        rows, or a row does not match the header.
+    """
     with open(file) as handle:
         header = handle.readline().rstrip("\n").split("\t")
         has_data = any(line.strip() for line in handle)
@@ -491,6 +691,32 @@ def _read_expansion_log(file):
 
 
 def _select_log_columns(header, requested, prefixes, description):
+    """
+    Resolve a requested column selection against a log header.
+
+    Parameters
+    ----------
+    header : list of str
+        Column names read from the log.
+    requested : str or iterable of str or None
+        Columns wanted. A bare string selects one column; None selects every
+        column carrying one of *prefixes*.
+    prefixes : tuple of str
+        Name prefixes that mark a column as belonging to this observable.
+    description : str
+        Observable name, used in error messages.
+
+    Returns
+    -------
+    list of str
+        The selected column names.
+
+    Raises
+    ------
+    ValueError
+        If a requested column is absent, or the log carries no expansion
+        columns at all.
+    """
     available = [
         name for name in header
         if any(name.startswith(prefix) for prefix in prefixes)
@@ -513,7 +739,20 @@ def _select_log_columns(header, requested, prefixes, description):
 
 
 def _column_label(column):
-    """Turn a reporter column name into a compact legend label."""
+    """
+    Turn a reporter column name into a compact legend label.
+
+    Parameters
+    ----------
+    column : str
+        Column name, e.g. ``"Rg_Proton_H1(nm)"``.
+
+    Returns
+    -------
+    str
+        The name without its observable prefix or unit suffix, e.g.
+        ``"Proton_H1"``.
+    """
     label = column
     for prefix in ("Expansion_", "Rg_", "Distance_"):
         if label.startswith(prefix):
@@ -525,7 +764,31 @@ def _column_label(column):
 
 
 def _average_by_progress(progress, values, progress_bins=None):
-    """Sort path samples and average rows sharing a progress group."""
+    """
+    Sort path samples and average rows sharing a progress group.
+
+    Parameters
+    ----------
+    progress : numpy.ndarray
+        Progress coordinate, one value per row of *values*.
+    values : numpy.ndarray
+        Log values, shaped ``(n_rows, n_columns)``.
+    progress_bins : int or None, optional
+        Number of equal-width bins to average within. With None, only rows
+        at exactly equal progress values are averaged. Default is None.
+
+    Returns
+    -------
+    grouped_progress : numpy.ndarray
+        Progress value of each populated group, in ascending order.
+    grouped_values : numpy.ndarray
+        Mean of the rows in each populated group.
+
+    Raises
+    ------
+    ValueError
+        If *progress_bins* is not a positive integer or None.
+    """
     if progress_bins is not None:
         if (
             isinstance(progress_bins, bool)
@@ -568,7 +831,8 @@ def plot_rpmd_atom_expansion(file, *, expansion_columns=None,
                              distance_columns=None, path_progress=None,
                              progress_bins=None, length_unit="nanometer",
                              filename=None, show=False):
-    """Plot an RPMD atom expansion against distance or path progress.
+    """
+    Plot an RPMD atom expansion against distance or path progress.
 
     With no *path_progress*, one selected centroid-distance column is used on
     the x axis and a direct expansion-versus-distance scatter is produced. With

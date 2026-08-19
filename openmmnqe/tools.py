@@ -42,7 +42,36 @@ def zero_velocities(n_atoms):
 
 
 def _sample_maxwell_boltzmann_velocities(system, temperature, n_copies, rng):
-    """Draw independent particle velocities for *n_copies* at *temperature*."""
+    """
+    Draw independent bead velocities from a Maxwell-Boltzmann distribution.
+
+    OpenMM's RPMD Hamiltonian thermalizes each bead at ``n_copies * k_B * T``,
+    so a bead velocity is drawn with ``sigma = sqrt(n_copies*k_B*T/m)`` rather
+    than the classical ``sqrt(k_B*T/m)``.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System whose particle masses set the widths.
+    temperature : openmm.unit.Quantity or float
+        Target temperature. A plain number is read as kelvin.
+    n_copies : int
+        Number of ring-polymer beads.
+    rng : numpy.random.Generator
+        Random source the velocities are drawn from.
+
+    Returns
+    -------
+    openmm.unit.Quantity
+        Velocities in nm/ps, shaped ``(n_copies, n_particles, 3)``. Massless
+        particles, typically virtual sites, are left at zero.
+
+    Raises
+    ------
+    ValueError
+        If *n_copies* is not positive, the temperature is not finite and
+        positive, or a particle mass is not finite and non-negative.
+    """
     if n_copies <= 0:
         raise ValueError("n_copies must be positive")
     if unit.is_quantity(temperature):
@@ -85,12 +114,40 @@ def _sample_free_ring_polymer_displacements(
     rng,
     scale_factor=1.0,
 ):
-    """Draw free-ring-polymer coordinates with a fixed zero centroid.
+    """
+    Draw free-ring-polymer displacements with a fixed zero centroid.
 
     OpenMM evolves mode ``k`` at angular frequency
     ``2*P*k_B*T/hbar*sin(pi*k/P)`` and thermalizes its RPMD Hamiltonian at
     ``P*T``.  In an orthonormal normal-mode basis, each non-centroid real
-    coordinate therefore has variance ``P*k_B*T/(m*omega_k**2)``.
+    coordinate therefore has variance ``P*k_B*T/(m*omega_k**2)``.  The
+    centroid mode is left at zero, so the displacements can be added to an
+    existing classical configuration without moving it.
+
+    Parameters
+    ----------
+    masses_amu : array-like of float
+        Particle masses in daltons, one per atom.
+    temperature : openmm.unit.Quantity or float
+        Target temperature. A plain number is read as kelvin.
+    n_copies : int
+        Number of ring-polymer beads.
+    rng : numpy.random.Generator
+        Random source the displacements are drawn from.
+    scale_factor : float, optional
+        Multiplies the sampled widths, so values below 1 start the beads
+        more tightly collapsed than equilibrium. Default is 1.0.
+
+    Returns
+    -------
+    numpy.ndarray
+        Displacements in nanometres, shaped ``(n_copies, n_atoms, 3)``, whose
+        mean over the bead axis is zero. Massless particles stay at zero.
+
+    Raises
+    ------
+    ValueError
+        If the temperature is not finite and positive.
     """
     if unit.is_quantity(temperature):
         temperature_k = temperature.value_in_unit(unit.kelvin)
@@ -403,7 +460,8 @@ def init_beads(modeller, simulation, n_beads, scale_factor=1.0,
 
 
 def step_rpmd(simulation, steps):
-    """Advance an RPMD Simulation while keeping its step count synchronized.
+    """
+    Advance an RPMD Simulation while keeping its step count synchronized.
 
     OpenMM 8.5 advances an :class:`openmm.RPMDIntegrator`'s time but does not
     advance its Context step count.  :meth:`openmm.app.Simulation.step` uses
@@ -443,6 +501,19 @@ def step_rpmd(simulation, steps):
     native_step = integrator.step
 
     def synchronized_step(count):
+        """
+        Advance the integrator, repairing the step count if OpenMM did not.
+
+        Parameters
+        ----------
+        count : int
+            Number of steps to advance.
+
+        Raises
+        ------
+        RuntimeError
+            If the Context step count moved by anything other than *count*.
+        """
         before = simulation.currentStep
         native_step(count)
         after = simulation.currentStep

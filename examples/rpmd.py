@@ -14,6 +14,7 @@ device = "CUDA"
 
 
 def run_openmm_rpmd():
+    """Run RPMD on a peptide in vacuum, driving the integrator by hand."""
     print(flush=True)
     n_steps = 1_000
     report_every = 100
@@ -56,6 +57,7 @@ def run_openmm_rpmd():
 
 
 def run_openmm_rpmd_solvated():
+    """Run RPMD on the same peptide with explicit solvent around it."""
     print(flush=True)
     n_steps = 200
     report_every = 100
@@ -101,6 +103,7 @@ def run_openmm_rpmd_solvated():
 
 
 def run_openmm_rpmd_ml():
+    """Run RPMD with MACE, rather than a classical force field, as the potential."""
     print(flush=True)
     n_steps = 200
     report_every = 100
@@ -142,6 +145,7 @@ def run_openmm_rpmd_ml():
 
 
 def run_openmm_rpmd_mixed():
+    """Run RPMD with MACE on the solute and the classical force field on the water."""
     print(flush=True)
     n_steps = 200
     report_every = 100
@@ -202,6 +206,7 @@ def run_openmm_rpmd_mixed():
 
 
 def run_rpmd_quantum_spread_reporter():
+    """Log how far two atoms' beads spread, then plot the result."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
@@ -262,6 +267,7 @@ def run_rpmd_quantum_spread_reporter():
 
 
 def run_rpmd_bead_reporter():
+    """Write each bead's own trajectory to its own PDB file."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
@@ -305,6 +311,7 @@ def run_rpmd_bead_reporter():
 
 
 def run_rpmd_centroid_reporter():
+    """Write the bead-averaged centroid trajectory to a single PDB file."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
@@ -347,6 +354,7 @@ def run_rpmd_centroid_reporter():
 
 
 def run_openmm_adqtb():
+    """Run adQTB on a peptide, assigning particle types by element by hand."""
     print(flush=True)
     n_steps = 1_000
     report_every = 100
@@ -400,6 +408,7 @@ def run_openmm_adqtb():
 
 
 def run_openmm_rpmd_equilibration():
+    """Equilibrate an RPMD system through the driver, leaving a bead-aware restart."""
     print(flush=True)
     n_beads = 2
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -419,6 +428,7 @@ def run_openmm_rpmd_equilibration():
 
 
 def run_openmm_rpmd_prod():
+    """Equilibrate, then run RPMD production from the restart it left behind."""
     print(flush=True)
     n_beads = 2
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -445,6 +455,7 @@ def run_openmm_rpmd_prod():
 
 
 def run_openmm_rpmd_contracted():
+    """Run contracted RPMD, evaluating the slow forces on fewer beads than the fast ones."""
     print(flush=True)
     n_beads = 8
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -472,6 +483,7 @@ def run_openmm_rpmd_contracted():
 
 
 def run_openmm_adqtb_eq():
+    """Equilibrate an adQTB system through the driver, adapting its friction as it goes."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -489,6 +501,7 @@ def run_openmm_adqtb_eq():
 
 
 def run_openmm_adqtb_prod():
+    """Equilibrate, then run adQTB production on a solvated peptide."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -524,6 +537,7 @@ EXAMPLES = {
 
 
 def main():
+    """Run whichever example is named on the command line."""
     global device
 
     parser = argparse.ArgumentParser(description=__doc__)

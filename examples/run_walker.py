@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+"""Run one walker of a multiple-walkers metadynamics simulation.
+
+Launched once per walker, each with its own ``--walker-id``, so PLUMED's
+multiple-walkers machinery can share bias between the processes. The
+placeholders ``__WALKER_ID__`` and ``__N_WALKERS__`` in the PLUMED script are
+filled in from the command line, and every output file is suffixed with the
+walker id so concurrent processes do not collide.
+
+Runs a two-particle toy dimer by default, so the example works without any
+external files; pass ``--pdb`` to drive a real solvated system instead.
+"""
 import argparse
 import random
 
@@ -80,6 +91,7 @@ def load_pdb_system(pdb_path, ff_xmls, nonbonded_cutoff_nm=1.0):
 
 
 def main():
+    """Parse the walker options, build its system, and run its trajectory."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--walker-id", type=int, required=True)
     ap.add_argument("--n-walkers", type=int, required=True)

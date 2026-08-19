@@ -22,6 +22,7 @@ class OneParticleForceField:
     """Deterministic force field for cheap public-workflow tests."""
 
     def createSystem(self, topology, **kwargs):
+        """Return a one-argon System held by a harmonic well, ignoring *kwargs*."""
         system = openmm.System()
         system.addParticle(39.9 * unit.dalton)
         restraint = openmm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
@@ -61,7 +62,10 @@ def one_particle_system():
 
 @pytest.fixture
 def ligand_forcefield(tmp_path):
-    """Build ``(modeller, forcefield)`` for a PDB whose ligands need parameters.
+    """Return a builder giving ``(modeller, forcefield)`` for a ligand PDB.
+
+    Call the fixture with an input PDB, and optionally a *base_forcefield* or
+    any other ``build_forcefield_xml`` keyword, to get that pair back.
 
     ``forcefill.build_forcefield_xml`` asks the base force field which residues
     it cannot match, parameterises those with GAFF2/AM1-BCC, and writes an
@@ -94,6 +98,7 @@ def ligand_forcefield(tmp_path):
     build_number = itertools.count()
 
     def _build(input_pdb, base_forcefield=BASE_FORCEFIELD, **kwargs):
+        """Parameterise *input_pdb* and pair it with its force field."""
         build_dir = tmp_path / f"forcefill-{next(build_number)}"
         build_dir.mkdir()
         result = ff.build_forcefield_xml(input_pdb,

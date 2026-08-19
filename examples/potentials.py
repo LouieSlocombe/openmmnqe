@@ -13,6 +13,7 @@ import openmmnqe as nqe
 
 
 def run_openmm_ml():
+    """Relax a peptide with MACE driving the whole system."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     potential = MLPotential("mace-off23-small")
     modeller = app.Modeller(pdb.topology, pdb.positions)
@@ -24,6 +25,7 @@ def run_openmm_ml():
 
 
 def run_ase_mace():
+    """Relax the same peptide with MACE through the ASE bridge instead."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     potential = MLPotential("ase")
     calculator = mace_off("small", default_dtype="float32")
@@ -40,6 +42,7 @@ def run_ase_mace():
 
 
 def run_ase_orca():
+    """Relax malonaldehyde with ORCA as the ASE calculator; needs ORCA_PATH."""
     if "ORCA_PATH" not in os.environ:
         raise RuntimeError("set ORCA_PATH to the ORCA executable")
 
@@ -61,6 +64,7 @@ def run_ase_orca():
 
 
 def run_openmm_ml_mixed_system():
+    """Relax a solvated peptide with MACE on the solute and MM on the water."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField("amber14-all.xml", "amber14/tip3pfb.xml")
     potential = MLPotential("mace-off23-small")
@@ -92,6 +96,7 @@ EXAMPLES = {
 
 
 def main():
+    """Run whichever example is named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("example", choices=sorted(EXAMPLES))
     args = parser.parse_args()

@@ -18,7 +18,36 @@ BASE_FORCEFIELD = ("amber14-all.xml", "amber14/tip3pfb.xml")
 
 
 def ligand_forcefield(input_pdb, base_forcefield=BASE_FORCEFIELD):
-    """Parameterise ligands and return the matching modeller and force field."""
+    """
+    Parameterise ligands and return the matching modeller and force field.
+
+    The Modeller is built from the same file forcefill read, with nothing in
+    between, because the generated templates describe those residues exactly
+    as that file spells them.
+
+    Parameters
+    ----------
+    input_pdb : str
+        Structure to parameterise. It must already be repaired: forcefill
+        decides what needs parameters by asking what the base force field
+        cannot match.
+    base_forcefield : tuple of str, optional
+        Standard force field files the generated ffxml loads underneath.
+        Default is ``BASE_FORCEFIELD``.
+
+    Returns
+    -------
+    modeller : openmm.app.Modeller
+        Modeller holding *input_pdb* exactly as forcefill saw it.
+    forcefield : openmm.app.ForceField
+        The base files plus the generated ligand ffxml.
+
+    Raises
+    ------
+    RuntimeError
+        If forcefill skipped any residue, which would leave the system
+        without parameters for it.
+    """
     result = ff.build_forcefield_xml(
         input_pdb,
         "ligands.xml",
@@ -36,6 +65,7 @@ def ligand_forcefield(input_pdb, base_forcefield=BASE_FORCEFIELD):
 
 
 def run_openmm_relaxation():
+    """Minimise a solvated peptide with the staged, restrained relaxation."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -54,6 +84,7 @@ def run_openmm_relaxation():
 
 
 def run_openmm_heating():
+    """Heat a solvated peptide to its target temperature under restraints."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -73,6 +104,7 @@ def run_openmm_heating():
 
 
 def run_openmm_heating_deuterate():
+    """Heat the same system with every hydrogen replaced by deuterium."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -92,6 +124,7 @@ def run_openmm_heating_deuterate():
 
 
 def run_openmm_npt():
+    """Equilibrate a solvated peptide at constant pressure."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -111,6 +144,7 @@ def run_openmm_npt():
 
 
 def run_eq_workflow():
+    """Run the full classical equilibration: relax, heat, then NPT."""
     print(flush=True)
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
@@ -141,6 +175,7 @@ def run_eq_workflow():
 
 
 def run_eq_workflow_mixed():
+    """Run the same equilibration with MACE on the solute and MM on the water."""
     print(flush=True)
 
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -176,6 +211,7 @@ def run_eq_workflow_mixed():
 
 
 def run_eq_workflow_plumed_dihedral():
+    """Bias a peptide dihedral with metadynamics, classically and then with RPMD."""
     print(flush=True)
 
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -269,6 +305,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 
 
 def run_eq_workflow_plumed_dihedral_opes():
+    """Bias the same dihedral with OPES instead of metadynamics."""
     print(flush=True)
     n_steps = 100_000
     temperature = 300.0 * unit.kelvin
@@ -335,6 +372,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
 
 
 def run_malonaldehyde_pt():
+    """Malonaldehyde proton transfer in vacuum, biased on the single transfer coordinate."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
@@ -385,6 +423,7 @@ def run_malonaldehyde_pt():
 
 
 def run_malonaldehyde_pt_solvated():
+    """The same transfer with explicit solvent and an ML/MM split."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 40_000
@@ -445,6 +484,7 @@ def run_malonaldehyde_pt_solvated():
 
 
 def run_malonaldehyde_pt_quantum_solvated():
+    """The solvated transfer again with RPMD, so the proton itself is quantised."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
@@ -516,6 +556,7 @@ def run_malonaldehyde_pt_quantum_solvated():
 
 
 def run_malonaldehyde_pt_adqtb_solvated():
+    """The solvated transfer with adQTB supplying the nuclear quantum effects instead."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 10_000
@@ -583,6 +624,7 @@ def run_malonaldehyde_pt_adqtb_solvated():
 
 
 def run_malonaldehyde_pt_solvated_full():
+    """The solvated transfer after a full relax-heat-NPT equilibration."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 50_000
@@ -661,6 +703,7 @@ def run_malonaldehyde_pt_solvated_full():
 
 
 def run_fad_pt_solvated():
+    """Formic acid dimer double proton transfer, on a one-dimensional two-proton CV."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 20_000
@@ -727,6 +770,7 @@ def run_fad_pt_solvated():
 
 
 def run_gc_pt_solvated():
+    """Guanine-cytosine double proton transfer, on the same two-proton CV."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 40_000
@@ -793,6 +837,7 @@ def run_gc_pt_solvated():
 
 
 def run_gc_pt_quantum_solvated():
+    """The guanine-cytosine transfer again with RPMD on four beads."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 60_000
@@ -869,6 +914,7 @@ def run_gc_pt_quantum_solvated():
 
 
 def run_malonaldehyde_pathmsd():
+    """Bias malonaldehyde along a NEB reference path with PATHMSD rather than a bond CV."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 100_000
@@ -961,6 +1007,7 @@ EXAMPLES = {
 
 
 def main():
+    """Run whichever workflow is named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("example", choices=sorted(EXAMPLES))
     args = parser.parse_args()

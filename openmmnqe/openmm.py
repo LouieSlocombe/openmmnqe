@@ -55,7 +55,24 @@ _RPMD_RESTART_VERSION = 2
 
 
 def _validate_rpmd_n_beads(n_beads):
-    """Require an RPMD bead count to be a positive, non-boolean integer."""
+    """
+    Require an RPMD bead count to be a positive, non-boolean integer.
+
+    Parameters
+    ----------
+    n_beads : int
+        Bead count to check.
+
+    Returns
+    -------
+    int
+        The bead count as a plain int.
+
+    Raises
+    ------
+    ValueError
+        If *n_beads* is a bool, not an integer, or not positive.
+    """
     if (
         isinstance(n_beads, (bool, np.bool_))
         or not isinstance(n_beads, (int, np.integer))
@@ -66,7 +83,25 @@ def _validate_rpmd_n_beads(n_beads):
 
 
 def _validate_pdb_identity_name(name, description, max_length):
-    """Reject topology identity names that PDB output cannot preserve."""
+    """
+    Reject topology identity names that PDB output cannot preserve.
+
+    Parameters
+    ----------
+    name : str
+        Atom or residue name to check.
+    description : str
+        What *name* labels, used in the error message.
+    max_length : int
+        Width of the PDB field the name has to fit, 4 for an atom and 3 for
+        a residue.
+
+    Raises
+    ------
+    ValueError
+        If *name* is empty, over-long, non-ASCII, contains whitespace, or is
+        not a string.
+    """
     if (
         not isinstance(name, str)
         or not name
@@ -82,12 +117,29 @@ def _validate_pdb_identity_name(name, description, max_length):
 
 
 def _topology_identity_signature(topology):
-    """Return a PDB-round-trip-stable ordered topology signature.
+    """
+    Return a PDB-round-trip-stable ordered topology signature.
 
     PDB serialization is allowed to renumber atom, residue, and chain IDs and
     does not reliably preserve bond type/order metadata.  The restart identity
     therefore uses atom order, chemically meaningful names/elements, the
     ordered chain/residue grouping, and bond endpoints.
+
+    Parameters
+    ----------
+    topology : openmm.app.Topology
+        Topology to fingerprint.
+
+    Returns
+    -------
+    str
+        Hex SHA-256 digest of the signature, stable across a PDB round trip
+        of the same structure.
+
+    Raises
+    ------
+    ValueError
+        If an atom or residue name would not survive PDB output.
     """
     chain_ordinals = {
         chain: ordinal for ordinal, chain in enumerate(topology.chains())
@@ -134,7 +186,24 @@ def _topology_identity_signature(topology):
 
 
 def _particle_masses_dalton(system):
-    """Return ordered particle masses as finite, non-negative floats."""
+    """
+    Return ordered particle masses as finite, non-negative floats.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System whose particles are read, in index order.
+
+    Returns
+    -------
+    numpy.ndarray
+        Masses in daltons, shaped ``(n_particles,)``.
+
+    Raises
+    ------
+    ValueError
+        If any mass is not finite and non-negative.
+    """
     masses = np.asarray([
         system.getParticleMass(index).value_in_unit(unit.dalton)
         for index in range(system.getNumParticles())
@@ -145,7 +214,24 @@ def _particle_masses_dalton(system):
 
 
 def _rpmd_temperature_kelvin(integrator):
-    """Return an RPMD integrator's finite, positive temperature in kelvin."""
+    """
+    Return an RPMD integrator's finite, positive temperature in kelvin.
+
+    Parameters
+    ----------
+    integrator : openmm.RPMDIntegrator
+        Integrator to read the temperature from.
+
+    Returns
+    -------
+    float
+        Temperature in kelvin.
+
+    Raises
+    ------
+    ValueError
+        If the temperature is not finite and positive.
+    """
     temperature = float(integrator.getTemperature().value_in_unit(unit.kelvin))
     if not np.isfinite(temperature) or temperature <= 0.0:
         raise ValueError("RPMDIntegrator temperature must be positive and finite")
@@ -153,7 +239,28 @@ def _rpmd_temperature_kelvin(integrator):
 
 
 def _restart_scalar(archive, name, scalar_type):
-    """Read a restart scalar only when its shape and dtype match the schema."""
+    """
+    Read a restart scalar only when its shape and dtype match the schema.
+
+    Parameters
+    ----------
+    archive : numpy.lib.npyio.NpzFile
+        Opened restart archive.
+    name : str
+        Field to read.
+    scalar_type : {"integer", "float", "boolean", "string"}
+        Kind the field is required to hold.
+
+    Returns
+    -------
+    int or float or bool or str
+        The stored value, as a Python scalar.
+
+    Raises
+    ------
+    ValueError
+        If the field is not a scalar, or does not hold *scalar_type*.
+    """
     value = archive[name]
     if value.shape != ():
         raise ValueError(f"RPMD restart field {name} must be a scalar")
@@ -173,7 +280,8 @@ def _restart_scalar(archive, name, scalar_type):
 
 
 class PreparedSystem:
-    """Stand-in force field that hands a pre-built ``openmm.System`` to a stage.
+    """
+    Stand-in force field that hands a pre-built ``openmm.System`` to a stage.
 
     Every ``run_openmm_*`` stage builds its System by calling
     ``forcefield.createSystem(topology, **kwargs)``.  Wrapping an existing
@@ -218,11 +326,19 @@ class PreparedSystem:
 
     @property
     def system(self):
-        """openmm.System: The held System that ``createSystem`` returns."""
+        """
+        The held System that :meth:`createSystem` returns.
+
+        Returns
+        -------
+        openmm.System
+            The System this instance was built around.
+        """
         return self._system
 
     def createSystem(self, topology, **kwargs):
-        """Return the held System after checking it matches *topology*.
+        """
+        Return the held System after checking it matches *topology*.
 
         Parameters
         ----------
@@ -373,14 +489,36 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
 
 
 def _maybe_deuterate(modeller, system, deuterate, deuterate_option):
-    """Deuterate the system in place when requested."""
+    """
+    Deuterate the system in place when requested.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        Modeller whose topology names the hydrogens to convert.
+    system : openmm.System
+        System whose particle masses are edited in place.
+    deuterate : bool
+        Whether to deuterate at all. False makes this a no-op.
+    deuterate_option : str
+        Selection passed through to :func:`openmmnqe.tools.deuterate_system`.
+    """
     if deuterate:
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
 
 
 def _load_plumed(system, plumed_script_path):
-    """Attach a PLUMED bias force to the system if a script path is given."""
+    """
+    Attach a PLUMED bias force to the system if a script path is given.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System the bias force is added to, in place.
+    plumed_script_path : str or None
+        Path to a PLUMED input script. None makes this a no-op.
+    """
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
 
@@ -395,10 +533,27 @@ def _add_standard_reporters(simulation, output_prefix, n_report,
                             pdb_steps=False, stdout_volume=False,
                             checkpoint_interval=None):
     """
-    Append the standard reporter set shared by the drivers.
+    Append the standard reporter set shared by the classical drivers.
 
     Order: optional PDB trajectory, stdout state data, ``.log`` state data,
     optional periodic checkpoint.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation the reporters are appended to.
+    output_prefix : str
+        Prefix for the files written, giving ``<prefix>.log`` and friends.
+    n_report : int
+        Interval between reports, in steps.
+    pdb_steps : bool, optional
+        Also write a ``<prefix>_steps.pdb`` trajectory. Default is False.
+    stdout_volume : bool, optional
+        Include box volume in the stdout report, which is worth having under
+        a barostat. Default is False.
+    checkpoint_interval : int or None, optional
+        Interval between ``<prefix>.chk`` checkpoints. With None, no
+        checkpoint reporter is added. Default is None.
     """
     if pdb_steps:
         simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
@@ -424,12 +579,22 @@ def _add_standard_reporters(simulation, output_prefix, n_report,
 
 
 def _add_rpmd_progress_reporters(simulation, output_prefix, n_report):
-    """Append Context-independent progress reporters for an RPMD run.
+    """
+    Append Context-independent progress reporters for an RPMD run.
 
     An RPMD integrator's ordinary Context state is not a bead average and is
     not guaranteed to mirror any particular copy.  Step, time, speed, and box
     volume remain meaningful, but Context energy and kinetic-temperature
     fields do not, so they are deliberately omitted here.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation the reporters are appended to.
+    output_prefix : str
+        Prefix for the ``<prefix>.log`` progress log.
+    n_report : int
+        Interval between reports, in steps.
     """
     simulation.reporters.append(app.StateDataReporter(
         sys.stdout,
@@ -450,7 +615,38 @@ def _add_rpmd_progress_reporters(simulation, output_prefix, n_report):
 def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
                         atoms_to_watch, expansion_metric="rms",
                         distance_pairs=None):
-    """Append the RPMD reporter trio (optional spread, centroid, beads)."""
+    """
+    Append the RPMD reporter trio: optional spread, then centroid and beads.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation the reporters are appended to.
+    topology : openmm.app.Topology
+        Topology written into the PDB output and used to bounds-check the
+        watched atoms.
+    output_prefix : str
+        Prefix for ``<prefix>_spread.log``, ``<prefix>_centroid.pdb`` and the
+        per-bead ``<prefix>_bead_<i>.pdb`` files.
+    n_report : int
+        Interval between reports, in steps.
+    n_beads : int
+        Number of ring-polymer beads.
+    atoms_to_watch : list of int or None
+        Atoms whose expansion is logged. With None, no spread reporter is
+        added and *distance_pairs* may not be given either.
+    expansion_metric : {"rms", "mean"}, optional
+        Spread metric recorded for *atoms_to_watch*. Default is ``"rms"``.
+    distance_pairs : iterable of pair of int or None, optional
+        Atom pairs whose centroid distance is logged alongside the expansion.
+        Default is None.
+
+    Raises
+    ------
+    ValueError
+        If *distance_pairs* is given without *atoms_to_watch*, or an index
+        lies outside *topology*.
+    """
     if distance_pairs is not None and atoms_to_watch is None:
         raise ValueError("distance_pairs require atoms_to_watch")
     if atoms_to_watch is not None:
@@ -483,7 +679,8 @@ def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
 
 
 def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
-    """Atomically save every RPMD copy to a portable restart archive.
+    """
+    Atomically save every RPMD copy to a portable restart archive.
 
     OpenMM's ordinary ``Context`` checkpoint only sees the copy currently
     mirrored into the Context.  The other copies live in private arrays owned
@@ -492,6 +689,23 @@ def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
     picosecond.  The archive also carries the ordered particle masses, atom
     and topology signature, source temperature, box, time, and step count
     needed to validate and continue in a new ``Simulation``.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation driven by an ``RPMDIntegrator``.
+    checkpoint_file : str
+        Path the ``.npz`` archive is written to. It is written via a
+        temporary file and moved into place, so an interrupted save cannot
+        leave a half-written restart behind.
+    n_beads : int
+        Number of ring-polymer beads, checked against the integrator.
+
+    Raises
+    ------
+    ValueError
+        If *n_beads* is not a positive integer or disagrees with the
+        integrator, or the topology cannot be given a PDB-stable signature.
     """
     n_beads = _validate_rpmd_n_beads(n_beads)
 
@@ -592,7 +806,28 @@ def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
 
 
 def _read_rpmd_restart(checkpoint_file):
-    """Read and validate the format-independent portion of an RPMD restart."""
+    """
+    Read and validate the format-independent portion of an RPMD restart.
+
+    Parameters
+    ----------
+    checkpoint_file : str
+        Path to a ``.npz`` archive written by :func:`_save_rpmd_restart`.
+
+    Returns
+    -------
+    dict
+        The restart contents: ``num_beads``, ``num_particles``,
+        ``particle_masses_dalton``, ``topology_signature_sha256``,
+        ``temperature_kelvin``, ``positions_nm``, ``velocities_nm_per_ps``,
+        ``periodic``, ``box_vectors_nm``, and the run's time and step count.
+
+    Raises
+    ------
+    ValueError
+        If the file is corrupt, is a generic OpenMM checkpoint rather than a
+        bead-aware one, or fails the restart schema.
+    """
     try:
         archive = np.load(checkpoint_file, allow_pickle=False)
     except zipfile.BadZipFile as exc:
@@ -719,7 +954,29 @@ def _read_rpmd_restart(checkpoint_file):
 
 
 def _load_rpmd_restart(simulation, checkpoint_file, n_beads):
-    """Restore every RPMD copy before the integrator takes its first step."""
+    """
+    Restore every RPMD copy before the integrator takes its first step.
+
+    The restart is checked against the Simulation it is being loaded into:
+    a mismatched bead count, particle count, mass ordering, topology
+    signature, or temperature means the archive belongs to a different run
+    and is refused rather than silently reinterpreted.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation driven by an ``RPMDIntegrator``, restored in place.
+    checkpoint_file : str
+        Path to a restart written by :func:`_save_rpmd_restart`.
+    n_beads : int
+        Number of ring-polymer beads the run expects.
+
+    Raises
+    ------
+    ValueError
+        If the restart is corrupt, or does not match the current bead count,
+        ordered topology, particle masses, or temperature.
+    """
     n_beads = _validate_rpmd_n_beads(n_beads)
     restart = _read_rpmd_restart(checkpoint_file)
     integrator = simulation.integrator
@@ -848,6 +1105,22 @@ def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpo
     averaged over the copies via
     :func:`openmmnqe.tools.centroid_positions`. Without a bead count, an
     ordinary OpenMM checkpoint and Context structure are written.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation to save.
+    output_prefix : str
+        Prefix for the files written, giving ``<prefix>.chk`` and
+        ``<prefix><pdb_suffix>``.
+    pdb_suffix : str, optional
+        Suffix for the final structure file. Default is ``'.pdb'``.
+    save_checkpoint : bool, optional
+        Whether to write a checkpoint alongside the structure. Default is
+        True.
+    n_beads : int or None, optional
+        Number of ring-polymer beads for an RPMD run, or None for a
+        classical one. Default is None.
     """
     if save_checkpoint:
         checkpoint_file = f'{output_prefix}.chk'
@@ -872,6 +1145,16 @@ def _load_checkpoint(simulation, checkpoint_file, n_beads=None):
     With *n_beads*, require the bead-aware openmmnqe RPMD format and restore
     every copy. Without it, delegate to OpenMM's ordinary Context checkpoint
     loader.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation restored in place.
+    checkpoint_file : str
+        Path to the checkpoint written by the preceding stage.
+    n_beads : int or None, optional
+        Number of ring-polymer beads for an RPMD run, or None for a
+        classical one. Default is None.
 
     Raises
     ------
@@ -1512,7 +1795,32 @@ def run_openmm_steered(modeller,
 
 
 def _split_rpmd_seed(seed):
-    """Derive independent NumPy and OpenMM seeds from one master seed."""
+    """
+    Derive independent NumPy and OpenMM seeds from one master seed.
+
+    Bead initialisation and the PILE thermostat draw from separate streams,
+    so one master seed is split rather than reused: sharing it would
+    correlate the starting ring polymer with its thermostat noise.
+
+    Parameters
+    ----------
+    seed : int or None
+        Non-negative master seed, or None to leave both streams
+        non-deterministic.
+
+    Returns
+    -------
+    initialization_seed : int or None
+        Seed for the NumPy generator that places the beads.
+    thermostat_seed : int or None
+        Seed for the OpenMM PILE thermostat. Never zero, which OpenMM reads
+        as a request for a non-deterministic seed.
+
+    Raises
+    ------
+    ValueError
+        If *seed* is a bool, not an integer, or negative.
+    """
     if seed is None:
         return None, None
     if (

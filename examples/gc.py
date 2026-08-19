@@ -1,3 +1,11 @@
+"""Guanine-cytosine double proton transfer, in explicit solvent.
+
+The same pipeline as :mod:`ma`, on a base pair rather than a single molecule:
+forcefill parameterises both residues, MACE treats the pair while the water
+stays classical, and metadynamics on the two transferring protons gives the
+free-energy surface. Both bases are ML atoms, so the CV is the two-proton
+one-dimensional coordinate rather than a NEB path.
+"""
 import logging
 import os
 
