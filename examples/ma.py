@@ -42,14 +42,20 @@ if __name__ == "__main__":
                                      "ligands.xml",
                                      base_forcefield=forcefield_names,
                                      workdir="forcefill_work")
-    print(f"Parameterised: {result.parameterized}, skipped: {result.skipped}", flush=True)
+    # A skipped residue would only fail later, at createSystem, and forcefield_xml
+    # is None when the base files already matched everything -- ForceField() will
+    # not take a None.
+    if result.skipped:
+        raise RuntimeError(f"forcefill skipped residues: {result.skipped}")
+    extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
+    print(f"Parameterised: {result.parameterized}", flush=True)
 
     # Built from the same file forcefill read, with nothing in between: the
     # templates describe those residues exactly as this file spells them, so an
     # edit here (adding hydrogens, deleting water) stops them matching.
     pdb_data = app.PDBFile(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    forcefield = app.ForceField(*forcefield_names, result.forcefield_xml)
+    forcefield = app.ForceField(*forcefield_names, *extra)
 
     padding = 1.5
     box_shape = 'cube'

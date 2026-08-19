@@ -94,7 +94,11 @@ the two it declares the same way. Every installer finishes by checking each one 
 from its checkout rather than from `site-packages`.
 
 `environment_ci.yml` is the exception: a GitHub runner has only this repository checked
-out, so CI keeps the `git+` pip entries and takes all four straight from GitHub.
+out, so CI keeps the `git+` pip entries and takes all four straight from GitHub. Those
+`git+` installs track each repository's default branch, so CI failing here is the
+integration signal that a sibling moved; forcefill bumps its `version` on API-visible
+changes, so comparing `pip show forcefill` against a checkout's `pyproject.toml` tells
+a stale install from a new one.
 
 ## Sol cluster
 

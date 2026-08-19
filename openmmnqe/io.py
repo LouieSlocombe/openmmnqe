@@ -13,12 +13,21 @@ structure into an OpenMM force field is
 dependency::
 
     import forcefill as ff
+    import openmm.app as app
 
-    result = ff.build_forcefield_xml(input_pdb, "ligands.xml",
-                                     base_forcefield=forcefield_names)
+    names = ("amber14-all.xml", "amber14/tip3pfb.xml")
+    result = ff.build_forcefield_xml(input_pdb, "ligands.xml", base_forcefield=names)
+    if result.skipped:
+        raise RuntimeError(f"forcefill skipped residues: {result.skipped}")
+    extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
+
     pdb_data = app.PDBFile(input_pdb)
     modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    forcefield = app.ForceField(*forcefield_names, result.forcefield_xml)
+    forcefield = app.ForceField(*names, *extra)
+
+A skipped residue would otherwise surface later, as a template error at
+``createSystem``, and ``forcefield_xml`` is ``None`` when the base files
+already matched every residue, which ``ForceField()`` will not take.
 
 forcefill asks the base force field which residues it cannot match, rather
 than deciding by residue name, so a structure has to be *repaired* before it
@@ -436,8 +445,10 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
     **Run this before parameterising, not after.**
     ``forcefill.build_forcefield_xml`` decides what needs parameters by asking
     the base force field what it cannot match, and a protein missing its
-    hydrogens matches nothing -- so an unrepaired structure comes back with
-    every residue in ``result.skipped``, which also suppresses forcefill's
+    hydrogens matches nothing.  On a bare protein that is fatal: every residue
+    is standard-but-unmatched, none can be auto-parameterised, and forcefill
+    raises.  With a free ligand alongside, it instead comes back with the
+    protein residues in ``result.skipped``, which also suppresses forcefill's
     whole-structure check.  forcefill is subtractive only and will not repair
     anything itself.  The order for a raw structure is repair, then
     ``forcefill.clean_pdb``, then ``build_forcefield_xml``, each writing its

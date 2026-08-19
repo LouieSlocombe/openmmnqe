@@ -21,11 +21,17 @@ import openmm.app as app
 
 names = ("amber14-all.xml", "amber14/tip3pfb.xml")
 result = ff.build_forcefield_xml(input_pdb, "ligands.xml", base_forcefield=names)
+if result.skipped:
+    raise RuntimeError(f"forcefill skipped residues: {result.skipped}")
+extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
 
 pdb_data = app.PDBFile(input_pdb)
 modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-forcefield = app.ForceField(*names, result.forcefield_xml)
+forcefield = app.ForceField(*names, *extra)
 ```
+
+A skipped residue would otherwise surface later, as a template error at `createSystem`, and `forcefield_xml` is
+`None` when the base files already matched every residue, which `ForceField()` will not take.
 
 The templates describe the residues exactly as `input_pdb` spells them, so nothing may edit the topology between
 those two blocks. A raw crystal structure has to be repaired *before* it is parameterised — forcefill is subtractive
