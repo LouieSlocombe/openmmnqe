@@ -560,15 +560,20 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     runtime = workflow_runtime
 
     class GroupedForce:
-        def __init__(self):
+        def __init__(self, group=0):
             self.force_groups = []
+            self._group = group
 
         def setForceGroup(self, group):
             self.force_groups.append(group)
+            self._group = group
+
+        def getForceGroup(self):
+            return self._group
 
     class NonbondedForce(GroupedForce):
-        def __init__(self):
-            super().__init__()
+        def __init__(self, group=0):
+            super().__init__(group)
             self.reciprocal_groups = []
 
         def setReciprocalSpaceForceGroup(self, group):
@@ -588,7 +593,7 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     monkeypatch.setattr(nqe_openmm.openmm, "CMAPTorsionForce", BondedForce)
     nonbonded = NonbondedForce()
     bonded = BondedForce()
-    other = OtherForce()
+    other = OtherForce(group=31)
     runtime.system.forces = [nonbonded, bonded, other]
 
     nqe_openmm.run_openmm_rpmd_contracted(
@@ -609,7 +614,8 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     assert nonbonded.force_groups == [1]
     assert nonbonded.reciprocal_groups == [2]
     assert bonded.force_groups == [0]
-    assert other.force_groups == [0]
+    assert other.force_groups == [], "an unrecognised force keeps its group"
+    assert other.getForceGroup() == 31
     assert integrator.args[-1] == {1: 8, 2: 1}
     assert runtime.calls.checkpoints == [
         ((simulation, "ready.chk"), {"n_beads": 32})
@@ -631,6 +637,27 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
             {"pdb_suffix": "_final.pdb", "n_beads": 32},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        nqe_openmm.run_openmm_rpmd_contracted,
+        nqe_openmm.run_openmm_rpmd_prod,
+        nqe_openmm.run_openmm_adqtb_prod,
+    ],
+)
+def test_nqe_production_stages_reject_default_barostat_on_python_force(
+    workflow_runtime,
+    stage,
+):
+    runtime = workflow_runtime
+    runtime.system.forces = [nqe_openmm.openmm.PythonForce(lambda *args: 0.0)]
+
+    with pytest.raises(ValueError, match="PythonForce"):
+        stage(runtime.modeller, forcefield=object())
+
+    assert runtime.calls.barostats == []
 
 
 def test_adqtb_equilibration_configures_adaptation_and_checkpoint_reporting(

@@ -340,6 +340,7 @@ def test_save_final_state_checkpoints_and_uses_context_positions(monkeypatch, tm
     monkeypatch.setattr(nqe_openmm.app.PDBFile, "writeFile", write_file)
     simulation = SimpleNamespace(
         topology=topology,
+        system=SimpleNamespace(usesPeriodicBoundaryConditions=lambda: False),
         context=SimpleNamespace(getState=get_state),
         saveCheckpoint=lambda path: saved_checkpoints.append(path),
     )
@@ -361,6 +362,7 @@ def test_save_final_rpmd_state_uses_centroid_and_custom_suffix(monkeypatch, tmp_
     topology = SimpleNamespace(getNumAtoms=lambda: 2)
     simulation = SimpleNamespace(
         topology=topology,
+        system=SimpleNamespace(usesPeriodicBoundaryConditions=lambda: False),
         context=SimpleNamespace(
             getState=lambda **kwargs: pytest.fail("context positions are bead 0")
         ),
@@ -754,3 +756,40 @@ def test_rpmd_load_rejects_legacy_context_checkpoint(tmp_path):
             checkpoint,
             n_beads=2,
         )
+
+
+def test_save_final_state_writes_current_box_for_periodic_system():
+    topology = app.Topology()
+    residue = topology.addResidue("AR", topology.addChain())
+    topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
+    stale_box = [Vec3(2.0, 0.0, 0.0), Vec3(0.0, 2.0, 0.0), Vec3(0.0, 0.0, 2.0)]
+    topology.setPeriodicBoxVectors(stale_box * unit.nanometer)
+
+    system = openmm.System()
+    system.addParticle(39.9 * unit.dalton)
+    system.setDefaultPeriodicBoxVectors(*(stale_box * unit.nanometer))
+    nonbonded = openmm.NonbondedForce()
+    nonbonded.addParticle(0.0, 0.3, 0.0)
+    nonbonded.setNonbondedMethod(openmm.NonbondedForce.CutoffPeriodic)
+    nonbonded.setCutoffDistance(0.9 * unit.nanometer)
+    system.addForce(nonbonded)
+
+    simulation = app.Simulation(
+        topology,
+        system,
+        openmm.VerletIntegrator(0.001),
+        openmm.Platform.getPlatformByName("Reference"),
+    )
+    simulation.context.setPositions([Vec3(0.1, 0.1, 0.1)] * unit.nanometer)
+    moved_box = [Vec3(2.5, 0.0, 0.0), Vec3(0.0, 2.5, 0.0), Vec3(0.0, 0.0, 2.5)]
+    simulation.context.setPeriodicBoxVectors(*(moved_box * unit.nanometer))
+
+    nqe_openmm._save_final_state(simulation, "boxed", save_checkpoint=False)
+
+    synced = simulation.topology.getPeriodicBoxVectors().value_in_unit(unit.nanometer)
+    assert [synced[i][i] for i in range(3)] == pytest.approx([2.5, 2.5, 2.5])
+    written = app.PDBFile("boxed.pdb")
+    cryst1 = written.topology.getPeriodicBoxVectors().value_in_unit(unit.nanometer)
+    assert [cryst1[i][i] for i in range(3)] == pytest.approx([2.5, 2.5, 2.5], abs=1e-3), (
+        "the stage-final PDB must carry the post-barostat box, not the build-time one"
+    )

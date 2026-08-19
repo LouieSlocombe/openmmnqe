@@ -508,6 +508,33 @@ def _maybe_deuterate(modeller, system, deuterate, deuterate_option):
         deuterate_system(modeller, system, option=deuterate_option)
 
 
+def _reject_barostat_on_python_force(system):
+    """
+    Refuse to add a barostat to a System carrying a ``PythonForce``.
+
+    Volume moves under an external per-bead potential (a QM/MM export, for
+    example) are untested and the potential's periodicity handling is owned
+    by whoever built the System, so the combination is rejected rather than
+    run.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System about to receive a barostat force.
+
+    Raises
+    ------
+    ValueError
+        If any force on *system* is an ``openmm.PythonForce``.
+    """
+    if any(isinstance(force, openmm.PythonForce)
+           for force in system.getForces()):
+        raise ValueError(
+            "A barostat cannot be combined with an external PythonForce "
+            "potential; pass barostat_freq=None"
+        )
+
+
 def _load_plumed(system, plumed_script_path):
     """
     Attach a PLUMED bias force to the system if a script path is given.
@@ -1104,7 +1131,9 @@ def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpo
     saved in a bead-aware restart archive, and the final PDB positions are
     averaged over the copies via
     :func:`openmmnqe.tools.centroid_positions`. Without a bead count, an
-    ordinary OpenMM checkpoint and Context structure are written.
+    ordinary OpenMM checkpoint and Context structure are written. For a
+    periodic system the topology's box is refreshed from the Context first,
+    so the PDB's CRYST1 record reflects any barostat moves.
 
     Parameters
     ----------
@@ -1128,6 +1157,9 @@ def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpo
             simulation.saveCheckpoint(checkpoint_file)
         else:
             _save_rpmd_restart(simulation, checkpoint_file, n_beads)
+    if simulation.system.usesPeriodicBoundaryConditions():
+        box_vectors = simulation.context.getState().getPeriodicBoxVectors()
+        simulation.topology.setPeriodicBoxVectors(box_vectors)
     if n_beads is None:
         positions = simulation.context.getState(getPositions=True).getPositions()
     else:
@@ -2066,7 +2098,8 @@ def run_openmm_rpmd_contracted(modeller,
     FileNotFoundError
         If *checkpoint_file* does not exist.
     ValueError
-        If an ML potential or calculator is given without *ml_idx*.
+        If an ML potential or calculator is given without *ml_idx*, or if
+        *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -2082,6 +2115,7 @@ def run_openmm_rpmd_contracted(modeller,
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
+        _reject_barostat_on_python_force(system)
         system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     _load_plumed(system, plumed_script_path)
@@ -2108,7 +2142,11 @@ def run_openmm_rpmd_contracted(modeller,
             print(f"  - {force.__class__.__name__}: Group 0")
 
         else:
-            force.setForceGroup(0)
+            # An unrecognised force (an external PythonForce potential, a
+            # PLUMED bias) keeps its group: groups absent from the
+            # contractions dict run on every bead.
+            print(f"  - {force.__class__.__name__}: keeping group "
+                  f"{force.getForceGroup()}")
 
     print(f"\nInitializing RPMDIntegrator with contractions: {contractions}", flush=True)
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep, contractions)
@@ -2226,7 +2264,8 @@ def run_openmm_rpmd_prod(modeller,
     FileNotFoundError
         If *checkpoint_file* does not exist.
     ValueError
-        If an ML potential or calculator is given without *ml_idx*.
+        If an ML potential or calculator is given without *ml_idx*, or if
+        *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -2234,6 +2273,7 @@ def run_openmm_rpmd_prod(modeller,
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
+        _reject_barostat_on_python_force(system)
         system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     _load_plumed(system, plumed_script_path)
@@ -2426,6 +2466,8 @@ def run_openmm_adqtb_prod(modeller,
     ------
     FileNotFoundError
         If *checkpoint_file* does not exist.
+    ValueError
+        If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -2433,6 +2475,7 @@ def run_openmm_adqtb_prod(modeller,
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
+        _reject_barostat_on_python_force(system)
         system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
 
     _load_plumed(system, plumed_script_path)
