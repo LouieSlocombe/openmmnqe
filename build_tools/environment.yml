@@ -19,7 +19,7 @@ dependencies:
   - pymace>=0.3.16
   - nnpops
   - ase>=3.28.0
-  - openmm>=8.5.1
+  - openmm>=8.5.2
   - openmm-ml>=1.6
   - openmmforcefields
   # forcefill's gaff backend runs the antechamber and parmchk2 executables, which
