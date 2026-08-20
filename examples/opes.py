@@ -1,5 +1,7 @@
 """Run a short OPES metadynamics simulation through OpenMM-PLUMED."""
 
+from __future__ import annotations
+
 import os
 
 import openmm.app as app
@@ -9,7 +11,7 @@ from openmm import openmm
 from openmmplumed import PlumedForce
 
 
-def main():
+def main() -> None:
     """Bias a solvated peptide dihedral with OPES and print the run log."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField("amber14-all.xml", "amber14/tip3p.xml")

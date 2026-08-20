@@ -6,6 +6,8 @@ is left here is the thing only this package can check: that a real steered run
 through OpenMM produces a trajectory those functions turn into a path PLUMED
 will actually bias.
 """
+from __future__ import annotations
+
 import os
 
 import openmm.app as app
@@ -18,7 +20,7 @@ import reactiontools as rt
 MALONALDEHYDE = 'tests/data/pdb/malonaldehyde.pdb'
 
 
-def main():
+def main() -> None:
     """Pull the proton across, make a path out of it, then bias along it."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin

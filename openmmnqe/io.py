@@ -46,11 +46,15 @@ because deleting atoms from a topology needs OpenMM. The conversions that go
 with it -- turning a path into the multi-model PDB ``PATHMSD`` reads, and the
 XYZ/PDB handling around it -- live in :mod:`reactiontools.tools_io`.
 """
+from __future__ import annotations
+
 import glob
 import os
 import re
 import shutil
 import string
+from collections.abc import Iterable, Mapping, Sequence
+from typing import TextIO
 
 import numpy as np
 import openmm.unit as unit
@@ -63,7 +67,7 @@ from openmm import app, Vec3
 from reactiontools import format_pdb_atom_name
 
 
-def remove_directory(directory):
+def remove_directory(directory: str) -> None:
     """
     Remove a directory and its contents, if it exists.
 
@@ -76,7 +80,7 @@ def remove_directory(directory):
         shutil.rmtree(directory)
 
 
-def copy_and_rename_file(src, dst_dir, new_name):
+def copy_and_rename_file(src: str, dst_dir: str, new_name: str) -> None:
     """
     Copy a file into a directory under a new name.
 
@@ -90,10 +94,9 @@ def copy_and_rename_file(src, dst_dir, new_name):
         Name the copy is given.
     """
     shutil.copy(src, os.path.join(dst_dir, new_name))
-    return None
 
 
-def list_files_with_pattern(directory, pattern):
+def list_files_with_pattern(directory: str, pattern: str) -> list[str]:
     """
     List the files in a directory matching a glob pattern.
 
@@ -112,7 +115,8 @@ def list_files_with_pattern(directory, pattern):
     return glob.glob(os.path.join(directory, pattern))
 
 
-def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=False):
+def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
+               sanitize: bool = True, kekulize: bool = False) -> int:
     """
     Convert an XYZ file to SDF, inferring the bonds as it goes.
 
@@ -151,7 +155,7 @@ def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=Fal
         If *sdf_path* cannot be opened for writing.
     """
 
-    def _parse_charge_from_comment(comment, fallback):
+    def _parse_charge_from_comment(comment: str | None, fallback: int) -> int:
         """
         Extract a total charge from the comment line of an XYZ frame.
 
@@ -192,7 +196,7 @@ def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=Fal
                 pass
         return fallback
 
-    def _read_xyz_frames(path):
+    def _read_xyz_frames(path: str) -> list[tuple[str, list[str]]]:
         """
         Split an XYZ file into its frames.
 
@@ -240,7 +244,8 @@ def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=Fal
             raise ValueError("No XYZ frames found.")
         return frames
 
-    def _frame_to_mol(comment, coord_lines, name_fallback):
+    def _frame_to_mol(comment: str, coord_lines: list[str],
+                      name_fallback: str) -> Chem.Mol:
         """
         Build an RDKit molecule from one XYZ frame.
 
@@ -335,7 +340,10 @@ def xyz_to_sdf(xyz_path, sdf_path, default_charge=0, sanitize=True, kekulize=Fal
     return n_written
 
 
-def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
+def relabel_residues_in_pdb(pdb_file_path: str | os.PathLike[str],
+                            relabel_map: Mapping[str, str],
+                            output_file: str | os.PathLike[str] | TextIO,
+                            ) -> PDBFile:
     """
     Rename residues in a PDB file according to a mapping.
 
@@ -394,7 +402,9 @@ def relabel_residues_in_pdb(pdb_file_path, relabel_map, output_file):
     return pdb
 
 
-def remove_residues_in_pdb(input_pdb, output_pdb, names):
+def remove_residues_in_pdb(input_pdb: str | os.PathLike[str],
+                           output_pdb: str | os.PathLike[str],
+                           names: Iterable[str]) -> None:
     """
     Remove every residue with one of the given names from a PDB file.
 
@@ -432,7 +442,8 @@ def remove_residues_in_pdb(input_pdb, output_pdb, names):
         PDBFile.writeFile(modeller.topology, modeller.positions, f)
 
 
-def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
+def fix_pdb(file_in: str | os.PathLike[str], file_out: str | os.PathLike[str],
+            ph: float = 7.0, rm_heterogens: bool = True) -> None:
     """
     Repair a PDB file with PDBFixer.
 
@@ -483,10 +494,11 @@ def fix_pdb(file_in, file_out, ph=7.0, rm_heterogens=True):
     fixer.addMissingHydrogens(ph)
     with open(file_out, 'w') as f:
         app.PDBFile.writeFile(fixer.topology, fixer.positions, f)
-    return None
 
 
-def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
+def convert_sdfs_to_pdb(
+        input_files: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
+        output_filename: str | os.PathLike[str] = "combined_output.pdb") -> None:
     """
     Convert one or more SDF files into a single combined PDB file.
 
@@ -541,7 +553,9 @@ def convert_sdfs_to_pdb(input_files, output_filename="combined_output.pdb"):
         PDBFile.writeFile(combined_topology, combined_positions * unit.nanometers, f)
 
 
-def save_pdb_selection(input_pdb_path, atom_indices, output_pdb_path):
+def save_pdb_selection(input_pdb_path: str | os.PathLike[str],
+                       atom_indices: Iterable[int],
+                       output_pdb_path: str | os.PathLike[str]) -> None:
     """
     Write out only the chosen atoms of a PDB file.
 
@@ -580,7 +594,7 @@ def save_pdb_selection(input_pdb_path, atom_indices, output_pdb_path):
         app.PDBFile.writeFile(modeller.topology, modeller.positions, f)
 
 
-def remove_file_pattern(pattern: str):
+def remove_file_pattern(pattern: str) -> None:
     """
     Remove all files matching a specific glob pattern.
 
@@ -596,7 +610,7 @@ def remove_file_pattern(pattern: str):
             pass
 
 
-def remove_file(file_path: str):
+def remove_file(file_path: str) -> None:
     """
     Remove a file if it exists.
 
@@ -611,7 +625,8 @@ def remove_file(file_path: str):
         pass
 
 
-def move_pdb_to_origin(input_pdb, output_filename):
+def move_pdb_to_origin(input_pdb: str | os.PathLike[str],
+                       output_filename: str | os.PathLike[str]) -> None:
     """
     Shift a structure so its centroid sits at the origin.
 
@@ -635,7 +650,7 @@ def move_pdb_to_origin(input_pdb, output_filename):
         PDBFile.writeFile(pdb.topology, new_positions, f)
 
 
-def center_in_box(modeller):
+def center_in_box(modeller: Modeller) -> None:
     """
     Shift a system so its centroid sits at the centre of its periodic box.
 
@@ -678,7 +693,7 @@ def center_in_box(modeller):
         modeller.positions = unit.Quantity(new_pos, unit.nanometer)
 
 
-def fix_pdb_chains(input_file, output_file):
+def fix_pdb_chains(input_file: str, output_file: str) -> None:
     """
     Assign unique chain IDs to each residue in a PDB file.
 
@@ -710,7 +725,7 @@ def fix_pdb_chains(input_file, output_file):
                 outfile.write(line)
 
 
-def fix_pdb_atom_labels(input_file, output_file):
+def fix_pdb_atom_labels(input_file: str, output_file: str) -> None:
     """
     Regenerate unique atom names and serial numbers in a PDB file.
 
@@ -750,7 +765,8 @@ def fix_pdb_atom_labels(input_file, output_file):
                 outfile.write(line)
 
 
-def save_only_index_atoms(modeller, idx_list, file_idx='index_atoms.pdb'):
+def save_only_index_atoms(modeller: Modeller, idx_list: Iterable[int],
+                          file_idx: str = 'index_atoms.pdb') -> None:
     """
     Write out only the chosen atoms of a Modeller.
 

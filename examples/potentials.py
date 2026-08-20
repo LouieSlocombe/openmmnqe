@@ -1,5 +1,7 @@
 """Relax structures with native MACE, ASE MACE, ORCA, or mixed ML/MM."""
 
+from __future__ import annotations
+
 import argparse
 import os
 
@@ -12,7 +14,7 @@ from openmmml import MLPotential
 import openmmnqe as nqe
 
 
-def run_openmm_ml():
+def run_openmm_ml() -> None:
     """Relax a peptide with MACE driving the whole system."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     potential = MLPotential("mace-off23-small")
@@ -24,7 +26,7 @@ def run_openmm_ml():
     nqe.remove_file_pattern("minimized*")
 
 
-def run_ase_mace():
+def run_ase_mace() -> None:
     """Relax the same peptide with MACE through the ASE bridge instead."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     potential = MLPotential("ase")
@@ -41,7 +43,7 @@ def run_ase_mace():
     nqe.remove_file_pattern("minimized*")
 
 
-def run_ase_orca():
+def run_ase_orca() -> None:
     """Relax malonaldehyde with ORCA as the ASE calculator; needs ORCA_PATH."""
     if "ORCA_PATH" not in os.environ:
         raise RuntimeError("set ORCA_PATH to the ORCA executable")
@@ -63,7 +65,7 @@ def run_ase_orca():
     nqe.remove_file_pattern("orca*")
 
 
-def run_openmm_ml_mixed_system():
+def run_openmm_ml_mixed_system() -> None:
     """Relax a solvated peptide with MACE on the solute and MM on the water."""
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
     forcefield = app.ForceField("amber14-all.xml", "amber14/tip3pfb.xml")
@@ -95,7 +97,7 @@ EXAMPLES = {
 }
 
 
-def main():
+def main() -> None:
     """Run whichever example is named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("example", choices=sorted(EXAMPLES))

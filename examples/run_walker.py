@@ -10,8 +10,11 @@ walker id so concurrent processes do not collide.
 Runs a two-particle toy dimer by default, so the example works without any
 external files; pass ``--pdb`` to drive a real solvated system instead.
 """
+from __future__ import annotations
+
 import argparse
 import random
+from collections.abc import Sequence
 
 import openmm as mm
 import openmm.app as app
@@ -19,7 +22,7 @@ import openmm.unit as unit
 from openmmplumed import PlumedForce
 
 
-def build_toy_dimer():
+def build_toy_dimer() -> tuple[app.Topology, mm.System, unit.Quantity]:
     """
     Build a minimal 2-particle system so the example runs without external files.
 
@@ -56,7 +59,9 @@ def build_toy_dimer():
     return top, system, positions
 
 
-def load_pdb_system(pdb_path, ff_xmls, nonbonded_cutoff_nm=1.0):
+def load_pdb_system(pdb_path: str, ff_xmls: Sequence[str],
+                    nonbonded_cutoff_nm: float = 1.0,
+                    ) -> tuple[app.Topology, mm.System, unit.Quantity]:
     """
     Build a solvated system from a PDB file and force-field XML(s).
 
@@ -90,7 +95,7 @@ def load_pdb_system(pdb_path, ff_xmls, nonbonded_cutoff_nm=1.0):
     return pdb.topology, system, pdb.positions
 
 
-def main():
+def main() -> None:
     """Parse the walker options, build its system, and run its trajectory."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--walker-id", type=int, required=True)

@@ -1,6 +1,10 @@
 """Fast orchestration tests for the public simulation-stage drivers."""
 
+from __future__ import annotations
+
 from types import SimpleNamespace
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
 import openmm.unit as unit
 import pytest
@@ -10,50 +14,50 @@ import openmmnqe.openmm as nqe_openmm
 
 
 class _Topology:
-    def __init__(self):
+    def __init__(self) -> None:
         self._atoms = [
             SimpleNamespace(index=0, name="CA"),
             SimpleNamespace(index=1, name="SIDE"),
         ]
 
-    def atoms(self):
+    def atoms(self) -> Iterator[SimpleNamespace]:
         return iter(self._atoms)
 
-    def getNumAtoms(self):
+    def getNumAtoms(self) -> int:
         return len(self._atoms)
 
 
 class _System:
-    def __init__(self):
+    def __init__(self) -> None:
         self.forces = []
 
-    def addForce(self, force):
+    def addForce(self, force: Any) -> int:
         self.forces.append(force)
         return len(self.forces) - 1
 
-    def getForces(self):
+    def getForces(self) -> list[Any]:
         return list(self.forces)
 
 
 class _ExternalForce:
-    def __init__(self, expression):
+    def __init__(self, expression: str) -> None:
         self.expression = expression
         self.global_parameters = []
         self.per_particle_parameters = []
         self.particles = []
 
-    def addGlobalParameter(self, name, value):
+    def addGlobalParameter(self, name: str, value: Any) -> None:
         self.global_parameters.append((name, value))
 
-    def addPerParticleParameter(self, name):
+    def addPerParticleParameter(self, name: str) -> None:
         self.per_particle_parameters.append(name)
 
-    def addParticle(self, index, parameters):
+    def addParticle(self, index: int, parameters: list[Any]) -> None:
         self.particles.append((index, parameters))
 
 
 class _Integrator:
-    def __init__(self, kind, args):
+    def __init__(self, kind: str, args: tuple[Any, ...]) -> None:
         self.kind = kind
         self.args = args
         self.temperatures = []
@@ -62,40 +66,40 @@ class _Integrator:
         self.adaptation_rates = []
         self.random_seeds = []
 
-    def setTemperature(self, temperature):
+    def setTemperature(self, temperature: unit.Quantity) -> None:
         self.temperatures.append(temperature)
 
-    def setStepSize(self, step_size):
+    def setStepSize(self, step_size: unit.Quantity) -> None:
         self.step_sizes.append(step_size)
 
-    def setSegmentLength(self, segment_length):
+    def setSegmentLength(self, segment_length: unit.Quantity) -> None:
         self.segment_lengths.append(segment_length)
 
-    def setDefaultAdaptationRate(self, rate):
+    def setDefaultAdaptationRate(self, rate: float) -> None:
         self.adaptation_rates.append(rate)
 
-    def setRandomNumberSeed(self, seed):
+    def setRandomNumberSeed(self, seed: int) -> None:
         self.random_seeds.append(seed)
 
 
 class _Context:
-    def __init__(self):
+    def __init__(self) -> None:
         self.positions = []
         self.velocity_temperatures = []
         self.parameters = []
 
-    def setPositions(self, positions):
+    def setPositions(self, positions: Any) -> None:
         self.positions.append(positions)
 
-    def setVelocitiesToTemperature(self, temperature):
+    def setVelocitiesToTemperature(self, temperature: unit.Quantity) -> None:
         self.velocity_temperatures.append(temperature)
 
-    def setParameter(self, name, value):
+    def setParameter(self, name: str, value: Any) -> None:
         self.parameters.append((name, value))
 
 
 class _Simulation:
-    def __init__(self, topology, system, integrator, platform):
+    def __init__(self, topology: Any, system: Any, integrator: Any, platform: Any) -> None:
         self.topology = topology
         self.system = system
         self.integrator = integrator
@@ -105,15 +109,15 @@ class _Simulation:
         self.steps = []
         self.minimizations = []
 
-    def step(self, steps):
+    def step(self, steps: int) -> None:
         self.steps.append(steps)
 
-    def minimizeEnergy(self, **kwargs):
+    def minimizeEnergy(self, **kwargs: Any) -> None:
         self.minimizations.append(kwargs)
 
 
 @pytest.fixture
-def workflow_runtime(monkeypatch):
+def workflow_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Replace costly OpenMM objects with recorders while retaining driver logic.
 
     Returns a namespace of ``calls``, ``modeller``, ``system`` and
@@ -144,27 +148,27 @@ def workflow_runtime(monkeypatch):
     system = _System()
     platform = object()
 
-    def build_system(*args):
+    def build_system(*args: Any) -> tuple[Any, Any]:
         calls.builds.append(args)
         return system, platform
 
-    def make_integrator(kind):
-        def factory(*args):
+    def make_integrator(kind: str) -> Callable[..., _Integrator]:
+        def factory(*args: Any) -> _Integrator:
             integrator = _Integrator(kind, args)
             calls.integrators.append(integrator)
             return integrator
 
         return factory
 
-    def make_barostat(kind):
-        def factory(*args):
+    def make_barostat(kind: str) -> Callable[..., SimpleNamespace]:
+        def factory(*args: Any) -> SimpleNamespace:
             barostat = SimpleNamespace(kind=kind, args=args)
             calls.barostats.append(barostat)
             return barostat
 
         return factory
 
-    def make_simulation(*args):
+    def make_simulation(*args: Any) -> _Simulation:
         simulation = _Simulation(*args)
         calls.simulations.append(simulation)
         return simulation
@@ -257,14 +261,14 @@ def workflow_runtime(monkeypatch):
     )
 
 
-def _temperature_values(temperatures):
+def _temperature_values(temperatures: Sequence[unit.Quantity]) -> list[float]:
     """Strip units from a sequence of temperatures, giving plain kelvin floats."""
     return [temperature.value_in_unit(unit.kelvin) for temperature in temperatures]
 
 
 def test_restrained_relaxation_runs_all_stages_and_saves_without_checkpoint(
-    workflow_runtime,
-):
+    workflow_runtime: SimpleNamespace,
+) -> None:
     runtime = workflow_runtime
 
     nqe_openmm.run_openmm_relaxation(
@@ -307,12 +311,12 @@ def test_restrained_relaxation_runs_all_stages_and_saves_without_checkpoint(
     ],
 )
 def test_heating_reaches_target_exactly_and_initializes_velocities_once(
-    workflow_runtime,
-    target,
-    increment,
-    expected_temperatures,
-    expected_steps,
-):
+    workflow_runtime: SimpleNamespace,
+    target: float,
+    increment: float,
+    expected_temperatures: list[float],
+    expected_steps: list[int],
+) -> None:
     runtime = workflow_runtime
 
     nqe_openmm.run_openmm_heating(
@@ -341,8 +345,8 @@ def test_heating_reaches_target_exactly_and_initializes_velocities_once(
 
 
 def test_npt_runs_restrained_and_unrestrained_phases_without_optional_barostat(
-    workflow_runtime,
-):
+    workflow_runtime: SimpleNamespace,
+) -> None:
     runtime = workflow_runtime
 
     nqe_openmm.run_openmm_npt(
@@ -371,8 +375,8 @@ def test_npt_runs_restrained_and_unrestrained_phases_without_optional_barostat(
 
 
 def test_classical_production_wires_optional_features_and_periodic_checkpoint(
-    workflow_runtime,
-):
+    workflow_runtime: SimpleNamespace,
+) -> None:
     runtime = workflow_runtime
 
     nqe_openmm.run_openmm_prod(
@@ -415,11 +419,11 @@ def test_classical_production_wires_optional_features_and_periodic_checkpoint(
     ],
 )
 def test_steered_md_accepts_inline_or_file_plumed_input(
-    monkeypatch,
-    plumed_input,
-    expected_path,
-    expected_contents,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    plumed_input: str,
+    expected_path: str,
+    expected_contents: str | None,
+) -> None:
     delegated = []
     monkeypatch.setattr(
         nqe_openmm,
@@ -451,8 +455,8 @@ def test_steered_md_accepts_inline_or_file_plumed_input(
 
 
 def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
-    workflow_runtime,
-):
+    workflow_runtime: SimpleNamespace,
+) -> None:
     runtime = workflow_runtime
 
     nqe_openmm.run_openmm_rpmd_equilibration(
@@ -506,14 +510,14 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
 
 
 @pytest.mark.parametrize("seed", [-1, 1.5, True])
-def test_split_rpmd_seed_rejects_invalid_values(seed):
+def test_split_rpmd_seed_rejects_invalid_values(seed: Any) -> None:
     with pytest.raises(ValueError, match="seed must be"):
         nqe_openmm._split_rpmd_seed(seed)
 
 
 def test_rpmd_production_loads_checkpoint_and_saves_centroid(
-    workflow_runtime,
-):
+    workflow_runtime: SimpleNamespace,
+) -> None:
     runtime = workflow_runtime
 
     nqe_openmm.run_openmm_rpmd_prod(
@@ -554,29 +558,29 @@ def test_rpmd_production_loads_checkpoint_and_saves_centroid(
 
 
 def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
-    monkeypatch,
-    workflow_runtime,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    workflow_runtime: SimpleNamespace,
+) -> None:
     runtime = workflow_runtime
 
     class GroupedForce:
-        def __init__(self, group=0):
+        def __init__(self, group: int=0) -> None:
             self.force_groups = []
             self._group = group
 
-        def setForceGroup(self, group):
+        def setForceGroup(self, group: int) -> None:
             self.force_groups.append(group)
             self._group = group
 
-        def getForceGroup(self):
+        def getForceGroup(self) -> int:
             return self._group
 
     class NonbondedForce(GroupedForce):
-        def __init__(self, group=0):
+        def __init__(self, group: int=0) -> None:
             super().__init__(group)
             self.reciprocal_groups = []
 
-        def setReciprocalSpaceForceGroup(self, group):
+        def setReciprocalSpaceForceGroup(self, group: int) -> None:
             self.reciprocal_groups.append(group)
 
     class BondedForce(GroupedForce):
@@ -648,9 +652,9 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     ],
 )
 def test_nqe_production_stages_reject_default_barostat_on_python_force(
-    workflow_runtime,
-    stage,
-):
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., None],
+) -> None:
     runtime = workflow_runtime
     runtime.system.forces = [nqe_openmm.openmm.PythonForce(lambda *args: 0.0)]
 
@@ -661,8 +665,8 @@ def test_nqe_production_stages_reject_default_barostat_on_python_force(
 
 
 def test_adqtb_equilibration_configures_adaptation_and_checkpoint_reporting(
-    workflow_runtime,
-):
+    workflow_runtime: SimpleNamespace,
+) -> None:
     runtime = workflow_runtime
 
     nqe_openmm.run_openmm_adqtb_eq(

@@ -1,8 +1,11 @@
 """Classical, ML/MM, enhanced-sampling, RPMD, and adQTB workflows."""
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
+from collections.abc import Sequence
 
 import forcefill as ff
 import openmm.app as app
@@ -17,7 +20,9 @@ import reactiontools as rt
 BASE_FORCEFIELD = ("amber14-all.xml", "amber14/tip3pfb.xml")
 
 
-def ligand_forcefield(input_pdb, base_forcefield=BASE_FORCEFIELD):
+def ligand_forcefield(input_pdb: str,
+                      base_forcefield: Sequence[str] = BASE_FORCEFIELD,
+                      ) -> tuple[app.Modeller, app.ForceField]:
     """
     Parameterise ligands and return the matching modeller and force field.
 
@@ -64,7 +69,7 @@ def ligand_forcefield(input_pdb, base_forcefield=BASE_FORCEFIELD):
     )
 
 
-def run_openmm_relaxation():
+def run_openmm_relaxation() -> None:
     """Minimise a solvated peptide with the staged, restrained relaxation."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
@@ -83,7 +88,7 @@ def run_openmm_relaxation():
     nqe.remove_file('minimized.pdb')
 
 
-def run_openmm_heating():
+def run_openmm_heating() -> None:
     """Heat a solvated peptide to its target temperature under restraints."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
@@ -103,7 +108,7 @@ def run_openmm_heating():
     nqe.remove_file_pattern('equilibrate*')
 
 
-def run_openmm_heating_deuterate():
+def run_openmm_heating_deuterate() -> None:
     """Heat the same system with every hydrogen replaced by deuterium."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
@@ -123,7 +128,7 @@ def run_openmm_heating_deuterate():
     nqe.remove_file_pattern('equilibrate*')
 
 
-def run_openmm_npt():
+def run_openmm_npt() -> None:
     """Equilibrate a solvated peptide at constant pressure."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input.pdb")
@@ -143,7 +148,7 @@ def run_openmm_npt():
     nqe.remove_file_pattern('npt_equilibrate*')
 
 
-def run_eq_workflow():
+def run_eq_workflow() -> None:
     """Run the full classical equilibration: relax, heat, then NPT."""
     print(flush=True)
     forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
@@ -174,7 +179,7 @@ def run_eq_workflow():
     nqe.remove_file_pattern('npt_equilibrate*')
 
 
-def run_eq_workflow_mixed():
+def run_eq_workflow_mixed() -> None:
     """Run the same equilibration with MACE on the solute and MM on the water."""
     print(flush=True)
 
@@ -210,7 +215,7 @@ def run_eq_workflow_mixed():
     nqe.remove_file_pattern('npt_equilibrate*')
 
 
-def run_eq_workflow_plumed_dihedral():
+def run_eq_workflow_plumed_dihedral() -> None:
     """Bias a peptide dihedral with metadynamics, classically and then with RPMD."""
     print(flush=True)
 
@@ -304,7 +309,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     nqe.remove_file('bck.0.fes.dat')
 
 
-def run_eq_workflow_plumed_dihedral_opes():
+def run_eq_workflow_plumed_dihedral_opes() -> None:
     """Bias the same dihedral with OPES instead of metadynamics."""
     print(flush=True)
     n_steps = 100_000
@@ -371,7 +376,7 @@ PRINT STRIDE=200 ARG=phi,metad.bias FILE=COLVAR
     nqe.remove_file('plumed.dat')
 
 
-def run_malonaldehyde_pt():
+def run_malonaldehyde_pt() -> None:
     """Malonaldehyde proton transfer in vacuum, biased on the single transfer coordinate."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -422,7 +427,7 @@ def run_malonaldehyde_pt():
     nqe.remove_file('plumed.dat')
 
 
-def run_malonaldehyde_pt_solvated():
+def run_malonaldehyde_pt_solvated() -> None:
     """The same transfer with explicit solvent and an ML/MM split."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -483,7 +488,7 @@ def run_malonaldehyde_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def run_malonaldehyde_pt_quantum_solvated():
+def run_malonaldehyde_pt_quantum_solvated() -> None:
     """The solvated transfer again with RPMD, so the proton itself is quantised."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -555,7 +560,7 @@ def run_malonaldehyde_pt_quantum_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def run_malonaldehyde_pt_adqtb_solvated():
+def run_malonaldehyde_pt_adqtb_solvated() -> None:
     """The solvated transfer with adQTB supplying the nuclear quantum effects instead."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -623,7 +628,7 @@ def run_malonaldehyde_pt_adqtb_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def run_malonaldehyde_pt_solvated_full():
+def run_malonaldehyde_pt_solvated_full() -> None:
     """The solvated transfer after a full relax-heat-NPT equilibration."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -702,7 +707,7 @@ def run_malonaldehyde_pt_solvated_full():
     nqe.remove_file('plumed.dat')
 
 
-def run_fad_pt_solvated():
+def run_fad_pt_solvated() -> None:
     """Formic acid dimer double proton transfer, on a one-dimensional two-proton CV."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -769,7 +774,7 @@ def run_fad_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def run_gc_pt_solvated():
+def run_gc_pt_solvated() -> None:
     """Guanine-cytosine double proton transfer, on the same two-proton CV."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -836,7 +841,7 @@ def run_gc_pt_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def run_gc_pt_quantum_solvated():
+def run_gc_pt_quantum_solvated() -> None:
     """The guanine-cytosine transfer again with RPMD on four beads."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -913,7 +918,7 @@ def run_gc_pt_quantum_solvated():
     nqe.remove_file('plumed.dat')
 
 
-def run_malonaldehyde_pathmsd():
+def run_malonaldehyde_pathmsd() -> None:
     """Bias malonaldehyde along a NEB reference path with PATHMSD rather than a bond CV."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
@@ -1006,7 +1011,7 @@ EXAMPLES = {
 }
 
 
-def main():
+def main() -> None:
     """Run whichever workflow is named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("example", choices=sorted(EXAMPLES))

@@ -11,20 +11,24 @@ Anything here that takes a temperature or a mass accepts either a
 :class:`openmm.unit.Quantity` or a bare number in the obvious unit -- kelvin
 and daltons respectively.
 """
+from __future__ import annotations
+
 import math
 import os
 import re
+from collections.abc import Sequence
 from numbers import Integral
-from typing import Dict, Sequence, Any, List, Union, Literal, Optional
+from typing import Any, Literal, TextIO
 
 import numpy as np
+import numpy.typing as npt
 import openmm.unit as unit
 from scipy import constants
 
 from openmm import openmm, app
 
 
-def zero_velocities(n_atoms):
+def zero_velocities(n_atoms: int) -> unit.Quantity:
     """
     Build a list of zero velocity vectors, one per atom.
 
@@ -41,7 +45,11 @@ def zero_velocities(n_atoms):
     return [openmm.Vec3(0, 0, 0) for _ in range(n_atoms)] * (unit.nanometer / unit.picosecond)
 
 
-def _sample_maxwell_boltzmann_velocities(system, temperature, n_copies, rng):
+def _sample_maxwell_boltzmann_velocities(system: openmm.System,
+                                         temperature: unit.Quantity | float,
+                                         n_copies: int,
+                                         rng: np.random.Generator,
+                                         ) -> unit.Quantity:
     """
     Draw independent bead velocities from a Maxwell-Boltzmann distribution.
 
@@ -108,12 +116,12 @@ def _sample_maxwell_boltzmann_velocities(system, temperature, n_copies, rng):
 
 
 def _sample_free_ring_polymer_displacements(
-    masses_amu,
-    temperature,
-    n_copies,
-    rng,
-    scale_factor=1.0,
-):
+    masses_amu: npt.ArrayLike,
+    temperature: unit.Quantity | float,
+    n_copies: int,
+    rng: np.random.Generator,
+    scale_factor: float = 1.0,
+) -> np.ndarray:
     """
     Draw free-ring-polymer displacements with a fixed zero centroid.
 
@@ -203,7 +211,8 @@ def _sample_free_ring_polymer_displacements(
     return displacements
 
 
-def write_multimodel_pdb(topology, positions, fh, model_index):
+def write_multimodel_pdb(topology: app.Topology, positions: unit.Quantity,
+                         fh: TextIO, model_index: int) -> None:
     """
     Append one model to an open multi-model PDB file.
 
@@ -221,7 +230,8 @@ def write_multimodel_pdb(topology, positions, fh, model_index):
     app.PDBFile.writeModel(topology, positions, fh, modelIndex=model_index)
 
 
-def centroid_positions(simulation, n_atoms, n_beads):
+def centroid_positions(simulation: app.Simulation, n_atoms: int,
+                       n_beads: int) -> unit.Quantity:
     """
     Average the bead positions of an RPMD simulation into a centroid structure.
 
@@ -279,7 +289,9 @@ def centroid_positions(simulation, n_atoms, n_beads):
     return [openmm.Vec3(*centroid[i]) for i in range(n_atoms)] * unit.nanometer
 
 
-def get_thermal_de_broglie_wavelength(mass, temperature):
+def get_thermal_de_broglie_wavelength(mass: unit.Quantity | float,
+                                      temperature: unit.Quantity | float,
+                                      ) -> unit.Quantity:
     """
     Compute the thermal de Broglie wavelength of a particle.
 
@@ -316,8 +328,10 @@ def get_thermal_de_broglie_wavelength(mass, temperature):
     return lambda_meters * unit.meter
 
 
-def init_beads(modeller, simulation, n_beads, scale_factor=1.0,
-               temperature=None, seed=None):
+def init_beads(modeller: app.Modeller, simulation: app.Simulation,
+               n_beads: int, scale_factor: float = 1.0,
+               temperature: unit.Quantity | float | None = None,
+               seed: int | None = None) -> None:
     """
     Seed RPMD bead positions and velocities at the simulation temperature.
 
@@ -459,7 +473,7 @@ def init_beads(modeller, simulation, n_beads, scale_factor=1.0,
         integrator.setVelocities(b, velocities[b])
 
 
-def step_rpmd(simulation, steps):
+def step_rpmd(simulation: app.Simulation, steps: int) -> None:
     """
     Advance an RPMD Simulation while keeping its step count synchronized.
 
@@ -500,7 +514,7 @@ def step_rpmd(simulation, steps):
 
     native_step = integrator.step
 
-    def synchronized_step(count):
+    def synchronized_step(count: int) -> None:
         """
         Advance the integrator, repairing the step count if OpenMM did not.
 
@@ -533,7 +547,7 @@ def step_rpmd(simulation, steps):
         integrator.step = native_step
 
 
-def count_dna_and_estimate_charge(topology):
+def count_dna_and_estimate_charge(topology: app.Topology) -> int:
     """
     Estimate the charge of the DNA in a topology from its residue count.
 
@@ -569,7 +583,12 @@ def count_dna_and_estimate_charge(topology):
     return estimated_charge
 
 
-def deuterate_system(modeller, system, option='all', target_resname=None):
+def deuterate_system(
+        modeller: app.Modeller,
+        system: openmm.System,
+        option: Literal['all', 'water', 'protein', 'dna', 'rna', 'nucleic',
+                        'ligand'] = 'all',
+        target_resname: str | None = None) -> None:
     """
     Replace the hydrogens of a system, or part of it, with deuterium.
 
@@ -667,7 +686,9 @@ def deuterate_system(modeller, system, option='all', target_resname=None):
             print(f"Warning: No residues matching option '{option}' were found.")
 
 
-def get_atoms_in_residue(pdb_file_path, residue_index, chain_id=None):
+def get_atoms_in_residue(pdb_file_path: str | os.PathLike[str],
+                         residue_index: int,
+                         chain_id: str | None = None) -> list[int] | None:
     """
     Look up the atom indices of one residue in a PDB file.
 
@@ -733,12 +754,12 @@ def get_atoms_in_residue(pdb_file_path, residue_index, chain_id=None):
 def set_adqtb_particle_types_by_element(
         integrator: Any,
         *,
-        topology: Optional[Any] = None,
-        system: Optional[Any] = None,
-        particle_elements: Optional[Sequence[Any]] = None,
+        topology: app.Topology | None = None,
+        system: openmm.System | None = None,
+        particle_elements: Sequence[Any] | None = None,
         start_type: int = 0,
         unknown_symbol: str = "X",
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Assign adQTB particle types so each chemical element shares one type.
 
@@ -793,7 +814,7 @@ def set_adqtb_particle_types_by_element(
             "integrator must support setParticleType(index, type); expected an OpenMM QTBIntegrator."
         )
 
-    def _sym_and_Z(el: Any) -> tuple[str, int]:
+    def _sym_and_Z(el: app.Element | str | None) -> tuple[str, int]:
         """
         Extract the symbol and atomic number of an element-like object.
 
@@ -866,12 +887,12 @@ _VMD_PICK_RE = re.compile(
 
 
 def atom_indices_from_vmd_picks(
-        modeller,
-        picks: List[str],
+        modeller: app.Modeller,
+        picks: list[str],
         *,
         match_mode: Literal["unique", "first", "all"] = "unique",
-        chain_id: Optional[str] = None,
-) -> List[Union[int, List[int]]]:
+        chain_id: str | None = None,
+) -> list[int | list[int]]:
     """
     Map VMD pick strings onto OpenMM topology atom indices.
 
@@ -915,7 +936,7 @@ def atom_indices_from_vmd_picks(
         key = (res.chain.id, res.name, resid, atom.name)
         lookup.setdefault(key, []).append(atom.index)
 
-    out: List[Union[int, List[int]]] = []
+    out: list[int | list[int]] = []
 
     for s in picks:
         m = _VMD_PICK_RE.match(s)
@@ -927,7 +948,7 @@ def atom_indices_from_vmd_picks(
         resname, resid_num, ins_code, atomname = m.groups()
         resid_str = f"{resid_num}{ins_code or ''}"
 
-        matches: List[int] = []
+        matches: list[int] = []
         if chain_id is not None:
             matches = lookup.get((chain_id, resname, resid_str, atomname), [])
         else:
@@ -960,7 +981,8 @@ def atom_indices_from_vmd_picks(
     return out
 
 
-def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
+def distance_between_atoms(modeller: app.Modeller, atom_index_1: int,
+                           atom_index_2: int) -> unit.Quantity:
     """
     Measure the distance between two atoms of a Modeller.
 
@@ -994,7 +1016,8 @@ def distance_between_atoms(modeller, atom_index_1: int, atom_index_2: int):
     return unit.norm(dr)
 
 
-def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
+def angle_between_atoms(modeller: app.Modeller, i: int, j: int, k: int,
+                        degrees: bool = False) -> float:
     """
     Measure the angle i-j-k, with its vertex at atom j.
 
@@ -1042,7 +1065,7 @@ def angle_between_atoms(modeller, i, j, k, degrees: bool = False):
     return math.degrees(theta) if degrees else theta
 
 
-def check_platform(platform=None):
+def check_platform(platform: str | None = None) -> str:
     """
     Pick a compute platform, preferring CUDA where it is available.
 

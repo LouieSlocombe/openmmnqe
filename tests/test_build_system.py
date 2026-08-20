@@ -1,7 +1,10 @@
 """Regression tests for the ML/MM configuration matrix in ``_build_system``."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from ase.calculators.lj import LennardJones
 import openmm.app as app
@@ -16,44 +19,44 @@ import openmmnqe.openmm as nqe_openmm
 TOLUENE = Path(__file__).resolve().parent / "data" / "pdb" / "toluene.pdb"
 
 
-def _toluene_modeller():
+def _toluene_modeller() -> app.Modeller:
     pdb = app.PDBFile(str(TOLUENE))
     return app.Modeller(pdb.topology, pdb.positions)
 
 
 class _Topology:
-    def __init__(self, periodic=False):
+    def __init__(self, periodic: bool=False) -> None:
         self.periodic = periodic
 
-    def getUnitCellDimensions(self):
+    def getUnitCellDimensions(self) -> object | None:
         return object() if self.periodic else None
 
 
 class _ForceField:
-    def __init__(self):
+    def __init__(self) -> None:
         self.calls = []
 
-    def createSystem(self, topology, **kwargs):
+    def createSystem(self, topology: Any, **kwargs: Any) -> str:
         self.calls.append((topology, kwargs))
         return "mm-system"
 
 
 class _Potential:
-    def __init__(self):
+    def __init__(self) -> None:
         self.calls = []
 
-    def createMixedSystem(self, topology, mm_system, ml_idx, **kwargs):
+    def createMixedSystem(self, topology: Any, mm_system: Any, ml_idx: list[int], **kwargs: Any) -> str:
         self.calls.append((topology, mm_system, ml_idx, kwargs))
         return "mixed-system"
 
 
 @pytest.fixture
-def fake_platform(monkeypatch):
+def fake_platform(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     requested = []
 
     class Platform:
         @staticmethod
-        def getPlatformByName(name):
+        def getPlatformByName(name: str) -> str:
             requested.append(name)
             return f"platform:{name}"
 
@@ -66,7 +69,7 @@ def fake_platform(monkeypatch):
     return requested
 
 
-def test_calculator_with_plain_forcefield_needs_ml_idx():
+def test_calculator_with_plain_forcefield_needs_ml_idx() -> None:
     modeller = _toluene_modeller()
     forcefield = app.ForceField("amber14-all.xml")
 
@@ -81,7 +84,7 @@ def test_calculator_with_plain_forcefield_needs_ml_idx():
         )
 
 
-def test_potential_needs_ml_idx():
+def test_potential_needs_ml_idx() -> None:
     modeller = _toluene_modeller()
     forcefield = app.ForceField("amber14-all.xml")
 
@@ -104,7 +107,7 @@ def test_potential_needs_ml_idx():
         (None, object(), [], "ml_idx is empty"),
     ],
 )
-def test_invalid_ml_region_configurations_raise(potential, calculator, ml_idx, message):
+def test_invalid_ml_region_configurations_raise(potential: Any, calculator: Any, ml_idx: list[int] | None, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         _build_system(
             SimpleNamespace(topology=_Topology()),
@@ -116,7 +119,7 @@ def test_invalid_ml_region_configurations_raise(potential, calculator, ml_idx, m
         )
 
 
-def test_pure_ml_forcefield_with_calculator_builds_system():
+def test_pure_ml_forcefield_with_calculator_builds_system() -> None:
     modeller = _toluene_modeller()
 
     system, platform = _build_system(
@@ -137,10 +140,10 @@ def test_pure_ml_forcefield_with_calculator_builds_system():
     [(False, app.CutoffNonPeriodic), (True, app.PME)],
 )
 def test_pure_mm_build_uses_boundary_appropriate_nonbonded_method(
-    fake_platform,
-    periodic,
-    expected_method,
-):
+    fake_platform: list[str],
+    periodic: bool,
+    expected_method: Any,
+) -> None:
     topology = _Topology(periodic=periodic)
     forcefield = _ForceField()
 
@@ -162,7 +165,7 @@ def test_pure_mm_build_uses_boundary_appropriate_nonbonded_method(
     assert forcefield.calls[0][1]["hydrogenMass"] is None
 
 
-def test_explicit_potential_builds_mixed_system_and_forces_cuda(fake_platform):
+def test_explicit_potential_builds_mixed_system_and_forces_cuda(fake_platform: list[str]) -> None:
     topology = _Topology()
     forcefield = _ForceField()
     potential = _Potential()
@@ -189,14 +192,14 @@ def test_explicit_potential_builds_mixed_system_and_forces_cuda(fake_platform):
     assert kwargs["hydrogenMass"] is None
 
 
-def _one_particle_openmm_system(n_particles=1):
+def _one_particle_openmm_system(n_particles: int=1) -> openmm.System:
     system = openmm.System()
     for _ in range(n_particles):
         system.addParticle(39.9 * unit.dalton)
     return system
 
 
-def test_prepared_system_returns_held_system_and_ignores_kwargs(one_particle_system):
+def test_prepared_system_returns_held_system_and_ignores_kwargs(one_particle_system: tuple[app.Modeller, Any]) -> None:
     modeller, _ = one_particle_system
     system = _one_particle_openmm_system()
     prepared = PreparedSystem(system)
@@ -212,7 +215,7 @@ def test_prepared_system_returns_held_system_and_ignores_kwargs(one_particle_sys
     assert prepared.system is system
 
 
-def test_prepared_system_rejects_particle_count_mismatch(one_particle_system):
+def test_prepared_system_rejects_particle_count_mismatch(one_particle_system: tuple[app.Modeller, Any]) -> None:
     modeller, _ = one_particle_system
     prepared = PreparedSystem(_one_particle_openmm_system(n_particles=2))
 
@@ -223,12 +226,12 @@ def test_prepared_system_rejects_particle_count_mismatch(one_particle_system):
         prepared.createSystem(modeller.topology)
 
 
-def test_prepared_system_requires_openmm_system():
+def test_prepared_system_requires_openmm_system() -> None:
     with pytest.raises(TypeError, match="openmm.System"):
         PreparedSystem("not-a-system")
 
 
-def test_prepared_system_flows_through_build_system(fake_platform, one_particle_system):
+def test_prepared_system_flows_through_build_system(fake_platform: list[str], one_particle_system: tuple[app.Modeller, Any]) -> None:
     modeller, _ = one_particle_system
     system = _one_particle_openmm_system()
 
@@ -245,7 +248,7 @@ def test_prepared_system_flows_through_build_system(fake_platform, one_particle_
     assert platform == "platform:CPU"
 
 
-def test_prepared_system_with_calculator_still_needs_ml_idx(one_particle_system):
+def test_prepared_system_with_calculator_still_needs_ml_idx(one_particle_system: tuple[app.Modeller, Any]) -> None:
     modeller, _ = one_particle_system
 
     with pytest.raises(ValueError, match="ml_idx"):
@@ -259,13 +262,13 @@ def test_prepared_system_with_calculator_still_needs_ml_idx(one_particle_system)
         )
 
 
-def test_bare_calculator_uses_ase_potential_fallback(monkeypatch, fake_platform):
+def test_bare_calculator_uses_ase_potential_fallback(monkeypatch: pytest.MonkeyPatch, fake_platform: list[str]) -> None:
     topology = _Topology()
     forcefield = _ForceField()
     fallback = _Potential()
     constructed = []
 
-    def make_potential(name):
+    def make_potential(name: str) -> _Potential:
         constructed.append(name)
         return fallback
 

@@ -1,5 +1,7 @@
 """RPMD, adQTB, and quantum-reporter simulation examples."""
 
+from __future__ import annotations
+
 import argparse
 from sys import stdout
 
@@ -13,7 +15,7 @@ import openmmnqe as nqe
 device = "CUDA"
 
 
-def run_openmm_rpmd():
+def run_openmm_rpmd() -> None:
     """Run RPMD on a peptide in vacuum, driving the integrator by hand."""
     print(flush=True)
     n_steps = 1_000
@@ -56,7 +58,7 @@ def run_openmm_rpmd():
     nqe.step_rpmd(simulation, n_steps)
 
 
-def run_openmm_rpmd_solvated():
+def run_openmm_rpmd_solvated() -> None:
     """Run RPMD on the same peptide with explicit solvent around it."""
     print(flush=True)
     n_steps = 200
@@ -102,7 +104,7 @@ def run_openmm_rpmd_solvated():
     nqe.step_rpmd(simulation, n_steps)
 
 
-def run_openmm_rpmd_ml():
+def run_openmm_rpmd_ml() -> None:
     """Run RPMD with MACE, rather than a classical force field, as the potential."""
     print(flush=True)
     n_steps = 200
@@ -144,7 +146,7 @@ def run_openmm_rpmd_ml():
     nqe.step_rpmd(simulation, n_steps)
 
 
-def run_openmm_rpmd_mixed():
+def run_openmm_rpmd_mixed() -> None:
     """Run RPMD with MACE on the solute and the classical force field on the water."""
     print(flush=True)
     n_steps = 200
@@ -205,7 +207,7 @@ def run_openmm_rpmd_mixed():
     nqe.step_rpmd(simulation, n_steps)
 
 
-def run_rpmd_quantum_spread_reporter():
+def run_rpmd_quantum_spread_reporter() -> None:
     """Log how far two atoms' beads spread, then plot the result."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -266,7 +268,7 @@ def run_rpmd_quantum_spread_reporter():
     nqe.remove_file("quantum_expansion.tsv")
 
 
-def run_rpmd_bead_reporter():
+def run_rpmd_bead_reporter() -> None:
     """Write each bead's own trajectory to its own PDB file."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -310,7 +312,7 @@ def run_rpmd_bead_reporter():
         nqe.remove_file(f'out_bead_{i}.pdb')
 
 
-def run_rpmd_centroid_reporter():
+def run_rpmd_centroid_reporter() -> None:
     """Write the bead-averaged centroid trajectory to a single PDB file."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -353,7 +355,7 @@ def run_rpmd_centroid_reporter():
     nqe.remove_file('centroid.pdb')
 
 
-def run_openmm_adqtb():
+def run_openmm_adqtb() -> None:
     """Run adQTB on a peptide, assigning particle types by element by hand."""
     print(flush=True)
     n_steps = 1_000
@@ -407,7 +409,7 @@ def run_openmm_adqtb():
     simulation.step(n_steps)
 
 
-def run_openmm_rpmd_equilibration():
+def run_openmm_rpmd_equilibration() -> None:
     """Equilibrate an RPMD system through the driver, leaving a bead-aware restart."""
     print(flush=True)
     n_beads = 2
@@ -427,7 +429,7 @@ def run_openmm_rpmd_equilibration():
     nqe.remove_file_pattern('rpmd_ready*')
 
 
-def run_openmm_rpmd_prod():
+def run_openmm_rpmd_prod() -> None:
     """Equilibrate, then run RPMD production from the restart it left behind."""
     print(flush=True)
     n_beads = 2
@@ -454,7 +456,7 @@ def run_openmm_rpmd_prod():
     nqe.remove_file_pattern('rpmd_prod*')
 
 
-def run_openmm_rpmd_contracted():
+def run_openmm_rpmd_contracted() -> None:
     """Run contracted RPMD, evaluating the slow forces on fewer beads than the fast ones."""
     print(flush=True)
     n_beads = 8
@@ -482,7 +484,7 @@ def run_openmm_rpmd_contracted():
     nqe.remove_file_pattern('rpmd_prod_contracted*')
 
 
-def run_openmm_adqtb_eq():
+def run_openmm_adqtb_eq() -> None:
     """Equilibrate an adQTB system through the driver, adapting its friction as it goes."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -500,7 +502,7 @@ def run_openmm_adqtb_eq():
     nqe.remove_file_pattern('adqtb_ready*')
 
 
-def run_openmm_adqtb_prod():
+def run_openmm_adqtb_prod() -> None:
     """Equilibrate, then run adQTB production on a solvated peptide."""
     print(flush=True)
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -536,7 +538,7 @@ EXAMPLES = {
 }
 
 
-def main():
+def main() -> None:
     """Run whichever example is named on the command line."""
     global device
 

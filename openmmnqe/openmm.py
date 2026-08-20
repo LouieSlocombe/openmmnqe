@@ -28,12 +28,16 @@ behave the same throughout -- *potential* with *ml_idx* runs an ML/MM mixed
 system and forces the CUDA platform, *plumed_script_path* attaches a bias,
 and *output_prefix* names every file the stage writes.
 """
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import sys
 import tempfile
 import zipfile
+from collections.abc import Iterable, Mapping
+from typing import Any, Literal
 
 import numpy as np
 import openmm.unit as unit
@@ -54,7 +58,7 @@ _RPMD_RESTART_KIND = "openmmnqe-rpmd-restart"
 _RPMD_RESTART_VERSION = 2
 
 
-def _validate_rpmd_n_beads(n_beads):
+def _validate_rpmd_n_beads(n_beads: int) -> int:
     """
     Require an RPMD bead count to be a positive, non-boolean integer.
 
@@ -82,7 +86,8 @@ def _validate_rpmd_n_beads(n_beads):
     return int(n_beads)
 
 
-def _validate_pdb_identity_name(name, description, max_length):
+def _validate_pdb_identity_name(name: str, description: str,
+                                max_length: int) -> None:
     """
     Reject topology identity names that PDB output cannot preserve.
 
@@ -116,7 +121,7 @@ def _validate_pdb_identity_name(name, description, max_length):
         )
 
 
-def _topology_identity_signature(topology):
+def _topology_identity_signature(topology: app.Topology) -> str:
     """
     Return a PDB-round-trip-stable ordered topology signature.
 
@@ -185,7 +190,7 @@ def _topology_identity_signature(topology):
     return hashlib.sha256(payload).hexdigest()
 
 
-def _particle_masses_dalton(system):
+def _particle_masses_dalton(system: openmm.System) -> np.ndarray:
     """
     Return ordered particle masses as finite, non-negative floats.
 
@@ -213,7 +218,7 @@ def _particle_masses_dalton(system):
     return masses
 
 
-def _rpmd_temperature_kelvin(integrator):
+def _rpmd_temperature_kelvin(integrator: openmm.RPMDIntegrator) -> float:
     """
     Return an RPMD integrator's finite, positive temperature in kelvin.
 
@@ -238,7 +243,9 @@ def _rpmd_temperature_kelvin(integrator):
     return temperature
 
 
-def _restart_scalar(archive, name, scalar_type):
+def _restart_scalar(archive: np.lib.npyio.NpzFile, name: str,
+                    scalar_type: Literal["integer", "float", "boolean", "string"],
+                    ) -> int | float | bool | str:
     """
     Read a restart scalar only when its shape and dtype match the schema.
 
@@ -315,7 +322,7 @@ class PreparedSystem:
     system by passing *potential* and *ml_idx* to a stage as usual.
     """
 
-    def __init__(self, system):
+    def __init__(self, system: openmm.System) -> None:
         if not isinstance(system, openmm.System):
             raise TypeError(
                 "PreparedSystem wraps an existing openmm.System, got "
@@ -325,7 +332,7 @@ class PreparedSystem:
         self._system = system
 
     @property
-    def system(self):
+    def system(self) -> openmm.System:
         """
         The held System that :meth:`createSystem` returns.
 
@@ -336,7 +343,8 @@ class PreparedSystem:
         """
         return self._system
 
-    def createSystem(self, topology, **kwargs):
+    def createSystem(self, topology: app.Topology,
+                     **kwargs: Any) -> openmm.System:
         """
         Return the held System after checking it matches *topology*.
 
@@ -372,7 +380,13 @@ class PreparedSystem:
         return self._system
 
 
-def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calculator):
+def _build_system(modeller: app.Modeller,
+                  forcefield: app.ForceField | MLPotential | PreparedSystem,
+                  platform_name: str | None,
+                  potential: Any,
+                  ml_idx: list[int] | None,
+                  calculator: Any,
+                  ) -> tuple[openmm.System, openmm.Platform]:
     """
     Construct the system and platform shared by every ``run_openmm_*`` driver.
 
@@ -488,7 +502,8 @@ def _build_system(modeller, forcefield, platform_name, potential, ml_idx, calcul
     return system, platform
 
 
-def _maybe_deuterate(modeller, system, deuterate, deuterate_option):
+def _maybe_deuterate(modeller: app.Modeller, system: openmm.System,
+                     deuterate: bool, deuterate_option: str) -> None:
     """
     Deuterate the system in place when requested.
 
@@ -508,7 +523,7 @@ def _maybe_deuterate(modeller, system, deuterate, deuterate_option):
         deuterate_system(modeller, system, option=deuterate_option)
 
 
-def _reject_barostat_on_python_force(system):
+def _reject_barostat_on_python_force(system: openmm.System) -> None:
     """
     Refuse to add a barostat to a System carrying a ``PythonForce``.
 
@@ -535,7 +550,8 @@ def _reject_barostat_on_python_force(system):
         )
 
 
-def _load_plumed(system, plumed_script_path):
+def _load_plumed(system: openmm.System,
+                 plumed_script_path: str | None) -> None:
     """
     Attach a PLUMED bias force to the system if a script path is given.
 
@@ -556,9 +572,10 @@ def _load_plumed(system, plumed_script_path):
         system.addForce(plumed_force)
 
 
-def _add_standard_reporters(simulation, output_prefix, n_report,
-                            pdb_steps=False, stdout_volume=False,
-                            checkpoint_interval=None):
+def _add_standard_reporters(simulation: app.Simulation, output_prefix: str,
+                            n_report: int, pdb_steps: bool = False,
+                            stdout_volume: bool = False,
+                            checkpoint_interval: int | None = None) -> None:
     """
     Append the standard reporter set shared by the classical drivers.
 
@@ -605,7 +622,8 @@ def _add_standard_reporters(simulation, output_prefix, n_report,
                                                            checkpoint_interval))
 
 
-def _add_rpmd_progress_reporters(simulation, output_prefix, n_report):
+def _add_rpmd_progress_reporters(simulation: app.Simulation,
+                                 output_prefix: str, n_report: int) -> None:
     """
     Append Context-independent progress reporters for an RPMD run.
 
@@ -639,9 +657,12 @@ def _add_rpmd_progress_reporters(simulation, output_prefix, n_report):
     ))
 
 
-def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
-                        atoms_to_watch, expansion_metric="rms",
-                        distance_pairs=None):
+def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
+                        output_prefix: str, n_report: int, n_beads: int,
+                        atoms_to_watch: list[int] | None,
+                        expansion_metric: Literal["rms", "mean"] = "rms",
+                        distance_pairs: Iterable[tuple[int, int]] | None = None,
+                        ) -> None:
     """
     Append the RPMD reporter trio: optional spread, then centroid and beads.
 
@@ -705,7 +726,8 @@ def _add_rpmd_reporters(simulation, topology, output_prefix, n_report, n_beads,
     ))
 
 
-def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
+def _save_rpmd_restart(simulation: app.Simulation, checkpoint_file: str,
+                       n_beads: int) -> None:
     """
     Atomically save every RPMD copy to a portable restart archive.
 
@@ -832,7 +854,7 @@ def _save_rpmd_restart(simulation, checkpoint_file, n_beads):
         raise
 
 
-def _read_rpmd_restart(checkpoint_file):
+def _read_rpmd_restart(checkpoint_file: str) -> dict[str, Any]:
     """
     Read and validate the format-independent portion of an RPMD restart.
 
@@ -980,7 +1002,8 @@ def _read_rpmd_restart(checkpoint_file):
             archive.close()
 
 
-def _load_rpmd_restart(simulation, checkpoint_file, n_beads):
+def _load_rpmd_restart(simulation: app.Simulation, checkpoint_file: str,
+                       n_beads: int) -> None:
     """
     Restore every RPMD copy before the integrator takes its first step.
 
@@ -1122,8 +1145,9 @@ def _load_rpmd_restart(simulation, checkpoint_file, n_beads):
         )
 
 
-def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpoint=True,
-                      n_beads=None):
+def _save_final_state(simulation: app.Simulation, output_prefix: str,
+                      pdb_suffix: str = '.pdb', save_checkpoint: bool = True,
+                      n_beads: int | None = None) -> None:
     """
     Save an optional checkpoint and write the final structure to PDB.
 
@@ -1170,7 +1194,8 @@ def _save_final_state(simulation, output_prefix, pdb_suffix='.pdb', save_checkpo
         app.PDBFile.writeFile(simulation.topology, positions, f)
 
 
-def _load_checkpoint(simulation, checkpoint_file, n_beads=None):
+def _load_checkpoint(simulation: app.Simulation, checkpoint_file: str,
+                     n_beads: int | None = None) -> None:
     """
     Load equilibration restart data into *simulation*.
 
@@ -1210,24 +1235,25 @@ def _load_checkpoint(simulation, checkpoint_file, n_beads=None):
         _load_rpmd_restart(simulation, checkpoint_file, n_beads)
 
 
-def run_openmm_relaxation(modeller,
-                          forcefield,
-                          output_prefix='minimized',
-                          temperature=300.0 * unit.kelvin,
-                          gamma=1.0 / unit.picosecond,
-                          time_step=1.0 * unit.femtoseconds,
-                          n_1=1_000,
-                          n_2=1_000,
-                          n_3=2_000,
-                          backbone_names=None,
-                          ks_1=100.0,
-                          ks_2=10.0,
-                          ks_3=0.0,
-                          platform_name=None,
-                          potential=None,
-                          ml_idx=None,
-                          calculator=None,
-                          ):
+def run_openmm_relaxation(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        output_prefix: str = 'minimized',
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        n_1: int = 1_000,
+        n_2: int = 1_000,
+        n_3: int = 2_000,
+        backbone_names: list[str] | None = None,
+        ks_1: float = 100.0,
+        ks_2: float = 10.0,
+        ks_3: float = 0.0,
+        platform_name: str | None = None,
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+) -> None:
     """
     Minimise in stages, easing the backbone restraints as it goes.
 
@@ -1322,17 +1348,18 @@ def run_openmm_relaxation(modeller,
     print(f"\nProcess complete. Saved to {output_prefix}", flush=True)
 
 
-def run_openmm_relaxation_simple(modeller,
-                                 forcefield,
-                                 output_prefix='minimized',
-                                 temperature=300.0 * unit.kelvin,
-                                 gamma=1.0 / unit.picosecond,
-                                 time_step=1.0 * unit.femtoseconds,
-                                 platform_name=None,
-                                 potential=None,
-                                 ml_idx=None,
-                                 calculator=None,
-                                 ):
+def run_openmm_relaxation_simple(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        output_prefix: str = 'minimized',
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        platform_name: str | None = None,
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+) -> None:
     """
     Perform a simple, unrestrained energy minimisation.
 
@@ -1382,25 +1409,26 @@ def run_openmm_relaxation_simple(modeller,
     print(f"\nProcess complete. Saved to {output_prefix}", flush=True)
 
 
-def run_openmm_heating(modeller,
-                       forcefield,
-                       output_prefix='equilibrate',
-                       k1=100.0,
-                       backbone_names=None,
-                       target_temp=300.0 * unit.kelvin,
-                       temp_step=50.0 * unit.kelvin,
-                       gamma=1.0 / unit.picosecond,
-                       time_step=1.0 * unit.femtoseconds,
-                       n_report=1_000,
-                       steps_per_stage=5_000,
-                       steps_final=5_000,
-                       platform_name=None,
-                       deuterate=False,
-                       deuterate_option='water',
-                       potential=None,
-                       ml_idx=None,
-                       calculator=None,
-                       ):
+def run_openmm_heating(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        output_prefix: str = 'equilibrate',
+        k1: float = 100.0,
+        backbone_names: list[str] | None = None,
+        target_temp: unit.Quantity = 300.0 * unit.kelvin,
+        temp_step: unit.Quantity = 50.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        n_report: int = 1_000,
+        steps_per_stage: int = 5_000,
+        steps_final: int = 5_000,
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+) -> None:
     """
     Heat a system from 0 K to temperature, under backbone restraints.
 
@@ -1508,26 +1536,27 @@ def run_openmm_heating(modeller,
     print(f"Saved equilibrated structure to {output_prefix}", flush=True)
 
 
-def run_openmm_npt(modeller,
-                   forcefield,
-                   output_prefix='npt_equilibrate',
-                   pressure=1.0 * unit.bar,
-                   temperature=300.0 * unit.kelvin,
-                   gamma=1.0 / unit.picosecond,
-                   time_step=1.0 * unit.femtoseconds,
-                   barostat_freq=50,
-                   backbone_names=None,
-                   k=10.0,
-                   n_report=500,
-                   n_1=5_000,
-                   n_2=15_000,
-                   platform_name=None,
-                   deuterate=False,
-                   deuterate_option='water',
-                   potential=None,
-                   ml_idx=None,
-                   calculator=None,
-                   ):
+def run_openmm_npt(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        output_prefix: str = 'npt_equilibrate',
+        pressure: unit.Quantity = 1.0 * unit.bar,
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        barostat_freq: int | None = 50,
+        backbone_names: list[str] | None = None,
+        k: float = 10.0,
+        n_report: int = 500,
+        n_1: int = 5_000,
+        n_2: int = 15_000,
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+) -> None:
     """
     Run a two-phase NPT density equilibration.
 
@@ -1626,24 +1655,25 @@ def run_openmm_npt(modeller,
     print(f"\nDensity equilibration complete. Saved to {output_prefix}", flush=True)
 
 
-def run_openmm_prod(modeller,
-                    forcefield,
-                    plumed_script_path=None,
-                    pressure=1.0 * unit.bar,
-                    temperature=300.0 * unit.kelvin,
-                    gamma=1.0 / unit.picosecond,
-                    time_step=1.0 * unit.femtoseconds,
-                    barostat_freq=50,
-                    n_report=1_000,
-                    steps=500_000,
-                    output_prefix='prod',
-                    platform_name=None,
-                    deuterate=False,
-                    deuterate_option='water',
-                    potential=None,
-                    ml_idx=None,
-                    calculator=None,
-                    ):
+def run_openmm_prod(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        plumed_script_path: str | None = None,
+        pressure: unit.Quantity = 1.0 * unit.bar,
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        barostat_freq: int | None = 50,
+        n_report: int = 1_000,
+        steps: int = 500_000,
+        output_prefix: str = 'prod',
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+) -> None:
     """
     Run an NPT production MD simulation, optionally with PLUMED enhanced sampling.
 
@@ -1717,24 +1747,25 @@ def run_openmm_prod(modeller,
     _save_final_state(simulation, output_prefix)
 
 
-def run_openmm_steered(modeller,
-                       forcefield,
-                       plumed_input,
-                       steps,
-                       output_prefix='smd',
-                       temperature=300.0 * unit.kelvin,
-                       gamma=1.0 / unit.picosecond,
-                       time_step=0.5 * unit.femtoseconds,
-                       n_report=100,
-                       pressure=1.0 * unit.bar,
-                       barostat_freq=None,
-                       platform_name=None,
-                       deuterate=False,
-                       deuterate_option='water',
-                       potential=None,
-                       ml_idx=None,
-                       calculator=None,
-                       ):
+def run_openmm_steered(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        plumed_input: str,
+        steps: int,
+        output_prefix: str = 'smd',
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 0.5 * unit.femtoseconds,
+        n_report: int = 100,
+        pressure: unit.Quantity = 1.0 * unit.bar,
+        barostat_freq: int | None = None,
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+) -> str:
     """
     Run a steered MD simulation, dragging a collective variable with PLUMED.
 
@@ -1826,7 +1857,7 @@ def run_openmm_steered(modeller,
     return traj_file
 
 
-def _split_rpmd_seed(seed):
+def _split_rpmd_seed(seed: int | None) -> tuple[int | None, int | None]:
     """
     Derive independent NumPy and OpenMM seeds from one master seed.
 
@@ -1878,27 +1909,29 @@ def _split_rpmd_seed(seed):
     return initialization_seed, thermostat_seed
 
 
-def run_openmm_rpmd_equilibration(modeller,
-                                  forcefield,
-                                  output_prefix='rpmd_ready',
-                                  n_beads=32,
-                                  temperature=300 * unit.kelvin,
-                                  friction=1.0 / unit.picosecond,
-                                  timestep=0.5 * unit.femtoseconds,
-                                  n_report=1_000,
-                                  n_1=1_000,
-                                  n_2=5_000,
-                                  platform_name=None,
-                                  deuterate=False,
-                                  deuterate_option='water',
-                                  potential=None,
-                                  ml_idx=None,
-                                  calculator=None,
-                                  atoms_to_watch=None,
-                                  scale_factor=1.0,
-                                  seed=None,
-                                  expansion_metric="rms",
-                                  distance_pairs_to_watch=None):
+def run_openmm_rpmd_equilibration(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        output_prefix: str = 'rpmd_ready',
+        n_beads: int = 32,
+        temperature: unit.Quantity = 300 * unit.kelvin,
+        friction: unit.Quantity = 1.0 / unit.picosecond,
+        timestep: unit.Quantity = 0.5 * unit.femtoseconds,
+        n_report: int = 1_000,
+        n_1: int = 1_000,
+        n_2: int = 5_000,
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+        atoms_to_watch: list[int] | None = None,
+        scale_factor: float = 1.0,
+        seed: int | None = None,
+        expansion_metric: Literal["rms", "mean"] = "rms",
+        distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+) -> None:
     """
     Equilibrate a ring-polymer molecular dynamics (RPMD) simulation.
 
@@ -2006,29 +2039,31 @@ def run_openmm_rpmd_equilibration(modeller,
     print(f"Saved final centroid structure to {output_prefix}_final.pdb", flush=True)
 
 
-def run_openmm_rpmd_contracted(modeller,
-                               forcefield,
-                               plumed_script_path=None,
-                               checkpoint_file='rpmd_ready.chk',
-                               output_prefix='rpmd_prod_contracted',
-                               n_beads=32,
-                               temperature=300 * unit.kelvin,
-                               pressure=1.0 * unit.bar,
-                               barostat_freq=50,
-                               friction=1.0 / unit.picosecond,
-                               timestep=0.5 * unit.femtoseconds,
-                               steps=100_000,
-                               n_report=1_000,
-                               contractions=None,
-                               platform_name=None,
-                               deuterate=False,
-                               deuterate_option='water',
-                               potential=None,
-                               ml_idx=None,
-                               atoms_to_watch=None,
-                               calculator=None,
-                               expansion_metric="rms",
-                               distance_pairs_to_watch=None):
+def run_openmm_rpmd_contracted(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        plumed_script_path: str | None = None,
+        checkpoint_file: str = 'rpmd_ready.chk',
+        output_prefix: str = 'rpmd_prod_contracted',
+        n_beads: int = 32,
+        temperature: unit.Quantity = 300 * unit.kelvin,
+        pressure: unit.Quantity = 1.0 * unit.bar,
+        barostat_freq: int | None = 50,
+        friction: unit.Quantity = 1.0 / unit.picosecond,
+        timestep: unit.Quantity = 0.5 * unit.femtoseconds,
+        steps: int = 100_000,
+        n_report: int = 1_000,
+        contractions: Mapping[int, int] | None = None,
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        atoms_to_watch: list[int] | None = None,
+        calculator: Any = None,
+        expansion_metric: Literal["rms", "mean"] = "rms",
+        distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+) -> None:
     """
     Run a contracted ring-polymer MD (RPMD) production simulation.
 
@@ -2177,28 +2212,30 @@ def run_openmm_rpmd_contracted(modeller,
     print(f"Saved final centroid structure to {output_prefix}_final.pdb", flush=True)
 
 
-def run_openmm_rpmd_prod(modeller,
-                         forcefield,
-                         plumed_script_path=None,
-                         checkpoint_file='rpmd_ready.chk',
-                         output_prefix='rpmd_prod',
-                         n_beads=32,
-                         pressure=1.0 * unit.bar,
-                         temperature=300.0 * unit.kelvin,
-                         gamma=1.0 / unit.picosecond,
-                         time_step=1.0 * unit.femtoseconds,
-                         barostat_freq=50,
-                         n_report=1_000,
-                         steps=500_000,
-                         platform_name=None,
-                         deuterate=False,
-                         deuterate_option='water',
-                         potential=None,
-                         ml_idx=None,
-                         atoms_to_watch=None,
-                         calculator=None,
-                         expansion_metric="rms",
-                         distance_pairs_to_watch=None):
+def run_openmm_rpmd_prod(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        plumed_script_path: str | None = None,
+        checkpoint_file: str = 'rpmd_ready.chk',
+        output_prefix: str = 'rpmd_prod',
+        n_beads: int = 32,
+        pressure: unit.Quantity = 1.0 * unit.bar,
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        barostat_freq: int | None = 50,
+        n_report: int = 1_000,
+        steps: int = 500_000,
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        atoms_to_watch: list[int] | None = None,
+        calculator: Any = None,
+        expansion_metric: Literal["rms", "mean"] = "rms",
+        distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+) -> None:
     """
     Run a full ring-polymer MD (RPMD) production simulation.
 
@@ -2304,23 +2341,24 @@ def run_openmm_rpmd_prod(modeller,
     _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)
 
 
-def run_openmm_adqtb_eq(modeller,
-                        forcefield,
-                        temperature=300.0 * unit.kelvin,
-                        gamma=1.0 / unit.picosecond,
-                        time_step=1.0 * unit.femtoseconds,
-                        segment_length=0.5 * unit.picosecond,
-                        adaptation_rate=0.5,
-                        n_report=1_000,
-                        steps=500_000,
-                        output_prefix='adqtb_ready',
-                        platform_name=None,
-                        deuterate=False,
-                        deuterate_option='water',
-                        potential=None,
-                        ml_idx=None,
-                        calculator=None,
-                        ):
+def run_openmm_adqtb_eq(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        segment_length: unit.Quantity = 0.5 * unit.picosecond,
+        adaptation_rate: float = 0.5,
+        n_report: int = 1_000,
+        steps: int = 500_000,
+        output_prefix: str = 'adqtb_ready',
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) equilibration simulation.
 
@@ -2386,27 +2424,28 @@ def run_openmm_adqtb_eq(modeller,
     _save_final_state(simulation, output_prefix)
 
 
-def run_openmm_adqtb_prod(modeller,
-                          forcefield,
-                          plumed_script_path=None,
-                          pressure=1.0 * unit.bar,
-                          barostat_freq=50,
-                          temperature=300.0 * unit.kelvin,
-                          gamma=1.0 / unit.picosecond,
-                          time_step=1.0 * unit.femtoseconds,
-                          segment_length=0.5 * unit.picosecond,
-                          adaptation_rate=0.5,
-                          n_report=1_000,
-                          steps=500_000,
-                          output_prefix='adqtb_prod',
-                          platform_name=None,
-                          deuterate=False,
-                          deuterate_option='water',
-                          potential=None,
-                          ml_idx=None,
-                          calculator=None,
-                          checkpoint_file='adqtb_ready.chk',
-                          ):
+def run_openmm_adqtb_prod(
+        modeller: app.Modeller,
+        forcefield: app.ForceField | MLPotential | PreparedSystem,
+        plumed_script_path: str | None = None,
+        pressure: unit.Quantity = 1.0 * unit.bar,
+        barostat_freq: int | None = 50,
+        temperature: unit.Quantity = 300.0 * unit.kelvin,
+        gamma: unit.Quantity = 1.0 / unit.picosecond,
+        time_step: unit.Quantity = 1.0 * unit.femtoseconds,
+        segment_length: unit.Quantity = 0.5 * unit.picosecond,
+        adaptation_rate: float = 0.5,
+        n_report: int = 1_000,
+        steps: int = 500_000,
+        output_prefix: str = 'adqtb_prod',
+        platform_name: str | None = None,
+        deuterate: bool = False,
+        deuterate_option: str = 'water',
+        potential: Any = None,
+        ml_idx: list[int] | None = None,
+        calculator: Any = None,
+        checkpoint_file: str = 'adqtb_ready.chk',
+) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) production simulation.
 

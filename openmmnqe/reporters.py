@@ -14,12 +14,18 @@ for one target atom without constructing it directly, and
 :func:`plot_rpmd_atom_expansion` to plot the result against a centroid
 atom-pair distance or a supplied reference-path progress coordinate.
 """
+from __future__ import annotations
+
+import os
+from collections.abc import Iterable, Sequence
 from numbers import Integral
+from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 import openmm.unit as unit
 
-from openmm import app
+from openmm import app, openmm
 
 from .tools import centroid_positions
 
@@ -27,7 +33,8 @@ from .tools import centroid_positions
 _SPREAD_METRICS = {"rms", "mean"}
 
 
-def _bead_coordinates(integrator, atom_indices=None):
+def _bead_coordinates(integrator: openmm.RPMDIntegrator,
+                      atom_indices: Sequence[int] | None = None) -> np.ndarray:
     """
     Collect the positions of every bead of the ring polymer.
 
@@ -57,7 +64,8 @@ def _bead_coordinates(integrator, atom_indices=None):
     return np.asarray(all_bead_positions)
 
 
-def _spread_from_coordinates(coordinates, metric):
+def _spread_from_coordinates(coordinates: np.ndarray,
+                             metric: Literal["rms", "mean"]) -> unit.Quantity:
     """
     Reduce bead coordinates to a per-atom radius about their centroid.
 
@@ -84,7 +92,9 @@ def _spread_from_coordinates(coordinates, metric):
     return values * unit.nanometers
 
 
-def _calculate_quantum_spread(integrator, atom_indices=None):
+def _calculate_quantum_spread(integrator: openmm.RPMDIntegrator,
+                              atom_indices: Sequence[int] | None = None,
+                              ) -> unit.Quantity:
     """
     Compute the RMS distance of the beads from their ring-polymer centroid.
 
@@ -110,7 +120,9 @@ def _calculate_quantum_spread(integrator, atom_indices=None):
     return _spread_from_coordinates(coordinates, metric="rms")
 
 
-def _calculate_bead_expansion(integrator, atom_indices=None):
+def _calculate_bead_expansion(integrator: openmm.RPMDIntegrator,
+                              atom_indices: Sequence[int] | None = None,
+                              ) -> unit.Quantity:
     r"""
     Compute the mean bead-centroid distance for selected atoms.
 
@@ -142,7 +154,9 @@ def _calculate_bead_expansion(integrator, atom_indices=None):
     return _spread_from_coordinates(coordinates, metric="mean")
 
 
-def _simulation_bead_coordinates(simulation, atom_indices):
+def _simulation_bead_coordinates(simulation: app.Simulation,
+                                 atom_indices: Sequence[int],
+                                 ) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Read one bead state per copy, undoing any periodic wrapping.
 
@@ -202,7 +216,7 @@ def _simulation_bead_coordinates(simulation, atom_indices):
     return np.asarray(coordinates), box
 
 
-def _validate_metric(metric):
+def _validate_metric(metric: str) -> None:
     """
     Check that a spread metric is one this module implements.
 
@@ -221,7 +235,7 @@ def _validate_metric(metric):
         raise ValueError(f"metric must be one of: {choices}")
 
 
-def _validate_atom_indices(atom_indices):
+def _validate_atom_indices(atom_indices: Iterable[int]) -> list[int]:
     """
     Validate and normalise selected zero-based atom indices.
 
@@ -256,7 +270,8 @@ def _validate_atom_indices(atom_indices):
     return [int(index) for index in atom_indices]
 
 
-def _validate_distance_pairs(distance_pairs):
+def _validate_distance_pairs(distance_pairs: Iterable[tuple[int, int]] | None,
+                             ) -> list[tuple[int, int]]:
     """
     Validate and normalise zero-based atom-index pairs.
 
@@ -302,7 +317,10 @@ def _validate_distance_pairs(distance_pairs):
     return normalised
 
 
-def _validate_observable_indices(atom_indices, distance_pairs, n_atoms=None):
+def _validate_observable_indices(atom_indices: Iterable[int],
+                                 distance_pairs: Iterable[tuple[int, int]] | None,
+                                 n_atoms: int | None = None,
+                                 ) -> tuple[list[int], list[tuple[int, int]]]:
     """
     Validate expansion atoms and distance pairs together.
 
@@ -347,8 +365,11 @@ def _validate_observable_indices(atom_indices, distance_pairs, n_atoms=None):
     return atom_indices, distance_pairs
 
 
-def _calculate_report_observables(simulation, atom_indices, metric,
-                                  distance_pairs):
+def _calculate_report_observables(simulation: app.Simulation,
+                                  atom_indices: Sequence[int],
+                                  metric: Literal["rms", "mean"],
+                                  distance_pairs: Sequence[tuple[int, int]],
+                                  ) -> tuple[unit.Quantity, unit.Quantity]:
     """
     Calculate expansion and centroid distances in one bead-state pass.
 
@@ -455,8 +476,12 @@ class RPMDQuantumSpreadReporter(object):
         Column names for *distance_pairs*. By default ``AtomI-AtomJ`` is used.
     """
 
-    def __init__(self, file, reportInterval, atom_indices, names=None,
-                 metric="rms", distance_pairs=None, distance_names=None):
+    def __init__(self, file: str | os.PathLike[str], reportInterval: int,
+                 atom_indices: Iterable[int],
+                 names: Sequence[str] | None = None,
+                 metric: Literal["rms", "mean"] = "rms",
+                 distance_pairs: Iterable[tuple[int, int]] | None = None,
+                 distance_names: Sequence[str] | None = None) -> None:
         if reportInterval <= 0:
             raise ValueError("reportInterval must be positive")
         atom_indices, distance_pairs = _validate_observable_indices(
@@ -497,7 +522,8 @@ class RPMDQuantumSpreadReporter(object):
         self._out = open(file, 'w')
         self._out.write(header + "\n")
 
-    def describeNextReport(self, simulation):
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
         """
         Report when the next report is due and what state it needs.
 
@@ -515,7 +541,7 @@ class RPMDQuantumSpreadReporter(object):
         steps = self._reportInterval - simulation.currentStep % self._reportInterval
         return (steps, False, False, False, False)
 
-    def report(self, simulation, state):
+    def report(self, simulation: app.Simulation, state: openmm.State) -> None:
         """
         Write the quantum spread and optional centroid distances.
 
@@ -543,16 +569,20 @@ class RPMDQuantumSpreadReporter(object):
         self._out.write(line + "\n")
         self._out.flush()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Close the output file."""
         out = getattr(self, "_out", None)
         if out is not None:
             out.close()
 
 
-def track_rpmd_atom_expansion(simulation, atom_index, file, report_interval,
-                              name=None, metric="rms", distance_pairs=None,
-                              distance_names=None):
+def track_rpmd_atom_expansion(simulation: app.Simulation, atom_index: int,
+                              file: str | os.PathLike[str],
+                              report_interval: int, name: str | None = None,
+                              metric: Literal["rms", "mean"] = "rms",
+                              distance_pairs: Iterable[tuple[int, int]] | None = None,
+                              distance_names: Sequence[str] | None = None,
+                              ) -> RPMDQuantumSpreadReporter:
     r"""
     Track one atom's ring-polymer spread or degree of expansion.
 
@@ -649,7 +679,8 @@ def track_rpmd_atom_expansion(simulation, atom_index, file, report_interval,
     return reporter
 
 
-def _read_expansion_log(file):
+def _read_expansion_log(file: str | os.PathLike[str],
+                        ) -> tuple[list[str], np.ndarray]:
     """
     Read a tab-separated expansion reporter log.
 
@@ -690,7 +721,10 @@ def _read_expansion_log(file):
     return header, values
 
 
-def _select_log_columns(header, requested, prefixes, description):
+def _select_log_columns(header: list[str],
+                        requested: str | Iterable[str] | None,
+                        prefixes: tuple[str, ...],
+                        description: str) -> list[str]:
     """
     Resolve a requested column selection against a log header.
 
@@ -738,7 +772,7 @@ def _select_log_columns(header, requested, prefixes, description):
     return selected
 
 
-def _column_label(column):
+def _column_label(column: str) -> str:
     """
     Turn a reporter column name into a compact legend label.
 
@@ -763,7 +797,9 @@ def _column_label(column):
     return label
 
 
-def _average_by_progress(progress, values, progress_bins=None):
+def _average_by_progress(progress: np.ndarray, values: np.ndarray,
+                         progress_bins: int | None = None,
+                         ) -> tuple[np.ndarray, np.ndarray]:
     """
     Sort path samples and average rows sharing a progress group.
 
@@ -827,10 +863,14 @@ def _average_by_progress(progress, values, progress_bins=None):
     return grouped_progress[populated], grouped_values[populated]
 
 
-def plot_rpmd_atom_expansion(file, *, expansion_columns=None,
-                             distance_columns=None, path_progress=None,
-                             progress_bins=None, length_unit="nanometer",
-                             filename=None, show=False):
+def plot_rpmd_atom_expansion(file: str | os.PathLike[str], *,
+                             expansion_columns: str | Iterable[str] | None = None,
+                             distance_columns: str | Iterable[str] | None = None,
+                             path_progress: npt.ArrayLike | None = None,
+                             progress_bins: int | None = None,
+                             length_unit: Literal["nanometer", "angstrom"] = "nanometer",
+                             filename: str | os.PathLike[str] | None = None,
+                             show: bool = False) -> tuple[Any, tuple[Any, ...]]:
     """
     Plot an RPMD atom expansion against distance or path progress.
 
@@ -1019,7 +1059,8 @@ class RPMDBeadReporter(object):
         Topology written into the PDB headers and models.
     """
 
-    def __init__(self, file_base_name, reportInterval, num_beads, topology):
+    def __init__(self, file_base_name: str, reportInterval: int,
+                 num_beads: int, topology: app.Topology) -> None:
         if reportInterval <= 0:
             raise ValueError("reportInterval must be positive")
         if num_beads <= 0:
@@ -1036,7 +1077,8 @@ class RPMDBeadReporter(object):
             app.PDBFile.writeHeader(topology, f)
             self._files.append(f)
 
-    def describeNextReport(self, simulation):
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
         """
         Report when the next report is due and what state it needs.
 
@@ -1054,7 +1096,7 @@ class RPMDBeadReporter(object):
         steps = self._reportInterval - simulation.currentStep % self._reportInterval
         return (steps, False, False, False, False)
 
-    def report(self, simulation, state):
+    def report(self, simulation: app.Simulation, state: openmm.State) -> None:
         """
         Write the current position of every bead to its own file.
 
@@ -1081,7 +1123,7 @@ class RPMDBeadReporter(object):
 
         self._next_frame_index += 1
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Write the PDB footers and close every bead file."""
         for f in getattr(self, "_files", []):
             try:
@@ -1113,7 +1155,8 @@ class RPMDCentroidReporter(object):
         Topology written into the PDB header and models.
     """
 
-    def __init__(self, file_name, reportInterval, num_beads, topology):
+    def __init__(self, file_name: str, reportInterval: int,
+                 num_beads: int, topology: app.Topology) -> None:
         if reportInterval <= 0:
             raise ValueError("reportInterval must be positive")
         if num_beads <= 0:
@@ -1125,7 +1168,8 @@ class RPMDCentroidReporter(object):
         self._out = open(file_name, 'w')
         app.PDBFile.writeHeader(topology, self._out)
 
-    def describeNextReport(self, simulation):
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
         """
         Report when the next report is due and what state it needs.
 
@@ -1143,7 +1187,7 @@ class RPMDCentroidReporter(object):
         steps = self._reportInterval - simulation.currentStep % self._reportInterval
         return (steps, False, False, False, False)
 
-    def report(self, simulation, state):
+    def report(self, simulation: app.Simulation, state: openmm.State) -> None:
         """
         Write the bead centroid for the current step.
 
@@ -1174,7 +1218,7 @@ class RPMDCentroidReporter(object):
         if self._next_frame_index % 10 == 0:
             self._out.flush()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Write the PDB footer and close the output file."""
         try:
             app.PDBFile.writeFooter(self._topology, self._out)

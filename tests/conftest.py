@@ -1,9 +1,13 @@
 """Shared paths, output isolation, and ligand parameterisation fixtures."""
 
+from __future__ import annotations
+
 import itertools
 import os
 import shutil
 from pathlib import Path
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import forcefill as ff
 import openmm.app as app
@@ -21,7 +25,7 @@ BASE_FORCEFIELD = ("amber14-all.xml", "amber14/tip3pfb.xml")
 class OneParticleForceField:
     """Deterministic force field for cheap public-workflow tests."""
 
-    def createSystem(self, topology, **kwargs):
+    def createSystem(self, topology: app.Topology, **kwargs: Any) -> openmm.System:
         """Return a one-argon System held by a harmonic well, ignoring *kwargs*."""
         system = openmm.System()
         system.addParticle(39.9 * unit.dalton)
@@ -36,19 +40,19 @@ class OneParticleForceField:
 
 
 @pytest.fixture(scope="session")
-def data_dir():
+def data_dir() -> Path:
     """Return the absolute path to immutable test inputs."""
     return TEST_DATA
 
 
 @pytest.fixture(autouse=True)
-def isolated_working_directory(tmp_path, monkeypatch):
+def isolated_working_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Contain every test's generated files in its own temporary directory."""
     monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture
-def one_particle_system():
+def one_particle_system() -> tuple[app.Modeller, OneParticleForceField]:
     """Return a one-argon Modeller and deterministic harmonic force field."""
     topology = app.Topology()
     residue = topology.addResidue("AR", topology.addChain())
@@ -61,7 +65,7 @@ def one_particle_system():
 
 
 @pytest.fixture
-def ligand_forcefield(tmp_path):
+def ligand_forcefield(tmp_path: Path) -> Callable[..., tuple[app.Modeller, app.ForceField]]:
     """Return a builder giving ``(modeller, forcefield)`` for a ligand PDB.
 
     Call the fixture with an input PDB, and optionally a *base_forcefield* or
@@ -97,7 +101,7 @@ def ligand_forcefield(tmp_path):
 
     build_number = itertools.count()
 
-    def _build(input_pdb, base_forcefield=BASE_FORCEFIELD, **kwargs):
+    def _build(input_pdb: str | os.PathLike[str], base_forcefield: Sequence[str]=BASE_FORCEFIELD, **kwargs: Any) -> tuple[app.Modeller, app.ForceField]:
         """Parameterise *input_pdb* and pair it with its force field."""
         build_dir = tmp_path / f"forcefill-{next(build_number)}"
         build_dir.mkdir()

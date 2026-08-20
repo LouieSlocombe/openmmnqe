@@ -1,5 +1,7 @@
 """Long-running comparisons of classical and quantum simulation methods."""
 
+from __future__ import annotations
+
 import argparse
 import os
 from sys import stdout
@@ -16,7 +18,8 @@ from openmm import openmm
 WHAM = os.environ.get("WHAM_PATH")
 
 
-def _accumulate_rdf_counts(counts, positions, particles, box_size):
+def _accumulate_rdf_counts(counts: list[int], positions: unit.Quantity,
+                           particles: int, box_size: float) -> None:
     """
     Add pair distances from one configuration to an RDF histogram.
 
@@ -43,7 +46,8 @@ def _accumulate_rdf_counts(counts, positions, particles, box_size):
                 counts[bin_index] += 1
 
 
-def _normalise_rdf(counts, samples, particles, box_size):
+def _normalise_rdf(counts: list[int], samples: int, particles: int,
+                   box_size: float) -> list[float]:
     """
     Convert a pair-distance histogram to a radial distribution function.
 
@@ -76,7 +80,8 @@ def _normalise_rdf(counts, samples, particles, box_size):
     return rdf
 
 
-def compute_rdf(context, particles, box_size):
+def compute_rdf(context: openmm.Context, particles: int,
+                box_size: float) -> list[float]:
     """
     Compute the radial distribution function by sampling an OpenMM context.
 
@@ -107,7 +112,8 @@ def compute_rdf(context, particles, box_size):
     return _normalise_rdf(counts, iterations, particles, box_size)
 
 
-def compute_rpmd_rdf(integrator, particles, box_size):
+def compute_rpmd_rdf(integrator: openmm.RPMDIntegrator, particles: int,
+                     box_size: float) -> list[float]:
     """
     Compute a bead-averaged RDF from every copy of an RPMD integrator.
 
@@ -151,7 +157,7 @@ def compute_rpmd_rdf(integrator, particles, box_size):
     )
 
 
-def run_parahydrogen():
+def run_parahydrogen() -> None:
     """
     Compare classical and RPMD radial distribution functions for para-hydrogen.
 
@@ -241,7 +247,7 @@ def run_parahydrogen():
     plt.show()
 
 
-def run_smd():
+def run_smd() -> None:
     """
     Pull deca-alanine open, then recover the free energy by umbrella sampling.
 
@@ -360,7 +366,7 @@ def run_smd():
     plt.ylabel("CV value (nm)")
     plt.show()
 
-    def run_window(window_index):
+    def run_window(window_index: int) -> None:
         """
         Sample one umbrella window and write its restraint-distance log.
 
@@ -439,7 +445,7 @@ EXAMPLES = {
 }
 
 
-def main():
+def main() -> None:
     """Run whichever comparison is named on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("example", choices=sorted(EXAMPLES))

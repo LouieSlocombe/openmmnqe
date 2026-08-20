@@ -1,6 +1,10 @@
 """Tests for structure editing and filesystem helpers."""
 
+from __future__ import annotations
+
 from io import StringIO
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import openmm.app as app
@@ -13,7 +17,7 @@ import openmmnqe as nqe
 import openmmnqe.io as nqe_io
 
 
-def test_file_helpers_copy_list_and_remove(tmp_path):
+def test_file_helpers_copy_list_and_remove(tmp_path: Path) -> None:
     source = tmp_path / "source.txt"
     source.write_text("payload")
     destination = tmp_path / "destination"
@@ -37,7 +41,7 @@ def test_file_helpers_copy_list_and_remove(tmp_path):
     assert not destination.exists()
 
 
-def test_remove_file_pattern_only_removes_matches(tmp_path):
+def test_remove_file_pattern_only_removes_matches(tmp_path: Path) -> None:
     matching = [tmp_path / "run-1.log", tmp_path / "run-2.log"]
     untouched = tmp_path / "run.txt"
     for path in [*matching, untouched]:
@@ -49,7 +53,7 @@ def test_remove_file_pattern_only_removes_matches(tmp_path):
     assert untouched.exists()
 
 
-def test_xyz_to_sdf_writes_readable_molecule(data_dir, tmp_path):
+def test_xyz_to_sdf_writes_readable_molecule(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "gc.sdf"
 
     count = nqe.xyz_to_sdf(data_dir / "GC.xyz", output)
@@ -62,9 +66,9 @@ def test_xyz_to_sdf_writes_readable_molecule(data_dir, tmp_path):
 
 
 def test_xyz_to_sdf_parses_documented_charge_formats_across_frames(
-    monkeypatch,
-    tmp_path,
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "charges.xyz"
     source.write_text(
         "\n".join(
@@ -123,7 +127,7 @@ def test_xyz_to_sdf_parses_documented_charge_formats_across_frames(
         ("1\ncomment\nH x 0 0\n", "Bad XYZ coordinates"),
     ],
 )
-def test_xyz_to_sdf_rejects_malformed_xyz(tmp_path, contents, message):
+def test_xyz_to_sdf_rejects_malformed_xyz(tmp_path: Path, contents: str, message: str) -> None:
     source = tmp_path / "bad.xyz"
     source.write_text(contents)
 
@@ -131,7 +135,7 @@ def test_xyz_to_sdf_rejects_malformed_xyz(tmp_path, contents, message):
         nqe.xyz_to_sdf(source, tmp_path / "bad.sdf")
 
 
-def test_relabel_residues_supports_paths_and_file_objects(data_dir, tmp_path):
+def test_relabel_residues_supports_paths_and_file_objects(data_dir: Path, tmp_path: Path) -> None:
     source = data_dir / "pdb" / "malonaldehyde.pdb"
     output = tmp_path / "renamed.pdb"
 
@@ -145,7 +149,7 @@ def test_relabel_residues_supports_paths_and_file_objects(data_dir, tmp_path):
     assert " MAL " in in_memory.getvalue()
 
 
-def test_remove_residues_removes_only_requested_names(data_dir, tmp_path):
+def test_remove_residues_removes_only_requested_names(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "without_water.pdb"
 
     nqe.remove_residues_in_pdb(
@@ -158,35 +162,35 @@ def test_remove_residues_removes_only_requested_names(data_dir, tmp_path):
     assert residues == ["AMM"]
 
 
-def test_fix_pdb_runs_repair_steps_in_order(monkeypatch, tmp_path):
+def test_fix_pdb_runs_repair_steps_in_order(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = []
 
     class FakeFixer:
         topology = object()
         positions = object()
 
-        def __init__(self, filename):
+        def __init__(self, filename: str) -> None:
             calls.append(("init", filename))
 
-        def findMissingResidues(self):
+        def findMissingResidues(self) -> None:
             calls.append("findMissingResidues")
 
-        def findNonstandardResidues(self):
+        def findNonstandardResidues(self) -> None:
             calls.append("findNonstandardResidues")
 
-        def replaceNonstandardResidues(self):
+        def replaceNonstandardResidues(self) -> None:
             calls.append("replaceNonstandardResidues")
 
-        def removeHeterogens(self, keep_water):
+        def removeHeterogens(self, keep_water: bool) -> None:
             calls.append(("removeHeterogens", keep_water))
 
-        def findMissingAtoms(self):
+        def findMissingAtoms(self) -> None:
             calls.append("findMissingAtoms")
 
-        def addMissingAtoms(self):
+        def addMissingAtoms(self) -> None:
             calls.append("addMissingAtoms")
 
-        def addMissingHydrogens(self, ph):
+        def addMissingHydrogens(self, ph: float) -> None:
             calls.append(("addMissingHydrogens", ph))
 
     monkeypatch.setattr(nqe_io, "PDBFixer", FakeFixer)
@@ -211,15 +215,15 @@ def test_fix_pdb_runs_repair_steps_in_order(monkeypatch, tmp_path):
     ]
 
 
-def test_fix_pdb_can_keep_heterogens(monkeypatch, tmp_path):
+def test_fix_pdb_can_keep_heterogens(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class FakeFixer:
         topology = object()
         positions = object()
 
-        def __init__(self, filename):
+        def __init__(self, filename: str) -> None:
             pass
 
-        def __getattr__(self, name):
+        def __getattr__(self, name: str) -> Any:
             if name == "removeHeterogens":
                 pytest.fail("removeHeterogens should not be called")
             return lambda *args: None
@@ -230,7 +234,7 @@ def test_fix_pdb_can_keep_heterogens(monkeypatch, tmp_path):
     nqe.fix_pdb("input.pdb", tmp_path / "output.pdb", rm_heterogens=False)
 
 
-def test_convert_sdfs_to_pdb_preserves_molecules_and_bonds(data_dir, tmp_path):
+def test_convert_sdfs_to_pdb_preserves_molecules_and_bonds(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "combined.pdb"
 
     nqe.convert_sdfs_to_pdb(
@@ -246,7 +250,7 @@ def test_convert_sdfs_to_pdb_preserves_molecules_and_bonds(data_dir, tmp_path):
     assert len(list(topology.chains())) == 2
 
 
-def test_save_pdb_selection_preserves_requested_atom_order(data_dir, tmp_path):
+def test_save_pdb_selection_preserves_requested_atom_order(data_dir: Path, tmp_path: Path) -> None:
     source = data_dir / "pdb" / "malonaldehyde.pdb"
     output = tmp_path / "selection.pdb"
     original = app.PDBFile(str(source))
@@ -259,7 +263,7 @@ def test_save_pdb_selection_preserves_requested_atom_order(data_dir, tmp_path):
     assert selected.topology.getNumAtoms() == 3
 
 
-def test_move_pdb_to_origin_centres_coordinates(data_dir, tmp_path):
+def test_move_pdb_to_origin_centres_coordinates(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "centred.pdb"
 
     nqe.move_pdb_to_origin(data_dir / "pdb" / "malonaldehyde.pdb", output)
@@ -269,7 +273,7 @@ def test_move_pdb_to_origin_centres_coordinates(data_dir, tmp_path):
     assert np.allclose(centroid, 0.0, atol=5e-5)
 
 
-def test_center_in_box_centres_orthorhombic_system():
+def test_center_in_box_centres_orthorhombic_system() -> None:
     topology = app.Topology()
     residue = topology.addResidue("RES", topology.addChain())
     topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
@@ -287,7 +291,7 @@ def test_center_in_box_centres_orthorhombic_system():
     assert np.allclose(centred[1] - centred[0], [3.0, 3.0, 3.0])
 
 
-def test_center_in_box_uses_triclinic_vector_sum():
+def test_center_in_box_uses_triclinic_vector_sum() -> None:
     topology = app.Topology()
     residue = topology.addResidue("RES", topology.addChain())
     topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
@@ -307,7 +311,7 @@ def test_center_in_box_uses_triclinic_vector_sum():
     assert np.allclose(centred[0], [1.35, 1.15, 1.0])
 
 
-def test_center_in_box_leaves_nonperiodic_positions_unchanged():
+def test_center_in_box_leaves_nonperiodic_positions_unchanged() -> None:
     topology = app.Topology()
     residue = topology.addResidue("RES", topology.addChain())
     topology.addAtom("A1", app.Element.getByAtomicNumber(6), residue)
@@ -322,7 +326,7 @@ def test_center_in_box_leaves_nonperiodic_positions_unchanged():
     )
 
 
-def test_fix_pdb_chains_assigns_one_chain_per_residue(data_dir, tmp_path):
+def test_fix_pdb_chains_assigns_one_chain_per_residue(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "fixed.pdb"
 
     nqe.fix_pdb_chains(data_dir / "pdb" / "malformed.pdb", output)
@@ -332,7 +336,7 @@ def test_fix_pdb_chains_assigns_one_chain_per_residue(data_dir, tmp_path):
     assert [residue.name for residue in parsed.topology.residues()] == ["HOH", "AMM"]
 
 
-def test_fix_pdb_chains_distinguishes_equal_ids(data_dir, tmp_path):
+def test_fix_pdb_chains_distinguishes_equal_ids(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "fixed.pdb"
     nqe.fix_pdb_chains(data_dir / "pdb" / "gc.pdb", output)
 
@@ -344,7 +348,7 @@ def test_fix_pdb_chains_distinguishes_equal_ids(data_dir, tmp_path):
     assert chains_by_residue == {"GGG": {"A"}, "CCC": {"B"}}
 
 
-def test_fix_pdb_atom_labels_renumbers_and_makes_names_unique(data_dir, tmp_path):
+def test_fix_pdb_atom_labels_renumbers_and_makes_names_unique(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "fixed_atoms.pdb"
     nqe.fix_pdb_atom_labels(data_dir / "pdb" / "malformed.pdb", output)
 
@@ -366,8 +370,8 @@ def test_fix_pdb_atom_labels_renumbers_and_makes_names_unique(data_dir, tmp_path
 
 
 def test_fix_pdb_atom_labels_restarts_names_for_equal_ids_in_different_chains(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "two_chains.pdb"
     source.write_text(
         "ATOM      1  C   LIG A   1       0.000   0.000   0.000  1.00  0.00           C  \n"
@@ -386,7 +390,7 @@ def test_fix_pdb_atom_labels_restarts_names_for_equal_ids_in_different_chains(
     assert names == ["C1", "C1"]
 
 
-def test_save_only_index_atoms_does_not_mutate_modeller(data_dir, tmp_path):
+def test_save_only_index_atoms_does_not_mutate_modeller(data_dir: Path, tmp_path: Path) -> None:
     pdb = app.PDBFile(str(data_dir / "pdb" / "malonaldehyde.pdb"))
     modeller = app.Modeller(pdb.topology, pdb.positions)
     output = tmp_path / "selection.pdb"

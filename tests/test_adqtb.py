@@ -1,5 +1,9 @@
 """CPU regression tests for continuity between the two adQTB stages."""
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import openmm.app as app
 import openmm.unit as unit
@@ -9,7 +13,7 @@ from openmm import openmm
 import openmmnqe as nqe
 
 
-def _adapted_friction_from_checkpoint(modeller, forcefield, checkpoint):
+def _adapted_friction_from_checkpoint(modeller: app.Modeller, forcefield: Any, checkpoint: Path) -> np.ndarray:
     system = forcefield.createSystem(modeller.topology)
     integrator = openmm.QTBIntegrator(
         300.0 * unit.kelvin,
@@ -29,9 +33,9 @@ def _adapted_friction_from_checkpoint(modeller, forcefield, checkpoint):
 
 
 def test_adqtb_production_loads_equilibrated_friction_before_stepping(
-    tmp_path,
-    one_particle_system,
-):
+    tmp_path: Path,
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
     modeller, forcefield = one_particle_system
     ready = tmp_path / "adqtb_ready"
     production = tmp_path / "adqtb_prod"
@@ -70,7 +74,7 @@ def test_adqtb_production_loads_equilibrated_friction_before_stepping(
     assert production.with_suffix(".chk").stat().st_size > 0
 
 
-def test_adqtb_production_rejects_missing_checkpoint(tmp_path, one_particle_system):
+def test_adqtb_production_rejects_missing_checkpoint(tmp_path: Path, one_particle_system: tuple[app.Modeller, Any]) -> None:
     modeller, forcefield = one_particle_system
     with pytest.raises(FileNotFoundError, match="equilibration stage"):
         nqe.run_openmm_adqtb_prod(

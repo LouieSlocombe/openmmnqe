@@ -1,6 +1,11 @@
 """Focused unit tests for simulation setup and geometry helpers."""
 
+from __future__ import annotations
+
 from types import SimpleNamespace
+from pathlib import Path
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import openmm.app as app
@@ -14,20 +19,20 @@ import openmmnqe.tools as nqe_tools
 
 
 class _State:
-    def __init__(self, positions, box_vectors):
+    def __init__(self, positions: Sequence[Any], box_vectors: Any) -> None:
         self._positions = np.asarray(positions, dtype=float) * unit.nanometer
         self._box_vectors = np.asarray(box_vectors, dtype=float) * unit.nanometer
 
-    def getPositions(self, asNumpy=False):
+    def getPositions(self, asNumpy: bool=False) -> unit.Quantity:
         return self._positions
 
-    def getPeriodicBoxVectors(self, asNumpy=False):
+    def getPeriodicBoxVectors(self, asNumpy: bool=False) -> unit.Quantity:
         return self._box_vectors
 
 
 class _Integrator:
-    def __init__(self, bead_positions=(), box_vectors=None,
-                 temperature=300.0 * unit.kelvin):
+    def __init__(self, bead_positions: Sequence[Any]=(), box_vectors: Any=None,
+                 temperature: unit.Quantity=300.0 * unit.kelvin) -> None:
         box_vectors = np.eye(3) if box_vectors is None else box_vectors
         self._states = [
             _State(positions, box_vectors)
@@ -38,45 +43,45 @@ class _Integrator:
         self.particle_types = {}
         self.temperature = temperature
 
-    def getState(self, bead, **kwargs):
+    def getState(self, bead: int, **kwargs: Any) -> _State:
         return self._states[bead]
 
-    def setPositions(self, bead, positions):
+    def setPositions(self, bead: int, positions: Any) -> None:
         self.positions[bead] = positions
 
-    def setVelocities(self, bead, velocities):
+    def setVelocities(self, bead: int, velocities: Any) -> None:
         self.velocities[bead] = velocities
 
-    def getTemperature(self):
+    def getTemperature(self) -> unit.Quantity:
         return self.temperature
 
-    def setParticleType(self, particle, particle_type):
+    def setParticleType(self, particle: int, particle_type: int) -> None:
         self.particle_types[particle] = particle_type
 
 
 class _System:
-    def __init__(self, periodic=False, masses=()):
+    def __init__(self, periodic: bool=False, masses: Sequence[float]=()) -> None:
         self._periodic = periodic
         self._masses = [mass * unit.dalton for mass in masses]
 
-    def usesPeriodicBoundaryConditions(self):
+    def usesPeriodicBoundaryConditions(self) -> bool:
         return self._periodic
 
-    def getNumParticles(self):
+    def getNumParticles(self) -> int:
         return len(self._masses)
 
-    def getParticleMass(self, index):
+    def getParticleMass(self, index: int) -> unit.Quantity:
         return self._masses[index]
 
 
-def _single_atom_modeller(position=(0.0, 0.0, 0.0)):
+def _single_atom_modeller(position: tuple[float, float, float]=(0.0, 0.0, 0.0)) -> app.Modeller:
     topology = app.Topology()
     residue = topology.addResidue("LIG", topology.addChain("A"), id="1")
     topology.addAtom("H1", app.Element.getBySymbol("H"), residue)
     return app.Modeller(topology, [Vec3(*position)] * unit.nanometer)
 
 
-def _multi_component_modeller_and_system():
+def _multi_component_modeller_and_system() -> tuple[app.Modeller, openmm.System]:
     topology = app.Topology()
     chain = topology.addChain("A")
     positions = []
@@ -91,7 +96,7 @@ def _multi_component_modeller_and_system():
     return app.Modeller(topology, positions * unit.nanometer), system
 
 
-def test_zero_velocities_returns_unit_bearing_vectors():
+def test_zero_velocities_returns_unit_bearing_vectors() -> None:
     velocities = nqe.zero_velocities(3)
 
     assert unit.is_quantity(velocities)
@@ -103,7 +108,7 @@ def test_zero_velocities_returns_unit_bearing_vectors():
     )
 
 
-def test_write_multimodel_pdb_delegates_model_index(monkeypatch):
+def test_write_multimodel_pdb_delegates_model_index(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     monkeypatch.setattr(
         nqe_tools.app.PDBFile,
@@ -121,7 +126,7 @@ def test_write_multimodel_pdb_delegates_model_index(monkeypatch):
     ]
 
 
-def test_thermal_de_broglie_wavelength_accepts_numbers_and_quantities():
+def test_thermal_de_broglie_wavelength_accepts_numbers_and_quantities() -> None:
     bare = nqe.get_thermal_de_broglie_wavelength(1.0, 300.0)
     quantified = nqe.get_thermal_de_broglie_wavelength(
         1.0 * unit.dalton,
@@ -138,7 +143,7 @@ def test_thermal_de_broglie_wavelength_accepts_numbers_and_quantities():
     )
 
 
-def test_init_beads_is_deterministic_and_sets_independent_thermal_velocities():
+def test_init_beads_is_deterministic_and_sets_independent_thermal_velocities() -> None:
     modeller = _single_atom_modeller((1.0, 2.0, 3.0))
     first = _Integrator()
     second = _Integrator()
@@ -197,7 +202,7 @@ def test_init_beads_is_deterministic_and_sets_independent_thermal_velocities():
     assert np.allclose(bead_positions.mean(axis=0), [[1.0, 2.0, 3.0]])
 
 
-def test_init_beads_velocity_scale_tracks_mass_and_skips_massless_particles():
+def test_init_beads_velocity_scale_tracks_mass_and_skips_massless_particles() -> None:
     masses = [1.0, 4.0, 0.0]
     modeller = SimpleNamespace(
         positions=[openmm.Vec3(0.0, 0.0, 0.0) for _ in masses]
@@ -241,7 +246,7 @@ def test_init_beads_velocity_scale_tracks_mass_and_skips_massless_particles():
     assert np.allclose(velocities[:, 2], 0.0)
 
 
-def test_init_beads_sets_velocities_on_real_rpmd_copies():
+def test_init_beads_sets_velocities_on_real_rpmd_copies() -> None:
     modeller = _single_atom_modeller()
     system = openmm.System()
     system.addParticle(1.0 * unit.dalton)
@@ -271,16 +276,16 @@ def test_init_beads_sets_velocities_on_real_rpmd_copies():
     assert not np.allclose(velocities[0], velocities[1])
 
 
-def test_step_rpmd_advances_context_count_and_schedules_reporters():
+def test_step_rpmd_advances_context_count_and_schedules_reporters() -> None:
     class _RecordingReporter:
-        def __init__(self):
+        def __init__(self) -> None:
             self.steps = []
 
-        def describeNextReport(self, simulation):
+        def describeNextReport(self, simulation: Any) -> tuple[int, bool, bool, bool, bool]:
             steps = 2 - simulation.currentStep % 2
             return (steps, False, False, False, False)
 
-        def report(self, simulation, state):
+        def report(self, simulation: Any, state: Any) -> None:
             self.steps.append(simulation.currentStep)
 
     modeller = _single_atom_modeller()
@@ -312,43 +317,43 @@ def test_step_rpmd_advances_context_count_and_schedules_reporters():
     assert reporter.steps == [2, 4]
 
 
-def test_step_rpmd_does_not_double_count_native_context_updates():
+def test_step_rpmd_does_not_double_count_native_context_updates() -> None:
     class _CountingContext:
-        def __init__(self):
+        def __init__(self) -> None:
             self.step_count = 4
 
-        def getStepCount(self):
+        def getStepCount(self) -> int:
             return self.step_count
 
-        def setStepCount(self, count):
+        def setStepCount(self, count: int) -> None:
             self.step_count = count
 
     class _NativeCountingIntegrator:
-        def __init__(self, context):
+        def __init__(self, context: Any) -> None:
             self.context = context
             self.calls = []
 
-        def getNumCopies(self):
+        def getNumCopies(self) -> int:
             return 2
 
-        def step(self, count):
+        def step(self, count: int) -> None:
             self.calls.append(count)
             self.context.setStepCount(self.context.getStepCount() + count)
 
     class _CountingSimulation:
-        def __init__(self):
+        def __init__(self) -> None:
             self.context = _CountingContext()
             self.integrator = _NativeCountingIntegrator(self.context)
 
         @property
-        def currentStep(self):
+        def currentStep(self) -> int:
             return self.context.getStepCount()
 
         @currentStep.setter
-        def currentStep(self, count):
+        def currentStep(self, count: int) -> None:
             self.context.setStepCount(count)
 
-        def step(self, count):
+        def step(self, count: int) -> None:
             self.integrator.step(count)
 
     simulation = _CountingSimulation()
@@ -365,26 +370,26 @@ def test_step_rpmd_does_not_double_count_native_context_updates():
     ("steps", "error"),
     [(True, TypeError), (1.5, TypeError), (-1, ValueError)],
 )
-def test_step_rpmd_rejects_invalid_step_counts(steps, error):
+def test_step_rpmd_rejects_invalid_step_counts(steps: Any, error: type[Exception]) -> None:
     with pytest.raises(error, match="steps must be a non-negative integer"):
         nqe.step_rpmd(SimpleNamespace(), steps)
 
 
-def test_step_rpmd_restores_native_step_after_failure():
+def test_step_rpmd_restores_native_step_after_failure() -> None:
     class _FailingIntegrator:
-        def getNumCopies(self):
+        def getNumCopies(self) -> int:
             return 2
 
-        def step(self, count):
+        def step(self, count: int) -> None:
             raise RuntimeError(f"failed after request for {count} steps")
 
     class _FailingSimulation:
         currentStep = 0
 
-        def __init__(self):
+        def __init__(self) -> None:
             self.integrator = _FailingIntegrator()
 
-        def step(self, count):
+        def step(self, count: int) -> None:
             self.integrator.step(count)
 
     simulation = _FailingSimulation()
@@ -396,7 +401,7 @@ def test_step_rpmd_restores_native_step_after_failure():
     assert simulation.integrator.step == native_step
 
 
-def test_init_beads_uses_thermal_position_scaling_and_preserves_centroid():
+def test_init_beads_uses_thermal_position_scaling_and_preserves_centroid() -> None:
     integrator = _Integrator()
     simulation = SimpleNamespace(
         system=_System(masses=[1.0, 16.0, 0.0]),
@@ -442,7 +447,7 @@ def test_init_beads_uses_thermal_position_scaling_and_preserves_centroid():
 
 
 @pytest.mark.parametrize("n_beads", [1, 5, 8])
-def test_init_beads_samples_free_ring_polymer_normal_modes(n_beads):
+def test_init_beads_samples_free_ring_polymer_normal_modes(n_beads: int) -> None:
     n_atoms = 3_000
     mass_amu = 1.0
     temperature_k = 300.0
@@ -494,7 +499,7 @@ def test_init_beads_samples_free_ring_polymer_normal_modes(n_beads):
 
 
 @pytest.mark.parametrize("n_beads", [0, -1, 2.0, True])
-def test_init_beads_rejects_invalid_bead_counts(n_beads):
+def test_init_beads_rejects_invalid_bead_counts(n_beads: Any) -> None:
     simulation = SimpleNamespace(
         system=_System(masses=[1.0]),
         integrator=_Integrator(),
@@ -505,7 +510,7 @@ def test_init_beads_rejects_invalid_bead_counts(n_beads):
 
 
 @pytest.mark.parametrize("seed", [-1, 1.5, True])
-def test_init_beads_rejects_invalid_seeds(seed):
+def test_init_beads_rejects_invalid_seeds(seed: Any) -> None:
     simulation = SimpleNamespace(
         system=_System(masses=[1.0]),
         integrator=_Integrator(),
@@ -521,7 +526,7 @@ def test_init_beads_rejects_invalid_seeds(seed):
 
 
 @pytest.mark.parametrize("invalid_coordinate", [np.nan, np.inf, -np.inf])
-def test_init_beads_rejects_nonfinite_positions(invalid_coordinate):
+def test_init_beads_rejects_nonfinite_positions(invalid_coordinate: float) -> None:
     modeller = SimpleNamespace(
         positions=np.asarray([[invalid_coordinate, 0.0, 0.0]])
         * unit.nanometer,
@@ -535,7 +540,7 @@ def test_init_beads_rejects_nonfinite_positions(invalid_coordinate):
         nqe.init_beads(modeller, simulation, n_beads=2)
 
 
-def test_init_beads_rejects_temperature_inconsistent_with_integrator():
+def test_init_beads_rejects_temperature_inconsistent_with_integrator() -> None:
     modeller = _single_atom_modeller()
     simulation = SimpleNamespace(
         system=_System(masses=[1.0]),
@@ -551,7 +556,7 @@ def test_init_beads_rejects_temperature_inconsistent_with_integrator():
         )
 
 
-def test_centroid_positions_unwraps_beads_across_box_boundary():
+def test_centroid_positions_unwraps_beads_across_box_boundary() -> None:
     simulation = SimpleNamespace(
         integrator=_Integrator(
             bead_positions=[[[0.1, 0.0, 0.0]], [[1.9, 0.0, 0.0]]],
@@ -569,7 +574,7 @@ def test_centroid_positions_unwraps_beads_across_box_boundary():
     )
 
 
-def test_centroid_positions_handles_triclinic_box():
+def test_centroid_positions_handles_triclinic_box() -> None:
     box = [[2.0, 0.0, 0.0], [0.5, 2.0, 0.0], [0.2, 0.3, 2.0]]
     simulation = SimpleNamespace(
         integrator=_Integrator(
@@ -588,7 +593,7 @@ def test_centroid_positions_handles_triclinic_box():
     )
 
 
-def test_centroid_positions_does_not_wrap_nonperiodic_systems():
+def test_centroid_positions_does_not_wrap_nonperiodic_systems() -> None:
     simulation = SimpleNamespace(
         integrator=_Integrator(
             bead_positions=[[[0.1, 0.0, 0.0]], [[1.9, 0.0, 0.0]]],
@@ -605,7 +610,7 @@ def test_centroid_positions_does_not_wrap_nonperiodic_systems():
     )
 
 
-def test_count_dna_charge_recognises_internal_and_terminal_names():
+def test_count_dna_charge_recognises_internal_and_terminal_names() -> None:
     topology = app.Topology()
     chain = topology.addChain()
     for residue_name in ("DA", "DC5", "DG3", "DT", "ALA", "RA"):
@@ -627,10 +632,10 @@ def test_count_dna_charge_recognises_internal_and_terminal_names():
     ],
 )
 def test_deuterate_system_selects_requested_component(
-    option,
-    target_resname,
-    expected_hydrogens,
-):
+    option: str,
+    target_resname: str | None,
+    expected_hydrogens: set[int],
+) -> None:
     modeller, system = _multi_component_modeller_and_system()
 
     nqe.deuterate_system(
@@ -650,7 +655,7 @@ def test_deuterate_system_selects_requested_component(
     assert changed == expected_hydrogens
 
 
-def test_deuterate_system_validates_options():
+def test_deuterate_system_validates_options() -> None:
     modeller, system = _multi_component_modeller_and_system()
 
     with pytest.raises(ValueError, match="target_resname"):
@@ -659,7 +664,7 @@ def test_deuterate_system_validates_options():
         nqe.deuterate_system(modeller, system, option="invalid")
 
 
-def test_deuterate_system_warns_when_target_is_absent(capsys):
+def test_deuterate_system_warns_when_target_is_absent(capsys: pytest.CaptureFixture[str]) -> None:
     modeller, system = _multi_component_modeller_and_system()
 
     nqe.deuterate_system(modeller, system, option="ligand", target_resname="NOPE")
@@ -667,14 +672,14 @@ def test_deuterate_system_warns_when_target_is_absent(capsys):
     assert "No ligand named 'NOPE'" in capsys.readouterr().out
 
 
-def test_get_atoms_in_residue_supports_global_and_chain_indexes(data_dir):
+def test_get_atoms_in_residue_supports_global_and_chain_indexes(data_dir: Path) -> None:
     source = data_dir / "pdb" / "gc.pdb"
 
     assert nqe.get_atoms_in_residue(source, 0) == list(range(16))
     assert nqe.get_atoms_in_residue(source, 0, chain_id="B") == list(range(16, 29))
 
 
-def test_get_atoms_in_residue_reports_missing_chain_and_index(data_dir, capsys):
+def test_get_atoms_in_residue_reports_missing_chain_and_index(data_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = data_dir / "pdb" / "gc.pdb"
 
     assert nqe.get_atoms_in_residue(source, 0, chain_id="Z") is None
@@ -683,7 +688,7 @@ def test_get_atoms_in_residue_reports_missing_chain_and_index(data_dir, capsys):
     assert "out of bounds" in capsys.readouterr().out
 
 
-def test_set_adqtb_particle_types_orders_elements_by_atomic_number():
+def test_set_adqtb_particle_types_orders_elements_by_atomic_number() -> None:
     integrator = _Integrator()
     elements = ["O", "H", "C", "H", None]
 
@@ -697,7 +702,7 @@ def test_set_adqtb_particle_types_orders_elements_by_atomic_number():
     assert integrator.particle_types == {0: 5, 1: 3, 2: 4, 3: 3, 4: 6}
 
 
-def test_set_adqtb_particle_types_reads_topology_and_checks_system_size():
+def test_set_adqtb_particle_types_reads_topology_and_checks_system_size() -> None:
     modeller, _ = _multi_component_modeller_and_system()
     integrator = _Integrator()
 
@@ -709,14 +714,14 @@ def test_set_adqtb_particle_types_reads_topology_and_checks_system_size():
         )
 
 
-def test_set_adqtb_particle_types_validates_required_interfaces():
+def test_set_adqtb_particle_types_validates_required_interfaces() -> None:
     with pytest.raises(TypeError, match="setParticleType"):
         nqe.set_adqtb_particle_types_by_element(object(), particle_elements=["H"])
     with pytest.raises(ValueError, match="topology or particle_elements"):
         nqe.set_adqtb_particle_types_by_element(_Integrator())
 
 
-def _ambiguous_modeller():
+def _ambiguous_modeller() -> app.Modeller:
     topology = app.Topology()
     positions = []
     for chain_id in ("A", "B"):
@@ -731,7 +736,7 @@ def _ambiguous_modeller():
     return app.Modeller(topology, positions * unit.nanometer)
 
 
-def test_atom_indices_from_vmd_picks_handles_chains_modes_and_insertions():
+def test_atom_indices_from_vmd_picks_handles_chains_modes_and_insertions() -> None:
     modeller = _ambiguous_modeller()
 
     assert nqe.atom_indices_from_vmd_picks(
@@ -756,15 +761,15 @@ def test_atom_indices_from_vmd_picks_handles_chains_modes_and_insertions():
     ],
 )
 def test_atom_indices_from_vmd_picks_rejects_invalid_or_ambiguous_picks(
-    pick,
-    kwargs,
-    message,
-):
+    pick: str,
+    kwargs: dict[str, Any],
+    message: str,
+) -> None:
     with pytest.raises(ValueError, match=message):
         nqe.atom_indices_from_vmd_picks(_ambiguous_modeller(), [pick], **kwargs)
 
 
-def test_distance_between_atoms_preserves_units():
+def test_distance_between_atoms_preserves_units() -> None:
     modeller = SimpleNamespace(
         positions=[Vec3(0.0, 0.0, 0.0), Vec3(0.3, 0.4, 0.0)]
         * unit.nanometer
@@ -777,12 +782,12 @@ def test_distance_between_atoms_preserves_units():
     assert distance.value_in_unit(unit.angstrom) == pytest.approx(5.0)
 
 
-def test_distance_between_atoms_requires_positions():
+def test_distance_between_atoms_requires_positions() -> None:
     with pytest.raises(ValueError, match="positions is None"):
         nqe.distance_between_atoms(SimpleNamespace(positions=None), 0, 1)
 
 
-def test_angle_between_atoms_returns_radians_or_degrees():
+def test_angle_between_atoms_returns_radians_or_degrees() -> None:
     modeller = SimpleNamespace(
         positions=[
             Vec3(1.0, 0.0, 0.0),
@@ -798,7 +803,7 @@ def test_angle_between_atoms_returns_radians_or_degrees():
     ) == pytest.approx(90.0)
 
 
-def test_angle_between_atoms_rejects_zero_length_vector():
+def test_angle_between_atoms_rejects_zero_length_vector() -> None:
     modeller = SimpleNamespace(
         positions=[
             Vec3(0.0, 0.0, 0.0),
@@ -812,7 +817,7 @@ def test_angle_between_atoms_rejects_zero_length_vector():
         nqe.angle_between_atoms(modeller, 0, 1, 2)
 
 
-def test_check_platform_preserves_explicit_choice():
+def test_check_platform_preserves_explicit_choice() -> None:
     assert nqe.check_platform("Reference") == "Reference"
 
 
@@ -820,14 +825,14 @@ def test_check_platform_preserves_explicit_choice():
     ("available", "expected"),
     [(["Reference", "CPU"], "CPU"), (["Reference", "CPU", "CUDA"], "CUDA")],
 )
-def test_check_platform_prefers_cuda(monkeypatch, available, expected):
+def test_check_platform_prefers_cuda(monkeypatch: pytest.MonkeyPatch, available: list[str], expected: str) -> None:
     class FakePlatform:
         @staticmethod
-        def getNumPlatforms():
+        def getNumPlatforms() -> int:
             return len(available)
 
         @staticmethod
-        def getPlatform(index):
+        def getPlatform(index: int) -> SimpleNamespace:
             return SimpleNamespace(getName=lambda: available[index])
 
     monkeypatch.setattr(nqe_tools.openmm, "Platform", FakePlatform)
