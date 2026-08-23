@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from pathlib import Path
 from collections.abc import Sequence
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -141,6 +141,36 @@ def test_thermal_de_broglie_wavelength_accepts_numbers_and_quantities() -> None:
     assert heavier.value_in_unit(unit.nanometer) == pytest.approx(
         bare.value_in_unit(unit.nanometer) / 2.0
     )
+
+
+@pytest.mark.parametrize("mass", [0.0, -1.0, np.nan, np.inf, [1.0]])
+def test_thermal_de_broglie_wavelength_rejects_invalid_mass(mass: Any) -> None:
+    with pytest.raises(ValueError, match="mass"):
+        nqe.get_thermal_de_broglie_wavelength(mass, 300.0)
+
+
+@pytest.mark.parametrize(
+    "temperature",
+    [0.0, -1.0, np.nan, np.inf, [300.0]],
+)
+def test_thermal_de_broglie_wavelength_rejects_invalid_temperature(
+    temperature: Any,
+) -> None:
+    with pytest.raises(ValueError, match="temperature"):
+        nqe.get_thermal_de_broglie_wavelength(1.0, temperature)
+
+
+def test_thermal_de_broglie_wavelength_rejects_incompatible_units() -> None:
+    with pytest.raises(ValueError, match="mass"):
+        nqe.get_thermal_de_broglie_wavelength(
+            1.0 * unit.nanometer,
+            300.0 * unit.kelvin,
+        )
+    with pytest.raises(ValueError, match="temperature"):
+        nqe.get_thermal_de_broglie_wavelength(
+            1.0 * unit.dalton,
+            300.0 * unit.nanometer,
+        )
 
 
 def test_init_beads_is_deterministic_and_sets_independent_thermal_velocities() -> None:
@@ -610,13 +640,41 @@ def test_centroid_positions_does_not_wrap_nonperiodic_systems() -> None:
     )
 
 
-def test_count_dna_charge_recognises_internal_and_terminal_names() -> None:
+def test_count_dna_charge_accounts_for_unphosphorylated_5_prime_termini() -> None:
     topology = app.Topology()
-    chain = topology.addChain()
-    for residue_name in ("DA", "DC5", "DG3", "DT", "ALA", "RA"):
-        topology.addResidue(residue_name, chain)
+    first_strand = topology.addChain()
+    for residue_name in ("DA5", "DC", "DG3"):
+        topology.addResidue(residue_name, first_strand)
+
+    second_strand = topology.addChain()
+    for residue_name in ("DT5", "DA3"):
+        topology.addResidue(residue_name, second_strand)
+
+    other = topology.addChain()
+    for residue_name in ("DT", "ALA", "RA"):
+        topology.addResidue(residue_name, other)
 
     assert nqe.count_dna_and_estimate_charge(topology) == -4
+
+
+def test_count_dna_charge_uses_phosphates_after_pdb_name_canonicalization(
+    tmp_path: Path,
+) -> None:
+    topology = app.Topology()
+    chain = topology.addChain("A")
+    five_prime = topology.addResidue("DA5", chain, id="1")
+    topology.addAtom("C1'", app.Element.getBySymbol("C"), five_prime)
+    three_prime = topology.addResidue("DA3", chain, id="2")
+    topology.addAtom("P", app.Element.getBySymbol("P"), three_prime)
+    positions = [Vec3(0, 0, 0), Vec3(0.1, 0, 0)] * unit.nanometer
+    pdb_path = tmp_path / "dna.pdb"
+    with pdb_path.open("w") as handle:
+        app.PDBFile.writeFile(topology, positions, handle)
+
+    loaded = app.PDBFile(str(pdb_path)).topology
+
+    assert [residue.name for residue in loaded.residues()] == ["DA", "DA"]
+    assert nqe.count_dna_and_estimate_charge(loaded) == -1
 
 
 @pytest.mark.parametrize(
@@ -721,6 +779,35 @@ def test_set_adqtb_particle_types_validates_required_interfaces() -> None:
         nqe.set_adqtb_particle_types_by_element(_Integrator())
 
 
+@pytest.mark.parametrize("start_type", [True, 1.5, "3"])
+def test_set_adqtb_particle_types_rejects_noninteger_start_type(
+    start_type: Any,
+) -> None:
+    integrator = _Integrator()
+
+    with pytest.raises(TypeError, match="start_type must be an integer"):
+        nqe.set_adqtb_particle_types_by_element(
+            integrator,
+            particle_elements=["H"],
+            start_type=start_type,
+        )
+
+    assert integrator.particle_types == {}
+
+
+def test_set_adqtb_particle_types_rejects_negative_start_type() -> None:
+    integrator = _Integrator()
+
+    with pytest.raises(ValueError, match="start_type must be a non-negative"):
+        nqe.set_adqtb_particle_types_by_element(
+            integrator,
+            particle_elements=["H"],
+            start_type=-1,
+        )
+
+    assert integrator.particle_types == {}
+
+
 def _ambiguous_modeller() -> app.Modeller:
     topology = app.Topology()
     positions = []
@@ -732,6 +819,13 @@ def _ambiguous_modeller() -> app.Modeller:
         "HIE", topology.addChain("C"), id="258", insertionCode="A"
     )
     topology.addAtom("CD2", app.Element.getBySymbol("C"), inserted)
+    positions.append(Vec3(0.0, 0.0, 0.0))
+    alphanumeric = topology.addResidue(
+        "CH4",
+        topology.addChain("D"),
+        id="1",
+    )
+    topology.addAtom("C1", app.Element.getBySymbol("C"), alphanumeric)
     positions.append(Vec3(0.0, 0.0, 0.0))
     return app.Modeller(topology, positions * unit.nanometer)
 
@@ -749,6 +843,9 @@ def test_atom_indices_from_vmd_picks_handles_chains_modes_and_insertions() -> No
         modeller, ["ALA12:CA"], match_mode="all"
     ) == [[0, 1]]
     assert nqe.atom_indices_from_vmd_picks(modeller, ["HIE258A:CD2"]) == [2]
+    assert nqe.atom_indices_from_vmd_picks(modeller, ["ALA 12:CA"], chain_id="A") == [0]
+    assert nqe.atom_indices_from_vmd_picks(modeller, ["HIE258 A:CD2"]) == [2]
+    assert nqe.atom_indices_from_vmd_picks(modeller, ["CH41:C1"]) == [3]
 
 
 @pytest.mark.parametrize(

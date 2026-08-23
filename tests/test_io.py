@@ -53,6 +53,24 @@ def test_remove_file_pattern_only_removes_matches(tmp_path: Path) -> None:
     assert untouched.exists()
 
 
+def test_remove_file_helpers_propagate_non_missing_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    protected = tmp_path / "protected.log"
+    protected.write_text("data")
+
+    def deny_removal(path: str | Path) -> None:
+        raise PermissionError(path)
+
+    monkeypatch.setattr(nqe_io.os, "remove", deny_removal)
+
+    with pytest.raises(PermissionError):
+        nqe.remove_file(protected)
+    with pytest.raises(PermissionError):
+        nqe.remove_file_pattern(str(tmp_path / "*.log"))
+
+
 def test_xyz_to_sdf_writes_readable_molecule(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "gc.sdf"
 
@@ -135,6 +153,37 @@ def test_xyz_to_sdf_rejects_malformed_xyz(tmp_path: Path, contents: str, message
         nqe.xyz_to_sdf(source, tmp_path / "bad.sdf")
 
 
+def test_xyz_to_sdf_closes_writer_when_conversion_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "molecule.xyz"
+    source.write_text("1\nframe\nH 0 0 0\n")
+
+    class RecordingWriter:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    writer = RecordingWriter()
+    monkeypatch.setattr(nqe_io.Chem, "SDWriter", lambda path: writer)
+
+    def fail_bond_inference(molecule: Chem.Mol, charge: int) -> None:
+        raise RuntimeError("bond inference failed")
+
+    monkeypatch.setattr(
+        nqe_io.rdDetermineBonds,
+        "DetermineBonds",
+        fail_bond_inference,
+    )
+
+    with pytest.raises(RuntimeError, match="bond inference failed"):
+        nqe.xyz_to_sdf(source, tmp_path / "molecule.sdf")
+
+    assert writer.closed
+
+
 def test_relabel_residues_supports_paths_and_file_objects(data_dir: Path, tmp_path: Path) -> None:
     source = data_dir / "pdb" / "malonaldehyde.pdb"
     output = tmp_path / "renamed.pdb"
@@ -159,6 +208,45 @@ def test_remove_residues_removes_only_requested_names(data_dir: Path, tmp_path: 
     )
     residues = [residue.name for residue in app.PDBFile(str(output)).topology.residues()]
 
+    assert residues == ["AMM"]
+
+
+def test_remove_residues_materializes_one_shot_name_iterable(
+    data_dir: Path,
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "without_residues.pdb"
+
+    nqe.remove_residues_in_pdb(
+        data_dir / "pdb" / "malformed.pdb",
+        output,
+        iter(("AMM", "HOH")),
+    )
+
+    atom_records = [
+        line
+        for line in output.read_text().splitlines()
+        if line.startswith(("ATOM  ", "HETATM"))
+    ]
+    assert atom_records == []
+
+
+def test_remove_residues_accepts_one_name_as_a_string(
+    data_dir: Path,
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "without_water.pdb"
+
+    nqe.remove_residues_in_pdb(
+        data_dir / "pdb" / "malformed.pdb",
+        output,
+        "HOH",
+    )
+
+    residues = [
+        residue.name
+        for residue in app.PDBFile(str(output)).topology.residues()
+    ]
     assert residues == ["AMM"]
 
 
@@ -248,6 +336,25 @@ def test_convert_sdfs_to_pdb_preserves_molecules_and_bonds(data_dir: Path, tmp_p
     # OpenMM normalises the water alias H2O to its canonical PDB name HOH.
     assert [residue.name for residue in topology.residues()] == ["CH4", "HOH"]
     assert len(list(topology.chains())) == 2
+
+
+@pytest.mark.parametrize("contents", ["", "not an SDF record\n$$$$\n"])
+def test_convert_sdfs_to_pdb_rejects_empty_or_malformed_records_before_writing(
+    data_dir: Path,
+    tmp_path: Path,
+    contents: str,
+) -> None:
+    bad_input = tmp_path / "bad.sdf"
+    bad_input.write_text(contents)
+    output = tmp_path / "combined.pdb"
+
+    with pytest.raises(ValueError, match="empty or malformed|Malformed molecule"):
+        nqe.convert_sdfs_to_pdb(
+            [data_dir / "CH4.sdf", bad_input],
+            output,
+        )
+
+    assert not output.exists()
 
 
 def test_save_pdb_selection_preserves_requested_atom_order(data_dir: Path, tmp_path: Path) -> None:
@@ -400,4 +507,19 @@ def test_save_only_index_atoms_does_not_mutate_modeller(data_dir: Path, tmp_path
 
     assert modeller.topology.getNumAtoms() == 9
     expected = [list(modeller.topology.atoms())[index].name for index in (1, 4)]
+    assert [atom.name for atom in selected.topology.atoms()] == expected
+
+
+def test_save_only_index_atoms_materializes_one_shot_index_iterable(
+    data_dir: Path,
+    tmp_path: Path,
+) -> None:
+    pdb = app.PDBFile(str(data_dir / "pdb" / "malonaldehyde.pdb"))
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    output = tmp_path / "selection.pdb"
+
+    nqe.save_only_index_atoms(modeller, iter((0, 4)), file_idx=output)
+
+    selected = app.PDBFile(str(output))
+    expected = [list(modeller.topology.atoms())[index].name for index in (0, 4)]
     assert [atom.name for atom in selected.topology.atoms()] == expected

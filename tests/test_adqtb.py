@@ -1,6 +1,7 @@
 """CPU regression tests for continuity between the two adQTB stages."""
 
 from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 

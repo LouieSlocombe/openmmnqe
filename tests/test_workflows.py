@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from collections.abc import Callable, Iterator, Sequence
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import openmm.unit as unit
@@ -30,6 +31,7 @@ class _Topology:
 class _System:
     def __init__(self) -> None:
         self.forces = []
+        self.periodic = True
 
     def addForce(self, force: Any) -> int:
         self.forces.append(force)
@@ -37,6 +39,9 @@ class _System:
 
     def getForces(self) -> list[Any]:
         return list(self.forces)
+
+    def usesPeriodicBoundaryConditions(self) -> bool:
+        return self.periodic
 
 
 class _ExternalForce:
@@ -344,6 +349,46 @@ def test_heating_reaches_target_exactly_and_initializes_velocities_once(
     assert runtime.calls.saved == [((simulation, "heated"), {})]
 
 
+@pytest.mark.parametrize(
+    "increment",
+    [0.0, -1.0, float("nan"), float("inf")],
+)
+def test_heating_rejects_nonpositive_or_nonfinite_increment_before_building(
+    workflow_runtime: SimpleNamespace,
+    increment: float,
+) -> None:
+    runtime = workflow_runtime
+
+    with pytest.raises(ValueError, match="temp_step must be finite and positive"):
+        nqe_openmm.run_openmm_heating(
+            runtime.modeller,
+            forcefield=object(),
+            temp_step=increment * unit.kelvin,
+        )
+
+    assert runtime.calls.builds == []
+
+
+@pytest.mark.parametrize(
+    "target",
+    [0.0, -1.0, float("nan"), float("inf")],
+)
+def test_heating_rejects_nonpositive_or_nonfinite_target_before_building(
+    workflow_runtime: SimpleNamespace,
+    target: float,
+) -> None:
+    runtime = workflow_runtime
+
+    with pytest.raises(ValueError, match="target_temp must be finite and positive"):
+        nqe_openmm.run_openmm_heating(
+            runtime.modeller,
+            forcefield=object(),
+            target_temp=target * unit.kelvin,
+        )
+
+    assert runtime.calls.builds == []
+
+
 def test_npt_runs_restrained_and_unrestrained_phases_without_optional_barostat(
     workflow_runtime: SimpleNamespace,
 ) -> None:
@@ -415,12 +460,26 @@ def test_classical_production_wires_optional_features_and_periodic_checkpoint(
     ("plumed_input", "expected_path", "expected_contents"),
     [
         ("DISTANCE ATOMS=1,2\nPRINT ARG=*", "pull_plumed.dat", "DISTANCE ATOMS=1,2\nPRINT ARG=*"),
+        ("DISTANCE ATOMS=1,2", "pull_plumed.dat", "DISTANCE ATOMS=1,2"),
+        (
+            "DISTANCE ATOMS=1,2\nPRINT ARG=* FILE=outputs/colvar",
+            "pull_plumed.dat",
+            "DISTANCE ATOMS=1,2\nPRINT ARG=* FILE=outputs/colvar",
+        ),
+        (
+            "MATHEVAL ARG=x FUNC=x/2 PERIODIC=NO",
+            "pull_plumed.dat",
+            "MATHEVAL ARG=x FUNC=x/2 PERIODIC=NO",
+        ),
         ("existing.dat", "existing.dat", None),
+        ("inputs/PLUMED", "inputs/PLUMED", None),
+        ("missing dir/plumed.dat", "missing dir/plumed.dat", None),
+        (Path("PLUMED"), "PLUMED", None),
     ],
 )
 def test_steered_md_accepts_inline_or_file_plumed_input(
     monkeypatch: pytest.MonkeyPatch,
-    plumed_input: str,
+    plumed_input: str | Path,
     expected_path: str,
     expected_contents: str | None,
 ) -> None:
@@ -452,6 +511,103 @@ def test_steered_md_accepts_inline_or_file_plumed_input(
     if expected_contents is not None:
         with open(expected_path) as handle:
             assert handle.read() == expected_contents
+
+
+def test_rpmd_reporter_finalizer_closes_outputs_on_success_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Reporter:
+        def __init__(self, close_error: Exception | None = None) -> None:
+            self.close_calls = 0
+            self.close_error = close_error
+
+        def close(self) -> None:
+            self.close_calls += 1
+            if self.close_error is not None:
+                raise self.close_error
+
+    monkeypatch.setattr(nqe_openmm, "RPMDQuantumSpreadReporter", Reporter)
+    monkeypatch.setattr(nqe_openmm, "RPMDCentroidReporter", Reporter)
+    monkeypatch.setattr(nqe_openmm, "RPMDBeadReporter", Reporter)
+
+    successful = Reporter()
+    with nqe_openmm._finalize_rpmd_reporters(
+        SimpleNamespace(reporters=[successful]),
+    ):
+        pass
+    assert successful.close_calls == 1
+
+    close_failure = Reporter(OSError("close failed"))
+    still_closed = Reporter()
+    with pytest.raises(OSError, match="close failed"):
+        with nqe_openmm._finalize_rpmd_reporters(
+            SimpleNamespace(reporters=[close_failure, still_closed]),
+        ):
+            pass
+    assert close_failure.close_calls == 1
+    assert still_closed.close_calls == 1
+
+    failing = Reporter(OSError("close failed"))
+    with pytest.raises(RuntimeError, match="simulation failed"):
+        with nqe_openmm._finalize_rpmd_reporters(
+            SimpleNamespace(reporters=[failing]),
+        ):
+            raise RuntimeError("simulation failed")
+    assert failing.close_calls == 1
+
+
+_BAROSTAT_STAGES = [
+    nqe_openmm.run_openmm_npt,
+    nqe_openmm.run_openmm_prod,
+    nqe_openmm.run_openmm_rpmd_contracted,
+    nqe_openmm.run_openmm_rpmd_prod,
+    nqe_openmm.run_openmm_adqtb_prod,
+]
+
+
+@pytest.mark.parametrize("stage", _BAROSTAT_STAGES)
+def test_barostat_stages_reject_nonperiodic_systems_before_context_creation(
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., None],
+) -> None:
+    runtime = workflow_runtime
+    runtime.system.periodic = False
+
+    with pytest.raises(ValueError, match="barostat requires a periodic System"):
+        stage(runtime.modeller, forcefield=object())
+
+    assert runtime.calls.barostats == []
+    assert runtime.calls.simulations == []
+
+
+@pytest.mark.parametrize("stage", _BAROSTAT_STAGES)
+@pytest.mark.parametrize(
+    ("frequency", "error", "message"),
+    [
+        (True, TypeError, "barostat_freq must be an integer"),
+        (1.5, TypeError, "barostat_freq must be an integer"),
+        (0, ValueError, "barostat_freq must be a positive integer"),
+        (-1, ValueError, "barostat_freq must be a positive integer"),
+    ],
+)
+def test_barostat_stages_validate_frequency_before_context_creation(
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., None],
+    frequency: Any,
+    error: type[Exception],
+    message: str,
+) -> None:
+    runtime = workflow_runtime
+
+    with pytest.raises(error, match=message):
+        stage(
+            runtime.modeller,
+            forcefield=object(),
+            barostat_freq=frequency,
+        )
+
+    assert runtime.calls.barostats == []
+    assert runtime.calls.simulations == []
 
 
 def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
@@ -641,6 +797,65 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
             {"pdb_suffix": "_final.pdb", "n_beads": 32},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("n_beads", "direct_space_copies"),
+    [(1, 1), (2, 2), (7, 7), (8, 8), (9, 8)],
+)
+def test_contracted_rpmd_default_contractions_fit_the_bead_count(
+    workflow_runtime: SimpleNamespace,
+    n_beads: int,
+    direct_space_copies: int,
+) -> None:
+    runtime = workflow_runtime
+
+    nqe_openmm.run_openmm_rpmd_contracted(
+        runtime.modeller,
+        forcefield=object(),
+        checkpoint_file="ready.chk",
+        n_beads=n_beads,
+        barostat_freq=None,
+        steps=0,
+    )
+
+    assert runtime.calls.integrators[0].args[-1] == {
+        1: direct_space_copies,
+        2: 1,
+    }
+
+
+@pytest.mark.parametrize(
+    ("contractions", "error", "message"),
+    [
+        ([(1, 1)], TypeError, "contractions must be a mapping"),
+        ({True: 1}, TypeError, "contraction force group must be an integer"),
+        ({-1: 1}, ValueError, "contraction force group must be a non-negative integer"),
+        ({32: 1}, ValueError, "contraction force group must be between 0 and 31"),
+        ({1: True}, TypeError, r"contractions\[1\] must be an integer"),
+        ({1: 1.5}, TypeError, r"contractions\[1\] must be an integer"),
+        ({1: 0}, ValueError, r"contractions\[1\] must be a positive integer"),
+        ({1: 9}, ValueError, r"contractions\[1\]=9 cannot exceed n_beads=8"),
+    ],
+)
+def test_contracted_rpmd_validates_explicit_contractions_before_building(
+    workflow_runtime: SimpleNamespace,
+    contractions: Any,
+    error: type[Exception],
+    message: str,
+) -> None:
+    runtime = workflow_runtime
+
+    with pytest.raises(error, match=message):
+        nqe_openmm.run_openmm_rpmd_contracted(
+            runtime.modeller,
+            forcefield=object(),
+            n_beads=8,
+            contractions=contractions,
+            barostat_freq=None,
+        )
+
+    assert runtime.calls.builds == []
 
 
 @pytest.mark.parametrize(

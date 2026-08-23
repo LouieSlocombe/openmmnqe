@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from pathlib import Path
 from collections.abc import Callable, Sequence
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -13,6 +13,7 @@ import openmm.unit as unit
 import pytest
 from openmm import Vec3
 
+import openmmnqe.reporters as reporters
 from openmmnqe.reporters import (
     RPMDBeadReporter,
     RPMDCentroidReporter,
@@ -23,7 +24,6 @@ from openmmnqe.reporters import (
     plot_rpmd_atom_expansion,
     track_rpmd_atom_expansion,
 )
-import openmmnqe.reporters as reporters
 
 
 class _State:
@@ -107,12 +107,6 @@ def test_calculate_bead_expansion_is_mean_radius_not_rms_radius() -> None:
 
 def test_quantum_spread_reporter_writes_header_and_values(tmp_path: Path) -> None:
     output = tmp_path / "spread.tsv"
-    reporter = RPMDQuantumSpreadReporter(
-        output,
-        reportInterval=5,
-        atom_indices=[0, 1],
-        names=["H", "O"],
-    )
     simulation = SimpleNamespace(
         currentStep=7,
         integrator=_Integrator(
@@ -123,9 +117,24 @@ def test_quantum_spread_reporter_writes_header_and_values(tmp_path: Path) -> Non
         ),
     )
 
-    assert reporter.describeNextReport(simulation) == (3, False, False, False, False)
-    reporter.report(simulation, state=None)
-    reporter._out.close()
+    with RPMDQuantumSpreadReporter(
+        output,
+        reportInterval=5,
+        atom_indices=[0, 1],
+        names=["H", "O"],
+    ) as reporter:
+        assert reporter.describeNextReport(simulation) == (
+            3,
+            False,
+            False,
+            False,
+            False,
+        )
+        reporter.report(simulation, state=None)
+
+    reporter.close()
+    reporter.__del__()
+    assert reporter._out.closed
 
     assert output.read_text().splitlines() == [
         "Step\tRg_H(nm)\tRg_O(nm)",
@@ -158,7 +167,7 @@ def test_expansion_reporter_writes_aligned_centroid_distances(tmp_path: Path) ->
     )
 
     reporter.report(simulation, state=None)
-    reporter._out.close()
+    reporter.close()
 
     assert output.read_text().splitlines() == [
         "Step\tExpansion_H(nm)\tDistance_H-O(nm)",
@@ -192,7 +201,7 @@ def test_expansion_and_centroid_distance_use_periodic_minimum_images(
     )
 
     reporter.report(simulation, state=None)
-    reporter._out.close()
+    reporter.close()
 
     assert output.read_text().splitlines() == [
         f"Step\t{prefix}_Atom0(nm)\tDistance_Atom0-Atom1(nm)",
@@ -225,7 +234,7 @@ def test_track_rpmd_atom_expansion_attaches_single_atom_reporter(tmp_path: Path)
     assert reporter.describeNextReport(simulation) == (3, False, False, False, False)
 
     reporter.report(simulation, state=None)
-    reporter._out.close()
+    reporter.close()
     assert output.read_text().splitlines() == [
         "Step\tRg_target(nm)",
         "12\t1.000000",
@@ -262,8 +271,30 @@ def test_track_rpmd_atom_expansion_rejects_invalid_atom_index(
     ],
 )
 def test_reporters_reject_nonpositive_intervals_or_bead_counts(tmp_path: Path, factory: Callable[[Path], Any]) -> None:
-    with pytest.raises(ValueError, match="must be positive"):
+    with pytest.raises(ValueError, match="must be a positive integer"):
         factory(tmp_path / "output")
+
+
+@pytest.mark.parametrize("invalid", [True, 1.5])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda path, value: RPMDQuantumSpreadReporter(path, value, [0]),
+        lambda path, value: RPMDBeadReporter(path, value, 1, _topology()),
+        lambda path, value: RPMDBeadReporter(path, 1, value, _topology()),
+        lambda path, value: RPMDCentroidReporter(path, value, 1, _topology()),
+        lambda path, value: RPMDCentroidReporter(path, 1, value, _topology()),
+    ],
+)
+def test_reporters_reject_noninteger_intervals_or_bead_counts(
+    tmp_path: Path,
+    factory: Callable[[Path, Any], Any],
+    invalid: Any,
+) -> None:
+    with pytest.raises(TypeError, match="must be an integer"):
+        factory(tmp_path / "output", invalid)
+
+    assert not list(tmp_path.iterdir())
 
 
 def test_quantum_spread_reporter_validates_names(tmp_path: Path) -> None:
@@ -359,7 +390,7 @@ def test_direct_reporter_gives_clear_error_for_late_topology_mismatch(tmp_path: 
 
     with pytest.raises(ValueError, match="outside topology"):
         reporter.report(simulation, state=None)
-    reporter._out.close()
+    reporter.close()
 
 
 def _write_plot_log(path: Path) -> None:
@@ -578,32 +609,50 @@ def test_plot_rpmd_atom_expansion_rejects_nonfinite_values(
         plot_rpmd_atom_expansion(log, **kwargs)
 
 
-def test_bead_reporter_writes_one_model_per_bead(tmp_path: Path) -> None:
+def test_bead_reporter_writes_consecutive_models_and_one_footer(
+    tmp_path: Path,
+) -> None:
     base = tmp_path / "beads"
-    reporter = RPMDBeadReporter(
+    integrator = _Integrator([[[0.0, 0.0, 0.0]], [[1.0, 0.0, 0.0]]])
+    simulation = SimpleNamespace(currentStep=5, integrator=integrator)
+
+    with RPMDBeadReporter(
         file_base_name=str(base),
         reportInterval=4,
         num_beads=2,
         topology=_topology(),
-    )
-    integrator = _Integrator([[[0.0, 0.0, 0.0]], [[1.0, 0.0, 0.0]]])
-    simulation = SimpleNamespace(currentStep=5, integrator=integrator)
+    ) as reporter:
+        assert reporter.describeNextReport(simulation) == (
+            3,
+            False,
+            False,
+            False,
+            False,
+        )
+        reporter.report(simulation, state=None)
+        reporter.report(simulation, state=None)
 
-    assert reporter.describeNextReport(simulation) == (3, False, False, False, False)
-    reporter.report(simulation, state=None)
+    reporter.close()
     reporter.__del__()
 
     for bead in (0, 1):
         contents = (tmp_path / f"beads_bead_{bead}.pdb").read_text()
-        assert contents.count("MODEL") == 1
-        assert contents.rstrip().endswith("END")
+        assert [
+            line for line in contents.splitlines() if line.startswith("MODEL")
+        ] == ["MODEL        1", "MODEL        2"]
+        assert contents.splitlines().count("END") == 1
     assert integrator.calls == [
+        (0, {"getPositions": True, "enforcePeriodicBox": True}),
+        (1, {"getPositions": True, "enforcePeriodicBox": True}),
         (0, {"getPositions": True, "enforcePeriodicBox": True}),
         (1, {"getPositions": True, "enforcePeriodicBox": True}),
     ]
 
 
-def test_centroid_reporter_delegates_centroid_calculation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_centroid_reporter_writes_consecutive_models_and_one_footer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     output = tmp_path / "centroid.pdb"
     calls = []
     monkeypatch.setattr(
@@ -614,16 +663,23 @@ def test_centroid_reporter_delegates_centroid_calculation(monkeypatch: pytest.Mo
             or [Vec3(0.5, 0.0, 0.0)] * unit.nanometer
         ),
     )
-    reporter = RPMDCentroidReporter(
+    simulation = SimpleNamespace(currentStep=10)
+
+    with RPMDCentroidReporter(
         file_name=output,
         reportInterval=10,
         num_beads=2,
         topology=_topology(),
-    )
-    simulation = SimpleNamespace(currentStep=10)
+    ) as reporter:
+        reporter.report(simulation, state=None)
+        reporter.report(simulation, state=None)
 
-    reporter.report(simulation, state=None)
+    reporter.close()
     reporter.__del__()
 
-    assert calls == [(simulation, 1, 2)]
-    assert output.read_text().count("MODEL") == 1
+    assert calls == [(simulation, 1, 2), (simulation, 1, 2)]
+    contents = output.read_text()
+    assert [
+        line for line in contents.splitlines() if line.startswith("MODEL")
+    ] == ["MODEL        1", "MODEL        2"]
+    assert contents.splitlines().count("END") == 1

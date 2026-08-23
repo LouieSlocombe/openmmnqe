@@ -1,7 +1,7 @@
 """The OpenMM simulation stages, from minimisation through to production.
 
 Each ``run_openmm_*`` function is one stage of a workflow, and they are meant
-to be run in order, each picking up where the last left off:
+to be run in order using the structure written by the preceding stage:
 
 1. :func:`run_openmm_relaxation` or :func:`run_openmm_relaxation_simple` --
    take the strain out of the starting structure,
@@ -21,12 +21,15 @@ pulls a collective variable to generate a reference path (see
 :mod:`reactiontools.tools_path`).
 
 Every stage takes the same shape: build the system, optionally deuterate it,
-attach a PLUMED bias and the reporters, run, then save restart data and a
-structure for the next stage to start from. RPMD restart files contain every
-bead rather than an ordinary single-Context checkpoint. The shared arguments
-behave the same throughout -- *potential* with *ml_idx* runs an ML/MM mixed
-system and forces the CUDA platform, *plumed_script_path* attaches a bias,
-and *output_prefix* names every file the stage writes.
+attach a PLUMED bias and the reporters, run, then save its final structure.
+Classical stages initialize new velocities when started from that structure;
+the paired RPMD and adQTB stages additionally consume their equilibration
+restart, preserving the state their production integrator needs. RPMD restart
+files contain every bead rather than an ordinary single-Context checkpoint.
+The shared arguments behave the same throughout -- *potential* with *ml_idx*
+runs an ML/MM mixed system and forces the CUDA platform,
+*plumed_script_path* attaches a bias, and *output_prefix* names every file the
+stage writes.
 """
 from __future__ import annotations
 
@@ -36,23 +39,31 @@ import os
 import sys
 import tempfile
 import zipfile
-from collections.abc import Iterable, Mapping
-from typing import Any, Literal
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from typing import Any, Literal, overload
 
 import numpy as np
 import openmm.unit as unit
+from openmm import app, openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
 
-from openmm import openmm, app
-from .reporters import (RPMDQuantumSpreadReporter,
-                        RPMDBeadReporter,
-                        RPMDCentroidReporter,
-                        _validate_observable_indices,
-                        )
-from .tools import (deuterate_system, check_platform, init_beads,
-                    centroid_positions, step_rpmd)
-
+from ._validation import require_integer, require_positive_finite_scalar_in_unit
+from .reporters import (
+    RPMDBeadReporter,
+    RPMDCentroidReporter,
+    RPMDQuantumSpreadReporter,
+    _validate_observable_indices,
+)
+from .tools import (
+    WorkflowDeuterationOption,
+    centroid_positions,
+    check_platform,
+    deuterate_system,
+    init_beads,
+    step_rpmd,
+)
 
 _RPMD_RESTART_KIND = "openmmnqe-rpmd-restart"
 _RPMD_RESTART_VERSION = 2
@@ -84,6 +95,60 @@ def _validate_rpmd_n_beads(n_beads: int) -> int:
     ):
         raise ValueError("n_beads must be a positive integer")
     return int(n_beads)
+
+
+def _validate_ml_indices(ml_idx: Iterable[int], n_atoms: int) -> list[int]:
+    """Return a normalized, unique, in-bounds ML atom selection."""
+    raw_indices = list(ml_idx)
+    if not raw_indices:
+        raise ValueError("ml_idx is empty; a mixed system needs at least one ML atom.")
+
+    normalized = []
+    seen = set()
+    for position, index in enumerate(raw_indices):
+        index = require_integer(
+            index,
+            name=f"ml_idx[{position}]",
+            minimum=0,
+        )
+        if index >= n_atoms:
+            raise ValueError(
+                f"ml_idx[{position}]={index} is outside the topology with "
+                f"{n_atoms} atoms"
+            )
+        if index in seen:
+            raise ValueError(f"ml_idx contains duplicate atom index {index}")
+        normalized.append(index)
+        seen.add(index)
+    return normalized
+
+
+def _validate_rpmd_contractions(
+    contractions: Mapping[int, int] | None,
+    n_beads: int,
+) -> dict[int, int]:
+    """Normalize an RPMD force-group contraction map for *n_beads*."""
+    if contractions is None:
+        return {1: min(8, n_beads), 2: 1}
+    if not isinstance(contractions, Mapping):
+        raise TypeError("contractions must be a mapping of force groups to copy counts")
+
+    normalized = {}
+    for raw_group, raw_count in contractions.items():
+        group = require_integer(raw_group, name="contraction force group", minimum=0)
+        if group > 31:
+            raise ValueError("contraction force group must be between 0 and 31")
+        count = require_integer(
+            raw_count,
+            name=f"contractions[{group}]",
+            minimum=1,
+        )
+        if count > n_beads:
+            raise ValueError(
+                f"contractions[{group}]={count} cannot exceed n_beads={n_beads}"
+            )
+        normalized[group] = count
+    return normalized
 
 
 def _validate_pdb_identity_name(name: str, description: str,
@@ -243,9 +308,43 @@ def _rpmd_temperature_kelvin(integrator: openmm.RPMDIntegrator) -> float:
     return temperature
 
 
-def _restart_scalar(archive: np.lib.npyio.NpzFile, name: str,
-                    scalar_type: Literal["integer", "float", "boolean", "string"],
-                    ) -> int | float | bool | str:
+@overload
+def _restart_scalar(
+    archive: np.lib.npyio.NpzFile,
+    name: str,
+    scalar_type: Literal["integer"],
+) -> int: ...
+
+
+@overload
+def _restart_scalar(
+    archive: np.lib.npyio.NpzFile,
+    name: str,
+    scalar_type: Literal["float"],
+) -> float: ...
+
+
+@overload
+def _restart_scalar(
+    archive: np.lib.npyio.NpzFile,
+    name: str,
+    scalar_type: Literal["boolean"],
+) -> bool: ...
+
+
+@overload
+def _restart_scalar(
+    archive: np.lib.npyio.NpzFile,
+    name: str,
+    scalar_type: Literal["string"],
+) -> str: ...
+
+
+def _restart_scalar(
+    archive: np.lib.npyio.NpzFile,
+    name: str,
+    scalar_type: Literal["integer", "float", "boolean", "string"],
+) -> int | float | bool | str:
     """
     Read a restart scalar only when its shape and dtype match the schema.
 
@@ -436,7 +535,8 @@ def _build_system(modeller: app.Modeller,
         absorbs unknown keywords into ``**args``, so passing a calculator
         through would quietly run the whole simulation at pure MM instead.
         Also raised when *ml_idx* is empty or is supplied without either an ML
-        potential or calculator.
+        potential or calculator, or when an ML atom index is negative,
+        duplicated, or outside the topology.
     """
     if potential is not None and ml_idx is None:
         raise ValueError(
@@ -457,12 +557,13 @@ def _build_system(modeller: app.Modeller,
             "ml_idx was given without an ML potential or calculator. Pass a "
             "potential/calculator for a mixed system, or omit ml_idx for pure MM."
         )
-    if (potential is not None or calculator is not None) and ml_idx is not None:
-        if len(ml_idx) == 0:
-            raise ValueError("ml_idx is empty; a mixed system needs at least one ML atom.")
-
     run_mixed = ml_idx is not None and (potential is not None or calculator is not None)
     if run_mixed:
+        assert ml_idx is not None
+        ml_idx = _validate_ml_indices(
+            ml_idx,
+            modeller.topology.getNumAtoms(),
+        )
         print("Adding ML potential to the system...", flush=True)
         platform_name = 'CUDA'
         print("ML potential in use: forcing platform to CUDA.", flush=True)
@@ -503,7 +604,8 @@ def _build_system(modeller: app.Modeller,
 
 
 def _maybe_deuterate(modeller: app.Modeller, system: openmm.System,
-                     deuterate: bool, deuterate_option: str) -> None:
+                     deuterate: bool,
+                     deuterate_option: WorkflowDeuterationOption) -> None:
     """
     Deuterate the system in place when requested.
 
@@ -521,6 +623,28 @@ def _maybe_deuterate(modeller: app.Modeller, system: openmm.System,
     if deuterate:
         print("Deuterating system...", flush=True)
         deuterate_system(modeller, system, option=deuterate_option)
+
+
+def _validate_barostat_frequency(
+    system: openmm.System,
+    barostat_freq: int | None,
+) -> int | None:
+    """Validate a requested barostat frequency and system periodicity."""
+    if barostat_freq is None:
+        return None
+
+    frequency = require_integer(
+        barostat_freq,
+        name="barostat_freq",
+        minimum=1,
+    )
+    if not system.usesPeriodicBoundaryConditions():
+        raise ValueError(
+            "A barostat requires a periodic System with at least one force "
+            "configured for periodic boundaries (for example PME or "
+            "CutoffPeriodic); otherwise pass barostat_freq=None"
+        )
+    return frequency
 
 
 def _reject_barostat_on_python_force(system: openmm.System) -> None:
@@ -565,11 +689,32 @@ def _load_plumed(system: openmm.System,
     if plumed_script_path is not None:
         print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
 
-        with open(plumed_script_path, 'r') as f:
+        with open(plumed_script_path) as f:
             script_content = f.read()
 
         plumed_force = PlumedForce(script_content)
         system.addForce(plumed_force)
+
+
+def _is_inline_plumed_input(plumed_input: str | os.PathLike[str]) -> bool:
+    """Distinguish inline PLUMED text from a path without opening either."""
+    if isinstance(plumed_input, os.PathLike):
+        return False
+    if "\n" in plumed_input or "\r" in plumed_input:
+        return True
+    if os.path.exists(plumed_input):
+        return False
+    if "=" in plumed_input:
+        return True
+    if os.path.sep in plumed_input or (
+        os.path.altsep is not None and os.path.altsep in plumed_input
+    ):
+        return False
+    if os.path.splitext(plumed_input)[1]:
+        return False
+    if any(character.isspace() for character in plumed_input):
+        return True
+    return plumed_input.isupper()
 
 
 def _add_standard_reporters(simulation: app.Simulation, output_prefix: str,
@@ -726,6 +871,44 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
     ))
 
 
+def _close_rpmd_output_reporters(
+    simulation: app.Simulation,
+    *,
+    suppress_errors: bool,
+) -> None:
+    """Close every package-owned reporter attached to *simulation*."""
+    first_error: Exception | None = None
+    reporter_types = (
+        RPMDQuantumSpreadReporter,
+        RPMDCentroidReporter,
+        RPMDBeadReporter,
+    )
+    for reporter in simulation.reporters:
+        if not isinstance(reporter, reporter_types):
+            continue
+        try:
+            reporter.close()
+        except Exception as exc:
+            if first_error is None:
+                first_error = exc
+    if first_error is not None and not suppress_errors:
+        raise first_error
+
+
+@contextmanager
+def _finalize_rpmd_reporters(
+    simulation: app.Simulation,
+) -> Iterator[None]:
+    """Ensure RPMD output reporters close on normal and exceptional exits."""
+    try:
+        yield
+    except BaseException:
+        _close_rpmd_output_reporters(simulation, suppress_errors=True)
+        raise
+    else:
+        _close_rpmd_output_reporters(simulation, suppress_errors=False)
+
+
 def _save_rpmd_restart(simulation: app.Simulation, checkpoint_file: str,
                        n_beads: int) -> None:
     """
@@ -774,8 +957,8 @@ def _save_rpmd_restart(simulation: app.Simulation, checkpoint_file: str,
     particle_masses = _particle_masses_dalton(simulation.system)
     topology_signature = _topology_identity_signature(simulation.topology)
     temperature_kelvin = _rpmd_temperature_kelvin(integrator)
-    positions = []
-    velocities = []
+    position_frames = []
+    velocity_frames = []
     first_state = None
     for bead in range(n_beads):
         state = integrator.getState(
@@ -801,16 +984,18 @@ def _save_rpmd_restart(simulation: app.Simulation, checkpoint_file: str,
                 f"Bead {bead} has velocity shape {bead_velocities.shape}; "
                 f"expected {(n_particles, 3)}"
             )
-        positions.append(np.asarray(bead_positions, dtype=np.float64))
-        velocities.append(np.asarray(bead_velocities, dtype=np.float64))
+        position_frames.append(np.asarray(bead_positions, dtype=np.float64))
+        velocity_frames.append(np.asarray(bead_velocities, dtype=np.float64))
 
-    positions = np.stack(positions)
-    velocities = np.stack(velocities)
+    positions = np.stack(position_frames)
+    velocities = np.stack(velocity_frames)
     if not np.isfinite(positions).all():
         raise ValueError("Cannot save RPMD restart: bead positions are not finite")
     if not np.isfinite(velocities).all():
         raise ValueError("Cannot save RPMD restart: bead velocities are not finite")
 
+    if first_state is None:  # Defensive: n_beads validation makes this unreachable.
+        raise RuntimeError("RPMD restart has no bead states to save")
     box_vectors = first_state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(
         unit.nanometer
     )
@@ -1257,9 +1442,9 @@ def run_openmm_relaxation(
     """
     Minimise in stages, easing the backbone restraints as it goes.
 
-    Three successive minimisation stages are executed with decreasing restraint
-    spring constants on backbone atoms, allowing the structure to relax gently.
-    An optional ML/MM mixed potential can be used.
+    Three successive minimisation stages are executed with decreasing quadratic
+    restraint coefficients on backbone atoms, allowing the structure to relax
+    gently. An optional ML/MM mixed potential can be used.
 
     Parameters
     ----------
@@ -1285,11 +1470,14 @@ def run_openmm_relaxation(
         Atom names considered backbone for restraints. If None, defaults to
         ``['CA', 'C', 'N', 'P', 'O3']``.
     ks_1 : float, optional
-        Spring constant for stage 1 in kJ/mol/nm^2. Default is 100.0.
+        Coefficient multiplying the squared displacement in stage 1, in
+        kJ/mol/nm^2. Default is 100.0.
     ks_2 : float, optional
-        Spring constant for stage 2 in kJ/mol/nm^2. Default is 10.0.
+        Coefficient multiplying the squared displacement in stage 2, in
+        kJ/mol/nm^2. Default is 10.0.
     ks_3 : float, optional
-        Spring constant for stage 3 in kJ/mol/nm^2. Default is 0.0.
+        Coefficient multiplying the squared displacement in stage 3, in
+        kJ/mol/nm^2. Default is 0.0.
     platform_name : str or None, optional
         OpenMM platform name. Default is None, which auto-detects via
         ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
@@ -1424,7 +1612,7 @@ def run_openmm_heating(
         steps_final: int = 5_000,
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
@@ -1445,7 +1633,8 @@ def run_openmm_heating(
     output_prefix : str, optional
         Prefix for output files. Default is ``'equilibrate'``.
     k1 : float, optional
-        Backbone restraint spring constant in kJ/mol/nm^2. Default is 100.0.
+        Coefficient multiplying the squared backbone displacement, in
+        kJ/mol/nm^2. Default is 100.0.
     backbone_names : list of str or None, optional
         Atom names considered backbone for restraints. If None, defaults to
         ``['CA', 'C', 'N', 'P', 'O3']``.
@@ -1480,6 +1669,19 @@ def run_openmm_heating(
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
     """
+    target_temp_kelvin = require_positive_finite_scalar_in_unit(
+        target_temp,
+        unit.kelvin,
+        name="target_temp",
+    )
+    temp_step_kelvin = require_positive_finite_scalar_in_unit(
+        temp_step,
+        unit.kelvin,
+        name="temp_step",
+    )
+    target_temp = target_temp_kelvin * unit.kelvin
+    temp_step = temp_step_kelvin * unit.kelvin
+
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
@@ -1552,7 +1754,7 @@ def run_openmm_npt(
         n_2: int = 15_000,
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
@@ -1581,13 +1783,14 @@ def run_openmm_npt(
     time_step : openmm.unit.Quantity, optional
         Integration time step. Default is 1.0 fs.
     barostat_freq : int or None, optional
-        Barostat attempt frequency in steps. If None, no barostat is added.
-        Default is 50.
+        Positive barostat attempt frequency in steps. The System must be
+        periodic when set. If None, no barostat is added. Default is 50.
     backbone_names : list of str or None, optional
         Atom names considered backbone for restraints. If None, defaults to
         ``['CA', 'C', 'N', 'P', 'O3']``.
     k : float, optional
-        Backbone restraint spring constant in kJ/mol/nm^2. Default is 10.0.
+        Coefficient multiplying the squared backbone displacement, in
+        kJ/mol/nm^2. Default is 10.0.
     n_report : int, optional
         Reporter interval in steps. Default is 500.
     n_1 : int, optional
@@ -1615,6 +1818,7 @@ def run_openmm_npt(
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
+    barostat_freq = _validate_barostat_frequency(system, barostat_freq)
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
@@ -1626,11 +1830,9 @@ def run_openmm_npt(
     restraint.addPerParticleParameter("y0")
     restraint.addPerParticleParameter("z0")
 
-    atom_indices = []
     for atom in modeller.topology.atoms():
         if atom.name in backbone_names:
             restraint.addParticle(atom.index, modeller.positions[atom.index])
-            atom_indices.append(atom.index)
     system.addForce(restraint)
 
     integrator = openmm.LangevinMiddleIntegrator(temperature,
@@ -1669,7 +1871,7 @@ def run_openmm_prod(
         output_prefix: str = 'prod',
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
@@ -1699,8 +1901,8 @@ def run_openmm_prod(
     time_step : openmm.unit.Quantity, optional
         Integration time step. Default is 1.0 fs.
     barostat_freq : int or None, optional
-        Barostat attempt frequency in steps. If None, no barostat is added.
-        Default is 50.
+        Positive barostat attempt frequency in steps. The System must be
+        periodic when set. If None, no barostat is added. Default is 50.
     n_report : int, optional
         Reporter interval in steps. Default is 1000.
     steps : int, optional
@@ -1725,6 +1927,7 @@ def run_openmm_prod(
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
+    barostat_freq = _validate_barostat_frequency(system, barostat_freq)
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
@@ -1750,7 +1953,7 @@ def run_openmm_prod(
 def run_openmm_steered(
         modeller: app.Modeller,
         forcefield: app.ForceField | MLPotential | PreparedSystem,
-        plumed_input: str,
+        plumed_input: str | os.PathLike[str],
         steps: int,
         output_prefix: str = 'smd',
         temperature: unit.Quantity = 300.0 * unit.kelvin,
@@ -1761,7 +1964,7 @@ def run_openmm_steered(
         barostat_freq: int | None = None,
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
@@ -1782,10 +1985,13 @@ def run_openmm_steered(
         the reactant.
     forcefield : openmm.app.ForceField
         The force field used to parameterise the system.
-    plumed_input : str
+    plumed_input : str or os.PathLike
         The PLUMED script itself, or the path to a file holding one. Anything
         containing a newline is taken to be a script and written to
-        ``'{output_prefix}_plumed.dat'``.
+        ``'{output_prefix}_plumed.dat'``. Existing files are always treated as
+        paths; a one-line PLUMED command is accepted as inline input too. A
+        path-like object is always treated as a path and can disambiguate an
+        unusual filename from script text.
     steps : int
         Number of MD steps to run. Use the step count returned alongside the
         script by the ``plumed_input_steered*`` builders, so the run covers the
@@ -1826,12 +2032,13 @@ def run_openmm_steered(
     str
         Path to the trajectory written by the run.
     """
-    if '\n' in plumed_input:
+    if _is_inline_plumed_input(plumed_input):
+        assert isinstance(plumed_input, str)
         plumed_script_path = f'{output_prefix}_plumed.dat'
         with open(plumed_script_path, 'w') as f:
             f.write(plumed_input)
     else:
-        plumed_script_path = plumed_input
+        plumed_script_path = os.fspath(plumed_input)
 
     print(f"Starting steered MD for {steps} steps...", flush=True)
     run_openmm_prod(modeller,
@@ -1922,7 +2129,7 @@ def run_openmm_rpmd_equilibration(
         n_2: int = 5_000,
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
@@ -2003,40 +2210,52 @@ def run_openmm_rpmd_equilibration(
         integrator.setRandomNumberSeed(thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
-    _add_rpmd_reporters(
-        simulation,
-        modeller.topology,
-        output_prefix,
-        n_report,
-        n_beads,
-        atoms_to_watch,
-        expansion_metric=expansion_metric,
-        distance_pairs=distance_pairs_to_watch,
-    )
-    _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
+    with _finalize_rpmd_reporters(simulation):
+        _add_rpmd_reporters(
+            simulation,
+            modeller.topology,
+            output_prefix,
+            n_report,
+            n_beads,
+            atoms_to_watch,
+            expansion_metric=expansion_metric,
+            distance_pairs=distance_pairs_to_watch,
+        )
+        _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
-    init_beads(
-        modeller,
-        simulation,
-        n_beads,
-        scale_factor=scale_factor,
-        seed=initialization_seed,
-    )
+        init_beads(
+            modeller,
+            simulation,
+            n_beads,
+            scale_factor=scale_factor,
+            seed=initialization_seed,
+        )
 
-    print("\n--- Stage 1: Bead Expansion  ---", flush=True)
-    integrator.setStepSize(timestep * 0.5)
-    step_rpmd(simulation, n_1)
+        print("\n--- Stage 1: Bead Expansion  ---", flush=True)
+        integrator.setStepSize(timestep * 0.5)
+        step_rpmd(simulation, n_1)
 
-    print(f"\n--- Stage 2: Relaxation at full timestep ({timestep}) ---", flush=True)
-    integrator.setStepSize(timestep)
-    step_rpmd(simulation, n_2)
+        print(
+            f"\n--- Stage 2: Relaxation at full timestep ({timestep}) ---",
+            flush=True,
+        )
+        integrator.setStepSize(timestep)
+        step_rpmd(simulation, n_2)
 
-    print("\n--- Saving State ---", flush=True)
-    # Not '_centroid.pdb': RPMDCentroidReporter owns that name and is still
-    # holding it open, so writing here would truncate the trajectory it spent
-    # the whole run building.
-    _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)
-    print(f"Saved final centroid structure to {output_prefix}_final.pdb", flush=True)
+        print("\n--- Saving State ---", flush=True)
+        # Not '_centroid.pdb': RPMDCentroidReporter owns that name and is still
+        # holding it open, so writing here would truncate the trajectory it spent
+        # the whole run building.
+        _save_final_state(
+            simulation,
+            output_prefix,
+            pdb_suffix='_final.pdb',
+            n_beads=n_beads,
+        )
+        print(
+            f"Saved final centroid structure to {output_prefix}_final.pdb",
+            flush=True,
+        )
 
 
 def run_openmm_rpmd_contracted(
@@ -2056,7 +2275,7 @@ def run_openmm_rpmd_contracted(
         contractions: Mapping[int, int] | None = None,
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         atoms_to_watch: list[int] | None = None,
@@ -2092,8 +2311,8 @@ def run_openmm_rpmd_contracted(
     pressure : openmm.unit.Quantity, optional
         Target pressure for the RPMD barostat. Default is 1.0 bar.
     barostat_freq : int or None, optional
-        RPMD barostat attempt frequency. If None, no barostat is added.
-        Default is 50.
+        Positive RPMD barostat attempt frequency. The System must be periodic
+        when set. If None, no barostat is added. Default is 50.
     friction : openmm.unit.Quantity, optional
         RPMD friction coefficient. Default is 1.0 / ps.
     timestep : openmm.unit.Quantity, optional
@@ -2104,7 +2323,8 @@ def run_openmm_rpmd_contracted(
         Reporter interval in steps. Default is 1000.
     contractions : dict or None, optional
         Mapping of force group to the number of contracted copies. If None,
-        defaults to ``{1: 8, 2: 1}``. Default is None.
+        direct-space forces use up to 8 copies and reciprocal-space forces use
+        the centroid alone. Default is None.
     platform_name : str or None, optional
         OpenMM platform name. Default is None, which auto-detects via
         ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
@@ -2134,19 +2354,15 @@ def run_openmm_rpmd_contracted(
         If *checkpoint_file* does not exist.
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
-        *barostat_freq* is set on a System carrying a ``PythonForce``.
+        a contraction is invalid, or *barostat_freq* is set on a nonperiodic
+        System or one carrying a ``PythonForce``.
     """
+    n_beads = _validate_rpmd_n_beads(n_beads)
+    contractions = _validate_rpmd_contractions(contractions, n_beads)
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
-    if contractions is None:
-        # Each copy count must divide n_beads. Groups left out of the dict --
-        # here group 0, the cheap bonded forces -- run on every bead.
-        contractions = {
-            1: 8,  # nonbonded direct space
-            2: 1  # PME reciprocal space, on the centroid alone
-        }
-
+    barostat_freq = _validate_barostat_frequency(system, barostat_freq)
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
@@ -2189,27 +2405,36 @@ def run_openmm_rpmd_contracted(
 
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
-    _add_rpmd_reporters(
-        simulation,
-        modeller.topology,
-        output_prefix,
-        n_report,
-        n_beads,
-        atoms_to_watch,
-        expansion_metric=expansion_metric,
-        distance_pairs=distance_pairs_to_watch,
-    )
+    with _finalize_rpmd_reporters(simulation):
+        _add_rpmd_reporters(
+            simulation,
+            modeller.topology,
+            output_prefix,
+            n_report,
+            n_beads,
+            atoms_to_watch,
+            expansion_metric=expansion_metric,
+            distance_pairs=distance_pairs_to_watch,
+        )
 
-    _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
+        _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
-    print(f"\nStarting Production Run ({steps} steps)...")
-    step_rpmd(simulation, steps)
-    print("Done.", flush=True)
+        print(f"\nStarting Production Run ({steps} steps)...")
+        step_rpmd(simulation, steps)
+        print("Done.", flush=True)
 
-    print("\n--- Saving State ---", flush=True)
-    # See run_openmm_rpmd_equilibration: '_centroid.pdb' belongs to the reporter.
-    _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)
-    print(f"Saved final centroid structure to {output_prefix}_final.pdb", flush=True)
+        print("\n--- Saving State ---", flush=True)
+        # The centroid reporter owns '_centroid.pdb'; save separately.
+        _save_final_state(
+            simulation,
+            output_prefix,
+            pdb_suffix='_final.pdb',
+            n_beads=n_beads,
+        )
+        print(
+            f"Saved final centroid structure to {output_prefix}_final.pdb",
+            flush=True,
+        )
 
 
 def run_openmm_rpmd_prod(
@@ -2228,7 +2453,7 @@ def run_openmm_rpmd_prod(
         steps: int = 500_000,
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         atoms_to_watch: list[int] | None = None,
@@ -2267,8 +2492,8 @@ def run_openmm_rpmd_prod(
     time_step : openmm.unit.Quantity, optional
         Integration time step. Default is 1.0 fs.
     barostat_freq : int or None, optional
-        RPMD barostat attempt frequency. If None, no barostat is added.
-        Default is 50.
+        Positive RPMD barostat attempt frequency. The System must be periodic
+        when set. If None, no barostat is added. Default is 50.
     n_report : int, optional
         Reporter interval in steps. Default is 1000.
     steps : int, optional
@@ -2302,11 +2527,13 @@ def run_openmm_rpmd_prod(
         If *checkpoint_file* does not exist.
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
-        *barostat_freq* is set on a System carrying a ``PythonForce``.
+        *barostat_freq* is set on a nonperiodic System or one carrying a
+        ``PythonForce``.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
+    barostat_freq = _validate_barostat_frequency(system, barostat_freq)
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
@@ -2321,24 +2548,30 @@ def run_openmm_rpmd_prod(
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
-    _add_rpmd_reporters(
-        simulation,
-        modeller.topology,
-        output_prefix,
-        n_report,
-        n_beads,
-        atoms_to_watch,
-        expansion_metric=expansion_metric,
-        distance_pairs=distance_pairs_to_watch,
-    )
+    with _finalize_rpmd_reporters(simulation):
+        _add_rpmd_reporters(
+            simulation,
+            modeller.topology,
+            output_prefix,
+            n_report,
+            n_beads,
+            atoms_to_watch,
+            expansion_metric=expansion_metric,
+            distance_pairs=distance_pairs_to_watch,
+        )
 
-    _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
+        _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
-    print(f"Starting production run for {steps} steps...", flush=True)
-    step_rpmd(simulation, steps)
-    print("Production run complete.", flush=True)
+        print(f"Starting production run for {steps} steps...", flush=True)
+        step_rpmd(simulation, steps)
+        print("Production run complete.", flush=True)
 
-    _save_final_state(simulation, output_prefix, pdb_suffix='_final.pdb', n_beads=n_beads)
+        _save_final_state(
+            simulation,
+            output_prefix,
+            pdb_suffix='_final.pdb',
+            n_beads=n_beads,
+        )
 
 
 def run_openmm_adqtb_eq(
@@ -2354,7 +2587,7 @@ def run_openmm_adqtb_eq(
         output_prefix: str = 'adqtb_ready',
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
@@ -2440,7 +2673,7 @@ def run_openmm_adqtb_prod(
         output_prefix: str = 'adqtb_prod',
         platform_name: str | None = None,
         deuterate: bool = False,
-        deuterate_option: str = 'water',
+        deuterate_option: WorkflowDeuterationOption = 'water',
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
@@ -2464,8 +2697,8 @@ def run_openmm_adqtb_prod(
     pressure : openmm.unit.Quantity, optional
         Target pressure for the barostat. Default is 1.0 bar.
     barostat_freq : int or None, optional
-        Barostat attempt frequency in steps. If None, no barostat is added.
-        Default is 50.
+        Positive barostat attempt frequency in steps. The System must be
+        periodic when set. If None, no barostat is added. Default is 50.
     temperature : openmm.unit.Quantity, optional
         Simulation temperature. Default is 300.0 K.
     gamma : openmm.unit.Quantity, optional
@@ -2506,11 +2739,13 @@ def run_openmm_adqtb_prod(
     FileNotFoundError
         If *checkpoint_file* does not exist.
     ValueError
-        If *barostat_freq* is set on a System carrying a ``PythonForce``.
+        If *barostat_freq* is set on a nonperiodic System or one carrying a
+        ``PythonForce``.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
+    barostat_freq = _validate_barostat_frequency(system, barostat_freq)
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:

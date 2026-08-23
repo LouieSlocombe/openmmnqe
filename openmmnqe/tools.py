@@ -23,9 +23,29 @@ from typing import Any, Literal, TextIO
 import numpy as np
 import numpy.typing as npt
 import openmm.unit as unit
+from openmm import app, openmm
 from scipy import constants
 
-from openmm import openmm, app
+from ._validation import require_integer, require_positive_finite_scalar_in_unit
+
+WorkflowDeuterationOption = Literal[
+    "all",
+    "water",
+    "protein",
+    "dna",
+    "rna",
+    "nucleic",
+]
+
+DeuterationOption = Literal[
+    "all",
+    "water",
+    "protein",
+    "dna",
+    "rna",
+    "nucleic",
+    "ligand",
+]
 
 
 def zero_velocities(n_atoms: int) -> unit.Quantity:
@@ -82,12 +102,11 @@ def _sample_maxwell_boltzmann_velocities(system: openmm.System,
     """
     if n_copies <= 0:
         raise ValueError("n_copies must be positive")
-    if unit.is_quantity(temperature):
-        temperature_k = temperature.value_in_unit(unit.kelvin)
-    else:
-        temperature_k = float(temperature)
-    if not np.isfinite(temperature_k) or temperature_k <= 0:
-        raise ValueError("temperature must be finite and positive")
+    temperature_k = require_positive_finite_scalar_in_unit(
+        temperature,
+        unit.kelvin,
+        name="temperature",
+    )
 
     masses_amu = np.asarray([
         system.getParticleMass(index).value_in_unit(unit.dalton)
@@ -157,16 +176,15 @@ def _sample_free_ring_polymer_displacements(
     ValueError
         If the temperature is not finite and positive.
     """
-    if unit.is_quantity(temperature):
-        temperature_k = temperature.value_in_unit(unit.kelvin)
-    else:
-        temperature_k = float(temperature)
-    if not np.isfinite(temperature_k) or temperature_k <= 0:
-        raise ValueError("temperature must be finite and positive")
+    temperature_k = require_positive_finite_scalar_in_unit(
+        temperature,
+        unit.kelvin,
+        name="temperature",
+    )
 
     masses_amu = np.asarray(masses_amu, dtype=float)
     n_atoms = len(masses_amu)
-    coefficients = np.zeros(
+    coefficients: npt.NDArray[np.complex128] = np.zeros(
         (n_copies // 2 + 1, n_atoms, 3),
         dtype=np.complex128,
     )
@@ -309,16 +327,23 @@ def get_thermal_de_broglie_wavelength(mass: unit.Quantity | float,
     -------
     openmm.unit.Quantity
         The thermal de Broglie wavelength, in metres.
-    """
-    if unit.is_quantity(mass):
-        mass_amu = mass.value_in_unit(unit.dalton)
-    else:
-        mass_amu = mass
 
-    if unit.is_quantity(temperature):
-        temp_k = temperature.value_in_unit(unit.kelvin)
-    else:
-        temp_k = temperature
+    Raises
+    ------
+    ValueError
+        If *mass* or *temperature* is not a finite, positive scalar, or if a
+        supplied quantity has incompatible units.
+    """
+    mass_amu = require_positive_finite_scalar_in_unit(
+        mass,
+        unit.dalton,
+        name="mass",
+    )
+    temp_k = require_positive_finite_scalar_in_unit(
+        temperature,
+        unit.kelvin,
+        name="temperature",
+    )
 
     mass_kg = mass_amu * constants.atomic_mass
 
@@ -428,12 +453,11 @@ def init_beads(modeller: app.Modeller, simulation: app.Simulation,
         )
     if temperature is None:
         temperature = integrator_temperature
-    if unit.is_quantity(temperature):
-        temperature_k = temperature.value_in_unit(unit.kelvin)
-    else:
-        temperature_k = float(temperature)
-    if not np.isfinite(temperature_k) or temperature_k <= 0:
-        raise ValueError("temperature must be finite and positive")
+    temperature_k = require_positive_finite_scalar_in_unit(
+        temperature,
+        unit.kelvin,
+        name="temperature",
+    )
     if not np.isclose(
         temperature_k,
         integrator_temperature_k,
@@ -549,11 +573,12 @@ def step_rpmd(simulation: app.Simulation, steps: int) -> None:
 
 def count_dna_and_estimate_charge(topology: app.Topology) -> int:
     """
-    Estimate the charge of the DNA in a topology from its residue count.
+    Estimate the charge of the DNA by counting its phosphate groups.
 
-    Each nucleotide carries one deprotonated phosphate, so the charge is
-    simply minus the number of DNA residues.  This is the number of
-    counter-ions the system needs to come out neutral.
+    Each phosphate contributes one negative elementary charge. Counting
+    phosphorus atoms is robust to OpenMM's PDB loader canonicalizing terminal
+    residue names such as ``DA5`` and ``DA3`` to ``DA``. An atomless synthetic
+    topology falls back to the residue-name convention.
 
     Parameters
     ----------
@@ -566,36 +591,46 @@ def count_dna_and_estimate_charge(topology: app.Topology) -> int:
         Estimated total DNA charge, in units of the elementary charge. Zero
         or negative.
     """
+    five_prime_residue_names = {"DA5", "DC5", "DG5", "DT5"}
     dna_residue_names = {
-        "DA", "DC", "DG", "DT",  # internal
-        "DA5", "DC5", "DG5", "DT5",  # 5'-terminal
-        "DA3", "DC3", "DG3", "DT3",  # 3'-terminal
+        "DA", "DC", "DG", "DT",
+        "DA3", "DC3", "DG3", "DT3",
+        *five_prime_residue_names,
     }
 
-    num_dna_residues = 0
-
+    estimated_charge = 0
     for residue in topology.residues():
-        if residue.name.strip() in dna_residue_names:
-            num_dna_residues += 1
-
-    estimated_charge = -num_dna_residues
-
+        residue_name = residue.name.strip()
+        if residue_name not in dna_residue_names:
+            continue
+        atoms = list(residue.atoms())
+        if atoms:
+            estimated_charge -= sum(
+                atom.name.strip().upper() == "P"
+                or getattr(atom.element, "symbol", "").upper() == "P"
+                for atom in atoms
+            )
+        elif residue_name not in five_prime_residue_names:
+            # Preserve the useful residue-name estimate for sparse synthetic
+            # Topologies that do not contain atom records.
+            estimated_charge -= 1
     return estimated_charge
 
 
 def deuterate_system(
         modeller: app.Modeller,
         system: openmm.System,
-        option: Literal['all', 'water', 'protein', 'dna', 'rna', 'nucleic',
-                        'ligand'] = 'all',
+        option: DeuterationOption = 'all',
         target_resname: str | None = None) -> None:
     """
     Replace the hydrogens of a system, or part of it, with deuterium.
 
     Only the particle masses change: the topology keeps calling them
-    hydrogens, and the force field keeps treating them as such.  That is all
-    a kinetic isotope effect needs, since the potential energy surface is
-    isotope-independent and the mass is what the dynamics sees.
+    hydrogens, and the force field keeps treating them as such. This models
+    isotope substitution on the same potential-energy surface. Quantitative
+    kinetic isotope effects can still require nuclear-quantum dynamics;
+    classical or constrained simulations do not recover zero-point and
+    tunnelling contributions merely by changing the masses.
 
     Parameters
     ----------
@@ -797,10 +832,12 @@ def set_adqtb_particle_types_by_element(
     Raises
     ------
     TypeError
-        If *integrator* is not a QTB integrator.
+        If *integrator* is not a QTB integrator, or if *start_type* is not a
+        strict integer.
     ValueError
         If neither *topology* nor *particle_elements* is given, or if the
-        element count disagrees with the system's particle count.
+        element count disagrees with the system's particle count, or if
+        *start_type* is negative.
 
     Notes
     -----
@@ -813,6 +850,7 @@ def set_adqtb_particle_types_by_element(
         raise TypeError(
             "integrator must support setParticleType(index, type); expected an OpenMM QTBIntegrator."
         )
+    start_type = require_integer(start_type, name="start_type", minimum=0)
 
     def _sym_and_Z(el: app.Element | str | None) -> tuple[str, int]:
         """
@@ -872,18 +910,19 @@ def set_adqtb_particle_types_by_element(
         symbol_to_Z.setdefault(sym, Z)
 
     ordered_symbols = sorted(symbol_to_Z.items(), key=lambda kv: (kv[1], kv[0]))
-    element_to_type = {sym: start_type + i for i, (sym, _) in enumerate(ordered_symbols)}
+    element_to_type = {
+        sym: start_type + i
+        for i, (sym, _) in enumerate(ordered_symbols)
+    }
 
     for idx, el in enumerate(particle_elements):
         sym, _ = _sym_and_Z(el)
-        integrator.setParticleType(idx, int(element_to_type[sym]))
+        integrator.setParticleType(idx, element_to_type[sym])
 
     return element_to_type
 
 
-_VMD_PICK_RE = re.compile(
-    r"^\s*([A-Za-z]+)\s*(-?\d+)\s*([A-Za-z]?)\s*:\s*([A-Za-z0-9'_*]+)\s*$"
-)
+_VMD_PICK_RE = re.compile(r"^\s*([^:]+?)\s*:\s*([A-Za-z0-9'_*]+)\s*$")
 
 
 def atom_indices_from_vmd_picks(
@@ -906,7 +945,9 @@ def atom_indices_from_vmd_picks(
         Modeller whose topology is searched.
     picks : list of str
         Pick strings of the form ``"RESNAME<RESID>[INSERTION_CODE]:ATOMNAME"``,
-        e.g. ``["HIE258:CD2", "ALA12:CA", "HIE258A:CD2"]``.
+        e.g. ``["HIE258:CD2", "ALA12:CA", "HIE258A:CD2"]``. Residue names
+        may contain digits; ``"CH41:C1"`` identifies atom C1 in residue CH4
+        with residue ID 1.
     match_mode : {'unique', 'first', 'all'}, optional
         What to do when a pick matches more than one atom: ``'unique'``
         raises, ``'first'`` takes the lowest index, ``'all'`` returns them
@@ -929,11 +970,14 @@ def atom_indices_from_vmd_picks(
     """
     topo = modeller.topology
 
-    lookup = {}
+    if match_mode not in {"unique", "first", "all"}:
+        raise ValueError(f"Unknown match_mode '{match_mode}'.")
+
+    lookup: dict[tuple[str, str, str], list[int]] = {}
     for atom in topo.atoms():
         res = atom.residue
-        resid = f"{res.id}{res.insertionCode or ''}"
-        key = (res.chain.id, res.name, resid, atom.name)
+        residue_pick = f"{res.name}{res.id}{res.insertionCode or ''}"
+        key = (res.chain.id, residue_pick, atom.name)
         lookup.setdefault(key, []).append(atom.index)
 
     out: list[int | list[int]] = []
@@ -945,19 +989,27 @@ def atom_indices_from_vmd_picks(
                 f"Pick '{s}' is malformed; expected like 'HIE258:CD2' (optionally 'HIE258A:CD2')."
             )
 
-        resname, resid_num, ins_code, atomname = m.groups()
-        resid_str = f"{resid_num}{ins_code or ''}"
+        residue_pick, atomname = m.groups()
+        residue_pick = "".join(residue_pick.split())
+        if not residue_pick:
+            raise ValueError(
+                f"Pick '{s}' is malformed; expected like 'HIE258:CD2' "
+                "(optionally 'HIE258A:CD2')."
+            )
 
         matches: list[int] = []
         if chain_id is not None:
-            matches = lookup.get((chain_id, resname, resid_str, atomname), [])
+            matches = lookup.get((chain_id, residue_pick, atomname), [])
         else:
-            for (ch, rn, rid, an), idxs in lookup.items():
-                if rn == resname and rid == resid_str and an == atomname:
+            for (_, candidate_pick, candidate_atom), idxs in lookup.items():
+                if candidate_pick == residue_pick and candidate_atom == atomname:
                     matches.extend(idxs)
 
         if not matches:
-            msg = f"No atom matches pick '{s}' -> (resname='{resname}', resid='{resid_str}', atomname='{atomname}')"
+            msg = (
+                f"No atom matches pick '{s}' -> "
+                f"(residue='{residue_pick}', atomname='{atomname}')"
+            )
             if chain_id is not None:
                 msg += f" in chain '{chain_id}'"
             msg += "."
@@ -975,9 +1027,6 @@ def atom_indices_from_vmd_picks(
                     f"Use chain_id='A' (etc.), or match_mode='first'/'all'."
                 )
             out.append(matches[0])
-        else:
-            raise ValueError(f"Unknown match_mode '{match_mode}'.")
-
     return out
 
 

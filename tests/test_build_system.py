@@ -6,15 +6,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from ase.calculators.lj import LennardJones
+import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pytest
+from ase.calculators.lj import LennardJones
 from openmm import openmm
 from openmmml import MLPotential
 
-from openmmnqe.openmm import PreparedSystem, _build_system
 import openmmnqe.openmm as nqe_openmm
+from openmmnqe.openmm import PreparedSystem, _build_system
 
 TOLUENE = Path(__file__).resolve().parent / "data" / "pdb" / "toluene.pdb"
 
@@ -25,11 +26,15 @@ def _toluene_modeller() -> app.Modeller:
 
 
 class _Topology:
-    def __init__(self, periodic: bool=False) -> None:
+    def __init__(self, periodic: bool=False, n_atoms: int=4) -> None:
         self.periodic = periodic
+        self.n_atoms = n_atoms
 
     def getUnitCellDimensions(self) -> object | None:
         return object() if self.periodic else None
+
+    def getNumAtoms(self) -> int:
+        return self.n_atoms
 
 
 class _ForceField:
@@ -117,6 +122,52 @@ def test_invalid_ml_region_configurations_raise(potential: Any, calculator: Any,
             ml_idx=ml_idx,
             calculator=calculator,
         )
+
+
+@pytest.mark.parametrize(
+    ("ml_idx", "error", "message"),
+    [
+        ([True], TypeError, r"ml_idx\[0\] must be an integer"),
+        ([1.0], TypeError, r"ml_idx\[0\] must be an integer"),
+        ([-1], ValueError, r"ml_idx\[0\] must be a non-negative integer"),
+        ([4], ValueError, r"ml_idx\[0\]=4 is outside the topology"),
+        ([1, 1], ValueError, "duplicate atom index 1"),
+    ],
+)
+def test_mixed_system_rejects_invalid_ml_indices(
+    ml_idx: list[Any],
+    error: type[Exception],
+    message: str,
+) -> None:
+    with pytest.raises(error, match=message):
+        _build_system(
+            SimpleNamespace(topology=_Topology()),
+            _ForceField(),
+            "CPU",
+            potential=_Potential(),
+            ml_idx=ml_idx,
+            calculator=None,
+        )
+
+
+def test_mixed_system_normalizes_numpy_integer_indices(
+    fake_platform: list[str],
+) -> None:
+    topology = _Topology()
+    potential = _Potential()
+
+    _build_system(
+        SimpleNamespace(topology=topology),
+        _ForceField(),
+        "CPU",
+        potential=potential,
+        ml_idx=np.array([1, 3], dtype=np.int64),
+        calculator=None,
+    )
+
+    normalized = potential.calls[0][2]
+    assert normalized == [1, 3]
+    assert all(type(index) is int for index in normalized)
 
 
 def test_pure_ml_forcefield_with_calculator_builds_system() -> None:

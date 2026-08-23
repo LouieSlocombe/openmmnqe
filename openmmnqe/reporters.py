@@ -19,16 +19,16 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Sequence
 from numbers import Integral
-from typing import Any, Literal
+from types import TracebackType
+from typing import Any, Literal, Self
 
 import numpy as np
 import numpy.typing as npt
 import openmm.unit as unit
-
 from openmm import app, openmm
 
+from ._validation import require_integer
 from .tools import centroid_positions
-
 
 _SPREAD_METRICS = {"rms", "mean"}
 
@@ -205,6 +205,7 @@ def _simulation_bead_coordinates(simulation: app.Simulation,
                     asNumpy=True
                 ).value_in_unit(unit.nanometer)
         elif periodic:
+            assert reference is not None and box is not None
             displacement = positions - reference
             for axis in (2, 1, 0):
                 displacement -= box[axis] * np.round(
@@ -446,7 +447,7 @@ def _calculate_report_observables(simulation: app.Simulation,
     return spreads, distances
 
 
-class RPMDQuantumSpreadReporter(object):
+class RPMDQuantumSpreadReporter:
     """
     Log the quantum spread of selected atoms during an RPMD simulation.
 
@@ -482,8 +483,11 @@ class RPMDQuantumSpreadReporter(object):
                  metric: Literal["rms", "mean"] = "rms",
                  distance_pairs: Iterable[tuple[int, int]] | None = None,
                  distance_names: Sequence[str] | None = None) -> None:
-        if reportInterval <= 0:
-            raise ValueError("reportInterval must be positive")
+        report_interval = require_integer(
+            reportInterval,
+            name="reportInterval",
+            minimum=1,
+        )
         atom_indices, distance_pairs = _validate_observable_indices(
             atom_indices,
             distance_pairs,
@@ -495,7 +499,7 @@ class RPMDQuantumSpreadReporter(object):
             raise ValueError(
                 "distance_names must contain one entry per distance pair"
             )
-        self._reportInterval = reportInterval
+        self._reportInterval = report_interval
         self._atom_indices = atom_indices
         self._metric = metric
         self._distance_pairs = distance_pairs
@@ -519,7 +523,7 @@ class RPMDQuantumSpreadReporter(object):
         if len(set(columns)) != len(columns):
             raise ValueError("reporter column names must be unique")
         header = "Step\t" + "\t".join(columns)
-        self._out = open(file, 'w')
+        self._out = open(file, "w")
         self._out.write(header + "\n")
 
     def describeNextReport(self, simulation: app.Simulation,
@@ -569,11 +573,31 @@ class RPMDQuantumSpreadReporter(object):
         self._out.write(line + "\n")
         self._out.flush()
 
-    def __del__(self) -> None:
-        """Close the output file."""
+    def close(self) -> None:
+        """Close the output file, safely allowing repeated calls."""
         out = getattr(self, "_out", None)
-        if out is not None:
+        if out is not None and not out.closed:
             out.close()
+
+    def __enter__(self) -> Self:
+        """Return this reporter for use as a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the output file when leaving a context."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort fallback for callers that did not close the reporter."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def track_rpmd_atom_expansion(simulation: app.Simulation, atom_index: int,
@@ -958,6 +982,7 @@ def plot_rpmd_atom_expansion(file: str | os.PathLike[str], *,
         else f"Quantum radius of gyration ({unit_label})"
     )
 
+    axes: tuple[Any, ...]
     if path_progress is None:
         if len(distance_columns) != 1:
             raise ValueError(
@@ -1039,7 +1064,7 @@ def plot_rpmd_atom_expansion(file: str | os.PathLike[str], *,
     return figure, axes
 
 
-class RPMDBeadReporter(object):
+class RPMDBeadReporter:
     """
     Write the trajectory of every individual bead to its own PDB file.
 
@@ -1061,21 +1086,26 @@ class RPMDBeadReporter(object):
 
     def __init__(self, file_base_name: str, reportInterval: int,
                  num_beads: int, topology: app.Topology) -> None:
-        if reportInterval <= 0:
-            raise ValueError("reportInterval must be positive")
-        if num_beads <= 0:
-            raise ValueError("num_beads must be positive")
-        self._reportInterval = reportInterval
-        self._num_beads = num_beads
+        self._reportInterval = require_integer(
+            reportInterval,
+            name="reportInterval",
+            minimum=1,
+        )
+        self._num_beads = require_integer(
+            num_beads,
+            name="num_beads",
+            minimum=1,
+        )
         self._topology = topology
         self._next_frame_index = 0
+        self._closed = False
 
         self._files = []
-        for i in range(num_beads):
+        for i in range(self._num_beads):
             filename = f"{file_base_name}_bead_{i}.pdb"
-            f = open(filename, 'w')
-            app.PDBFile.writeHeader(topology, f)
-            self._files.append(f)
+            output = open(filename, "w")
+            self._files.append(output)
+            app.PDBFile.writeHeader(topology, output)
 
     def describeNextReport(self, simulation: app.Simulation,
                            ) -> tuple[int, bool, bool, bool, bool]:
@@ -1114,7 +1144,12 @@ class RPMDBeadReporter(object):
             bead_state = integrator.getState(i, getPositions=True, enforcePeriodicBox=True)
             positions = bead_state.getPositions()
 
-            app.PDBFile.writeModel(self._topology, positions, self._files[i], self._next_frame_index)
+            app.PDBFile.writeModel(
+                self._topology,
+                positions,
+                self._files[i],
+                self._next_frame_index + 1,
+            )
 
             # Flushing every frame would cost more than it buys with one file
             # per bead.
@@ -1123,19 +1158,48 @@ class RPMDBeadReporter(object):
 
         self._next_frame_index += 1
 
-    def __del__(self) -> None:
-        """Write the PDB footers and close every bead file."""
-        for f in getattr(self, "_files", []):
+    def close(self) -> None:
+        """Write each PDB footer once and close every bead file."""
+        if getattr(self, "_closed", True):
+            return
+        self._closed = True
+
+        first_error: Exception | None = None
+        for output in getattr(self, "_files", []):
+            if output.closed:
+                continue
             try:
-                # The footer has to go in before the close, or the file is not
-                # valid PDB.
-                app.PDBFile.writeFooter(self._topology, f)
-                f.close()
-            except Exception:
-                pass
+                app.PDBFile.writeFooter(self._topology, output)
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+            finally:
+                output.close()
+        if first_error is not None:
+            raise first_error
+
+    def __enter__(self) -> Self:
+        """Return this reporter for use as a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Finalize the bead trajectories when leaving a context."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort fallback for callers that did not close the reporter."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
-class RPMDCentroidReporter(object):
+class RPMDCentroidReporter:
     """
     Write the centroid of the ring polymer to a single PDB file.
 
@@ -1157,15 +1221,20 @@ class RPMDCentroidReporter(object):
 
     def __init__(self, file_name: str, reportInterval: int,
                  num_beads: int, topology: app.Topology) -> None:
-        if reportInterval <= 0:
-            raise ValueError("reportInterval must be positive")
-        if num_beads <= 0:
-            raise ValueError("num_beads must be positive")
-        self._reportInterval = reportInterval
-        self._num_beads = num_beads
+        self._reportInterval = require_integer(
+            reportInterval,
+            name="reportInterval",
+            minimum=1,
+        )
+        self._num_beads = require_integer(
+            num_beads,
+            name="num_beads",
+            minimum=1,
+        )
         self._topology = topology
         self._next_frame_index = 0
-        self._out = open(file_name, 'w')
+        self._closed = False
+        self._out = open(file_name, "w")
         app.PDBFile.writeHeader(topology, self._out)
 
     def describeNextReport(self, simulation: app.Simulation,
@@ -1212,16 +1281,47 @@ class RPMDCentroidReporter(object):
             self._num_beads,
         )
 
-        app.PDBFile.writeModel(self._topology, centroid_pos, self._out, self._next_frame_index)
+        app.PDBFile.writeModel(
+            self._topology,
+            centroid_pos,
+            self._out,
+            self._next_frame_index + 1,
+        )
         self._next_frame_index += 1
 
         if self._next_frame_index % 10 == 0:
             self._out.flush()
 
-    def __del__(self) -> None:
-        """Write the PDB footer and close the output file."""
+    def close(self) -> None:
+        """Write the PDB footer once and close the output file."""
+        if getattr(self, "_closed", True):
+            return
+        self._closed = True
+
+        out = getattr(self, "_out", None)
+        if out is None or out.closed:
+            return
         try:
-            app.PDBFile.writeFooter(self._topology, self._out)
-            self._out.close()
+            app.PDBFile.writeFooter(self._topology, out)
+        finally:
+            out.close()
+
+    def __enter__(self) -> Self:
+        """Return this reporter for use as a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Finalize the centroid trajectory when leaving a context."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort fallback for callers that did not close the reporter."""
+        try:
+            self.close()
         except Exception:
             pass

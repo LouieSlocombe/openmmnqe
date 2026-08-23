@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, TextIO
 
 import numpy as np
@@ -106,6 +106,21 @@ def test_rpmd_stages_run_on_a_prepared_system(one_particle_system: tuple[app.Mod
     with np.load("rpmd_prod.chk", allow_pickle=False) as archive:
         assert archive["num_beads"].item() == 2
         assert archive["step_count"].item() == 8
+
+
+def test_production_rejects_default_barostat_for_nonperiodic_system(
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    modeller, forcefield = one_particle_system
+    prepared = nqe.PreparedSystem(forcefield.createSystem(modeller.topology))
+
+    with pytest.raises(ValueError, match="barostat requires a periodic System"):
+        nqe.run_openmm_prod(
+            modeller,
+            prepared,
+            steps=0,
+            platform_name="Reference",
+        )
 
 
 def test_maybe_deuterate_only_calls_helper_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:

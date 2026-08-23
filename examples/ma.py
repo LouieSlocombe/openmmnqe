@@ -12,12 +12,12 @@ import forcefill as ff
 import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
+import reactiontools as rt
 from ase.io import read, write
 from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 
 import openmmnqe as nqe
-import reactiontools as rt
 
 if __name__ == "__main__":
     print(flush=True)

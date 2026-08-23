@@ -5,8 +5,8 @@ from __future__ import annotations
 import itertools
 import os
 import shutil
-from pathlib import Path
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 import forcefill as ff

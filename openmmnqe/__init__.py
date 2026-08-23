@@ -46,6 +46,7 @@ transfer, turning a steered trajectory into a reference path, and plotting the
 free-energy surface that comes out -- lives in
 `reactiontools <https://github.com/LouieSlocombe/reactiontools>`_::
 
+    import openmmnqe as nqe
     import reactiontools as rt
 
     product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
@@ -59,60 +60,122 @@ The reactiontools builders take the ``openmm.app.Modeller`` and
 is already to hand.
 """
 
-__version__ = "0.1.0"
+import os as _os
+from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
+from importlib.metadata import version as _distribution_version
 
-from .io import (remove_directory,
-                 copy_and_rename_file,
-                 list_files_with_pattern,
-                 xyz_to_sdf,
-                 relabel_residues_in_pdb,
-                 remove_residues_in_pdb,
-                 fix_pdb,
-                 convert_sdfs_to_pdb,
-                 save_pdb_selection,
-                 remove_file_pattern,
-                 remove_file,
-                 move_pdb_to_origin,
-                 center_in_box,
-                 fix_pdb_chains,
-                 fix_pdb_atom_labels,
-                 save_only_index_atoms,
-                 )
-from .openmm import (PreparedSystem,
-                     run_openmm_relaxation,
-                     run_openmm_relaxation_simple,
-                     run_openmm_heating,
-                     run_openmm_npt,
-                     run_openmm_prod,
-                     run_openmm_rpmd_equilibration,
-                     run_openmm_rpmd_contracted,
-                     run_openmm_rpmd_prod,
-                     run_openmm_adqtb_eq,
-                     run_openmm_adqtb_prod,
-                     run_openmm_steered,
-                     )
-from .reporters import (RPMDQuantumSpreadReporter,
-                        RPMDBeadReporter,
-                        RPMDCentroidReporter,
-                        track_rpmd_atom_expansion,
-                        plot_rpmd_atom_expansion,
-                        )
-from .tools import (zero_velocities,
-                    write_multimodel_pdb,
-                    centroid_positions,
-                    init_beads,
-                    step_rpmd,
-                    get_thermal_de_broglie_wavelength,
-                    count_dna_and_estimate_charge,
-                    deuterate_system,
-                    get_atoms_in_residue,
-                    set_adqtb_particle_types_by_element,
-                    atom_indices_from_vmd_picks,
-                    distance_between_atoms,
-                    angle_between_atoms,
-                    check_platform,
-                    )
+from .io import (
+    center_in_box,
+    convert_sdfs_to_pdb,
+    copy_and_rename_file,
+    fix_pdb,
+    fix_pdb_atom_labels,
+    fix_pdb_chains,
+    list_files_with_pattern,
+    move_pdb_to_origin,
+    relabel_residues_in_pdb,
+    remove_directory,
+    remove_file,
+    remove_file_pattern,
+    remove_residues_in_pdb,
+    save_only_index_atoms,
+    save_pdb_selection,
+    xyz_to_sdf,
+)
+from .openmm import (
+    PreparedSystem,
+    run_openmm_adqtb_eq,
+    run_openmm_adqtb_prod,
+    run_openmm_heating,
+    run_openmm_npt,
+    run_openmm_prod,
+    run_openmm_relaxation,
+    run_openmm_relaxation_simple,
+    run_openmm_rpmd_contracted,
+    run_openmm_rpmd_equilibration,
+    run_openmm_rpmd_prod,
+    run_openmm_steered,
+)
+from .reporters import (
+    RPMDBeadReporter,
+    RPMDCentroidReporter,
+    RPMDQuantumSpreadReporter,
+    plot_rpmd_atom_expansion,
+    track_rpmd_atom_expansion,
+)
+from .tools import (
+    angle_between_atoms,
+    atom_indices_from_vmd_picks,
+    centroid_positions,
+    check_platform,
+    count_dna_and_estimate_charge,
+    deuterate_system,
+    distance_between_atoms,
+    get_atoms_in_residue,
+    get_thermal_de_broglie_wavelength,
+    init_beads,
+    set_adqtb_particle_types_by_element,
+    step_rpmd,
+    write_multimodel_pdb,
+    zero_velocities,
+)
 
-import os
+__all__ = [
+    "PreparedSystem",
+    "RPMDBeadReporter",
+    "RPMDCentroidReporter",
+    "RPMDQuantumSpreadReporter",
+    "__version__",
+    "angle_between_atoms",
+    "atom_indices_from_vmd_picks",
+    "center_in_box",
+    "centroid_positions",
+    "check_platform",
+    "convert_sdfs_to_pdb",
+    "copy_and_rename_file",
+    "count_dna_and_estimate_charge",
+    "deuterate_system",
+    "distance_between_atoms",
+    "fix_pdb",
+    "fix_pdb_atom_labels",
+    "fix_pdb_chains",
+    "get_atoms_in_residue",
+    "get_thermal_de_broglie_wavelength",
+    "init_beads",
+    "list_files_with_pattern",
+    "move_pdb_to_origin",
+    "openmm_nqe_dir",
+    "plot_rpmd_atom_expansion",
+    "relabel_residues_in_pdb",
+    "remove_directory",
+    "remove_file",
+    "remove_file_pattern",
+    "remove_residues_in_pdb",
+    "run_openmm_adqtb_eq",
+    "run_openmm_adqtb_prod",
+    "run_openmm_heating",
+    "run_openmm_npt",
+    "run_openmm_prod",
+    "run_openmm_relaxation",
+    "run_openmm_relaxation_simple",
+    "run_openmm_rpmd_contracted",
+    "run_openmm_rpmd_equilibration",
+    "run_openmm_rpmd_prod",
+    "run_openmm_steered",
+    "save_only_index_atoms",
+    "save_pdb_selection",
+    "set_adqtb_particle_types_by_element",
+    "step_rpmd",
+    "track_rpmd_atom_expansion",
+    "write_multimodel_pdb",
+    "xyz_to_sdf",
+    "zero_velocities",
+]
 
-openmm_nqe_dir = os.path.dirname(os.path.realpath(__file__))
+try:
+    __version__ = _distribution_version("openmmnqe")
+except _PackageNotFoundError:
+    # Importing directly from an unpacked source tree has no installed metadata.
+    __version__ = "0.1.0"
+
+openmm_nqe_dir = _os.path.dirname(_os.path.realpath(__file__))

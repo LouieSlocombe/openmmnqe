@@ -17,8 +17,8 @@ authors = [
 dependencies = [
     "numpy",
     "scipy",
-    "openmm",
-    "openmmml",      # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
+    "openmm>=8.5.2",
+    "openmmml>=1.6",  # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
     "openmmplumed",  # conda-forge: openmm-plumed (dist name OpenMMPlumed) -- same
     "ase",
     "pdbfixer",      # openmmnqe.io.fix_pdb -- forcefill is subtractive only and will not repair
@@ -48,6 +48,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "matplotlib",
+    "mypy",
 ]
 
 [tool.pytest.ini_options]
@@ -62,10 +63,18 @@ Homepage = "https://github.com/LouieSlocombe/openmmnqe"
 Repository = "https://github.com/LouieSlocombe/openmmnqe"
 
 [tool.ruff.lint]
-select = ["F", "E9"]
+select = ["F", "E9", "I", "B", "UP"]
 
-[tool.ruff.lint.per-file-ignores]
-"openmmnqe/__init__.py" = ["F401"]  # re-export module until __all__ lands
+[tool.mypy]
+python_version = "3.12"
+files = ["openmmnqe"]
+follow_imports = "silent"
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
 
 [tool.setuptools]
 include-package-data = true

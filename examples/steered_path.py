@@ -12,10 +12,10 @@ import os
 
 import openmm.app as app
 import openmm.unit as unit
+import reactiontools as rt
 from openmmml import MLPotential
 
 import openmmnqe as nqe
-import reactiontools as rt
 
 MALONALDEHYDE = 'tests/data/pdb/malonaldehyde.pdb'
 

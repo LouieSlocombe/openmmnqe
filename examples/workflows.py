@@ -10,12 +10,12 @@ from collections.abc import Sequence
 import forcefill as ff
 import openmm.app as app
 import openmm.unit as unit
+import reactiontools as rt
 from ase.io import read, write
 from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 
 import openmmnqe as nqe
-import reactiontools as rt
 
 BASE_FORCEFIELD = ("amber14-all.xml", "amber14/tip3pfb.xml")
 

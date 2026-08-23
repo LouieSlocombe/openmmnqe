@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import os
 
-from ase.calculators.orca import ORCA, OrcaProfile
-from mace.calculators.foundations_models import mace_off
 import openmm.app as app
 import openmm.unit as unit
+from ase.calculators.orca import ORCA, OrcaProfile
+from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 
 import openmmnqe as nqe

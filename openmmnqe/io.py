@@ -58,12 +58,11 @@ from typing import TextIO
 
 import numpy as np
 import openmm.unit as unit
-from openmm.app import PDBFile, Topology, Element, Modeller
+from openmm import Vec3, app
+from openmm.app import Element, Modeller, PDBFile, Topology
 from pdbfixer import PDBFixer
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
-
-from openmm import app, Vec3
 from reactiontools import format_pdb_atom_name
 
 
@@ -115,7 +114,9 @@ def list_files_with_pattern(directory: str, pattern: str) -> list[str]:
     return glob.glob(os.path.join(directory, pattern))
 
 
-def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
+def xyz_to_sdf(xyz_path: str | os.PathLike[str],
+               sdf_path: str | os.PathLike[str],
+               default_charge: int = 0,
                sanitize: bool = True, kekulize: bool = False) -> int:
     """
     Convert an XYZ file to SDF, inferring the bonds as it goes.
@@ -128,9 +129,9 @@ def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
 
     Parameters
     ----------
-    xyz_path : str
+    xyz_path : str or os.PathLike
         Path to the input XYZ file. May hold more than one frame.
-    sdf_path : str
+    sdf_path : str or os.PathLike
         Path to the output SDF file.
     default_charge : int, optional
         Total charge assumed for any frame whose comment does not give one.
@@ -196,7 +197,9 @@ def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
                 pass
         return fallback
 
-    def _read_xyz_frames(path: str) -> list[tuple[str, list[str]]]:
+    def _read_xyz_frames(
+        path: str | os.PathLike[str],
+    ) -> list[tuple[str, list[str]]]:
         """
         Split an XYZ file into its frames.
 
@@ -217,7 +220,7 @@ def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
             file holds no frames at all.
         """
         frames = []
-        with open(path, 'r', encoding='utf-8') as fh:
+        with open(path, encoding='utf-8') as fh:
             lines = [ln.rstrip('\n') for ln in fh]
         i = 0
         n_total = len(lines)
@@ -229,7 +232,9 @@ def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
             try:
                 n = int(lines[i].strip())
             except ValueError:
-                raise ValueError(f"Expected atom count at line {i + 1}, got: {lines[i]!r}")
+                raise ValueError(
+                    f"Expected atom count at line {i + 1}, got: {lines[i]!r}"
+                ) from None
             i += 1
             if i >= n_total:
                 raise ValueError("Unexpected EOF after atom count.")
@@ -273,8 +278,7 @@ def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
         """
         rw = Chem.RWMol()
         conf = Chem.Conformer(len(coord_lines))
-        symbols = []
-        for idx, line in enumerate(coord_lines):
+        for line in coord_lines:
             parts = line.split()
             if len(parts) < 4:
                 raise ValueError(f"Bad XYZ atom line (needs 'El x y z'): {line!r}")
@@ -282,11 +286,12 @@ def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
             try:
                 x, y, z = map(float, parts[1:4])
             except ValueError:
-                raise ValueError(f"Bad XYZ coordinates on line: {line!r}")
+                raise ValueError(
+                    f"Bad XYZ coordinates on line: {line!r}"
+                ) from None
             a = Chem.Atom(sym)
             atom_idx = rw.AddAtom(a)
             conf.SetAtomPosition(atom_idx, (x, y, z))
-            symbols.append(sym)
 
         mol = rw.GetMol()
         conf.Set3D(True)
@@ -301,42 +306,52 @@ def xyz_to_sdf(xyz_path: str, sdf_path: str, default_charge: int = 0,
     frames = _read_xyz_frames(xyz_path)
     base_name = os.path.splitext(os.path.basename(xyz_path))[0]
 
-    writer = Chem.SDWriter(sdf_path)
+    writer = Chem.SDWriter(os.fspath(sdf_path))
     if writer is None:
-        raise IOError(f"Could not open SDF writer for: {sdf_path}")
+        raise OSError(f"Could not open SDF writer for: {sdf_path}")
 
     n_written = 0
-    for idx, (comment, coord_lines) in enumerate(frames, start=1):
-        name_fallback = f"{base_name}_{idx}" if len(frames) > 1 else base_name
-        mol = _frame_to_mol(comment, coord_lines, name_fallback)
+    try:
+        for idx, (comment, coord_lines) in enumerate(frames, start=1):
+            name_fallback = (
+                f"{base_name}_{idx}" if len(frames) > 1 else base_name
+            )
+            mol = _frame_to_mol(comment, coord_lines, name_fallback)
 
-        total_charge = _parse_charge_from_comment(comment, default_charge)
+            total_charge = _parse_charge_from_comment(comment, default_charge)
 
-        rdDetermineBonds.DetermineBonds(mol, charge=total_charge)
+            rdDetermineBonds.DetermineBonds(mol, charge=total_charge)
 
-        if sanitize:
-            try:
-                Chem.SanitizeMol(mol)
-            except Exception:
-                Chem.SanitizeMol(
-                    mol,
-                    sanitizeOps=Chem.SanitizeFlags.SANITIZE_FINDRADICALS |
-                                Chem.SanitizeFlags.SANITIZE_SETAROMATICITY |
-                                Chem.SanitizeFlags.SANITIZE_SYMMRINGS
-                )
+            if sanitize:
+                try:
+                    Chem.SanitizeMol(mol)
+                except Exception:
+                    Chem.SanitizeMol(
+                        mol,
+                        sanitizeOps=(
+                            Chem.SanitizeFlags.SANITIZE_FINDRADICALS
+                            | Chem.SanitizeFlags.SANITIZE_SETAROMATICITY
+                            | Chem.SanitizeFlags.SANITIZE_SYMMRINGS
+                        ),
+                    )
 
-        if kekulize:
-            try:
-                Chem.Kekulize(mol, clearAromaticFlags=True)
-            except Exception:
-                pass
+            if kekulize:
+                try:
+                    Chem.Kekulize(mol, clearAromaticFlags=True)
+                except Exception:
+                    pass
 
-        writer.write(mol)
-        smi = Chem.MolToSmiles(mol, allBondsExplicit=True, allHsExplicit=True)
-        print(f"SMI: {smi}")
-        n_written += 1
+            writer.write(mol)
+            smi = Chem.MolToSmiles(
+                mol,
+                allBondsExplicit=True,
+                allHsExplicit=True,
+            )
+            print(f"SMI: {smi}")
+            n_written += 1
+    finally:
+        writer.close()
 
-    writer.close()
     return n_written
 
 
@@ -404,7 +419,7 @@ def relabel_residues_in_pdb(pdb_file_path: str | os.PathLike[str],
 
 def remove_residues_in_pdb(input_pdb: str | os.PathLike[str],
                            output_pdb: str | os.PathLike[str],
-                           names: Iterable[str]) -> None:
+                           names: str | Iterable[str]) -> None:
     """
     Remove every residue with one of the given names from a PDB file.
 
@@ -421,11 +436,12 @@ def remove_residues_in_pdb(input_pdb: str | os.PathLike[str],
         Path to the input PDB file.
     output_pdb : str or os.PathLike
         Path to write the result to. May be the input path.
-    names : iterable of str
-        Residue names to delete, matched exactly.
+    names : str or iterable of str
+        Residue name or names to delete, matched exactly.
     """
     pdb = PDBFile(os.fspath(input_pdb))
     modeller = Modeller(pdb.topology, pdb.positions)
+    names = {names} if isinstance(names, str) else frozenset(names)
 
     residues_to_delete = [res for res in modeller.topology.residues()
                           if res.name in names]
@@ -511,22 +527,56 @@ def convert_sdfs_to_pdb(
         Path(s) to the input SDF file(s).
     output_filename : str or os.PathLike, optional
         Path for the output PDB file. Default is ``'combined_output.pdb'``.
+
+    Raises
+    ------
+    ValueError
+        If no inputs are provided, or an input is empty or contains a
+        malformed molecule record. Validation finishes before the output is
+        opened, so a bad later input cannot produce a partial PDB.
     """
     if isinstance(input_files, (str, os.PathLike)):
         input_files = [input_files]
-    all_mols = []
+    if not input_files:
+        raise ValueError("No SDF input files were provided.")
+
+    all_mols: list[tuple[Chem.Mol, str | os.PathLike[str]]] = []
     for sdf_path in input_files:
-        suppl = Chem.SDMolSupplier(sdf_path, removeHs=False, sanitize=True)
-        for mol in suppl:
-            if mol is not None:
-                all_mols.append((mol, sdf_path))
+        sdf_path_str = os.fspath(sdf_path)
+        if not os.path.exists(sdf_path_str):
+            raise FileNotFoundError(sdf_path_str)
+        try:
+            suppl = Chem.SDMolSupplier(
+                sdf_path_str,
+                removeHs=False,
+                sanitize=True,
+            )
+        except OSError as exc:
+            raise ValueError(
+                f"SDF file is empty or malformed: {sdf_path_str}"
+            ) from exc
+
+        found_record = False
+        for record_index, mol in enumerate(suppl, start=1):
+            found_record = True
+            if mol is None:
+                raise ValueError(
+                    f"Malformed molecule record {record_index} in SDF file: "
+                    f"{sdf_path_str}"
+                )
+            all_mols.append((mol, sdf_path))
+        if not found_record:
+            raise ValueError(
+                f"SDF file contains no molecule records: {sdf_path_str}"
+            )
+
     combined_topology = Topology()
     combined_positions = []
     for mol, sdf_path in all_mols:
         res_name = os.path.splitext(os.path.basename(sdf_path))[0]
         residue = combined_topology.addResidue(res_name, combined_topology.addChain())
         rdkit_idx_to_atom = {}
-        element_counts = {}
+        element_counts: dict[str, int] = {}
         for atom in mol.GetAtoms():
             symbol = atom.GetSymbol()
             element = Element.getBySymbol(symbol)
@@ -606,22 +656,22 @@ def remove_file_pattern(pattern: str) -> None:
     for path in glob.glob(pattern):
         try:
             os.remove(path)
-        except OSError:
+        except FileNotFoundError:
             pass
 
 
-def remove_file(file_path: str) -> None:
+def remove_file(file_path: str | os.PathLike[str]) -> None:
     """
     Remove a file if it exists.
 
     Parameters
     ----------
-    file_path : str
+    file_path : str or os.PathLike
         The path to the file to be removed.
     """
     try:
         os.remove(file_path)
-    except OSError:
+    except FileNotFoundError:
         pass
 
 
@@ -711,7 +761,7 @@ def fix_pdb_chains(input_file: str, output_file: str) -> None:
     chain_chars = string.ascii_uppercase + string.ascii_lowercase + string.digits
     current_residue = None
     chain_index = -1
-    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+    with open(input_file) as infile, open(output_file, 'w') as outfile:
         for line in infile:
             if line.startswith(("ATOM  ", "HETATM")):
                 res_id = (line[21], line[22:27])
@@ -740,9 +790,9 @@ def fix_pdb_atom_labels(input_file: str, output_file: str) -> None:
         Path to the output PDB file with corrected atom labels.
     """
     current_residue = None
-    element_counts = {}
+    element_counts: dict[str, int] = {}
     global_atom_serial = 1
-    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+    with open(input_file) as infile, open(output_file, 'w') as outfile:
         for line in infile:
             if line.startswith(("ATOM  ", "HETATM")):
                 res_id = (line[21], line[22:27])
@@ -766,7 +816,8 @@ def fix_pdb_atom_labels(input_file: str, output_file: str) -> None:
 
 
 def save_only_index_atoms(modeller: Modeller, idx_list: Iterable[int],
-                          file_idx: str = 'index_atoms.pdb') -> None:
+                          file_idx: str | os.PathLike[str] = 'index_atoms.pdb',
+                          ) -> None:
     """
     Write out only the chosen atoms of a Modeller.
 
@@ -783,12 +834,17 @@ def save_only_index_atoms(modeller: Modeller, idx_list: Iterable[int],
         Modeller holding the full system.
     idx_list : iterable of int
         0-based indices of the atoms to keep.
-    file_idx : str, optional
+    file_idx : str or os.PathLike, optional
         Path to write to. Default is ``'index_atoms.pdb'``, which is the
         name the PLUMED inputs in :mod:`reactiontools.tools_cv` reference.
     """
     modeller_new = app.Modeller(modeller.topology, modeller.positions)
-    atoms_to_keep = [atom for atom in modeller_new.topology.atoms() if atom.index in idx_list]
-    modeller_new.delete([atom for atom in modeller_new.topology.atoms() if atom not in atoms_to_keep])
+    keep_indices = frozenset(idx_list)
+    atoms_to_delete = [
+        atom
+        for atom in modeller_new.topology.atoms()
+        if atom.index not in keep_indices
+    ]
+    modeller_new.delete(atoms_to_delete)
     with open(file_idx, 'w') as f:
         app.PDBFile.writeFile(modeller_new.topology, modeller_new.positions, f)

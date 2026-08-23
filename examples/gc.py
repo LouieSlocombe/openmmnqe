@@ -13,10 +13,10 @@ import forcefill as ff
 import matplotlib.pyplot as plt
 import openmm.app as app
 import openmm.unit as unit
+import reactiontools as rt
 from openmmml import MLPotential
 
 import openmmnqe as nqe
-import reactiontools as rt
 
 if __name__ == "__main__":
     print(flush=True)
