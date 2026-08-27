@@ -61,6 +61,19 @@ class _ExternalForce:
         self.particles.append((index, parameters))
 
 
+class _Barostat:
+    def __init__(self, kind: str, args: tuple[Any, ...]) -> None:
+        self.kind = kind
+        self.args = args
+        self._group = 0
+
+    def setForceGroup(self, group: int) -> None:
+        self._group = group
+
+    def getForceGroup(self) -> int:
+        return self._group
+
+
 class _Integrator:
     def __init__(self, kind: str, args: tuple[Any, ...]) -> None:
         self.kind = kind
@@ -165,9 +178,9 @@ def workflow_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
         return factory
 
-    def make_barostat(kind: str) -> Callable[..., SimpleNamespace]:
-        def factory(*args: Any) -> SimpleNamespace:
-            barostat = SimpleNamespace(kind=kind, args=args)
+    def make_barostat(kind: str) -> Callable[..., _Barostat]:
+        def factory(*args: Any) -> _Barostat:
+            barostat = _Barostat(kind, args)
             calls.barostats.append(barostat)
             return barostat
 
@@ -866,17 +879,19 @@ def test_contracted_rpmd_validates_explicit_contractions_before_building(
         nqe_openmm.run_openmm_adqtb_prod,
     ],
 )
-def test_nqe_production_stages_reject_default_barostat_on_python_force(
+def test_nqe_production_stages_warn_but_run_default_barostat_on_python_force(
     workflow_runtime: SimpleNamespace,
     stage: Callable[..., None],
 ) -> None:
     runtime = workflow_runtime
-    runtime.system.forces = [nqe_openmm.openmm.PythonForce(lambda *args: 0.0)]
+    python_force = nqe_openmm.openmm.PythonForce(lambda *args: 0.0)
+    runtime.system.forces = [python_force]
 
-    with pytest.raises(ValueError, match="PythonForce"):
+    with pytest.warns(UserWarning, match="PythonForce"):
         stage(runtime.modeller, forcefield=object())
 
-    assert runtime.calls.barostats == []
+    barostat = runtime.calls.barostats[0]
+    assert runtime.system.forces == [python_force, barostat]
 
 
 def test_adqtb_equilibration_configures_adaptation_and_checkpoint_reporting(

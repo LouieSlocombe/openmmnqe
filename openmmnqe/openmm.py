@@ -38,6 +38,7 @@ import json
 import os
 import sys
 import tempfile
+import warnings
 import zipfile
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -647,30 +648,39 @@ def _validate_barostat_frequency(
     return frequency
 
 
-def _reject_barostat_on_python_force(system: openmm.System) -> None:
+def _warn_barostat_on_python_force(system: openmm.System) -> None:
     """
-    Refuse to add a barostat to a System carrying a ``PythonForce``.
+    Warn when a barostat is added to a System carrying a ``PythonForce``.
 
-    Volume moves under an external per-bead potential (a QM/MM export, for
-    example) are untested and the potential's periodicity handling is owned
-    by whoever built the System, so the combination is rejected rather than
-    run.
+    OpenMM builds its molecule list from constraints and the bonded pairs each
+    force reports, and a ``PythonForce`` reports none, so every atom it covers
+    becomes its own molecule and the barostat scales those atoms individually
+    instead of translating molecules rigidly.  That is still a valid volume
+    move -- the Jacobian follows whatever is scaled -- but acceptance falls off
+    once stiff covalent bonds are being strained, and a callback that ignores
+    the box vectors it is handed contributes nothing to the energy change at
+    all.  Both are worth knowing about; neither is worth refusing to run.
 
     Parameters
     ----------
     system : openmm.System
         System about to receive a barostat force.
 
-    Raises
-    ------
-    ValueError
+    Warns
+    -----
+    UserWarning
         If any force on *system* is an ``openmm.PythonForce``.
     """
     if any(isinstance(force, openmm.PythonForce)
            for force in system.getForces()):
-        raise ValueError(
-            "A barostat cannot be combined with an external PythonForce "
-            "potential; pass barostat_freq=None"
+        warnings.warn(
+            "Adding a barostat to a System carrying an external PythonForce "
+            "potential: OpenMM sees no bonds through that force, so its atoms "
+            "are scaled one at a time rather than as molecules. Watch the "
+            "barostat acceptance rate, and check that the potential responds "
+            "to the periodic box vectors it is passed; pass barostat_freq=None "
+            "to run at fixed volume instead.",
+            stacklevel=3,
         )
 
 
@@ -2355,7 +2365,12 @@ def run_openmm_rpmd_contracted(
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
         a contraction is invalid, or *barostat_freq* is set on a nonperiodic
-        System or one carrying a ``PythonForce``.
+        System.
+
+    Warns
+    -----
+    UserWarning
+        If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
     n_beads = _validate_rpmd_n_beads(n_beads)
     contractions = _validate_rpmd_contractions(contractions, n_beads)
@@ -2366,7 +2381,7 @@ def run_openmm_rpmd_contracted(
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
-        _reject_barostat_on_python_force(system)
+        _warn_barostat_on_python_force(system)
         system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     _load_plumed(system, plumed_script_path)
@@ -2527,8 +2542,12 @@ def run_openmm_rpmd_prod(
         If *checkpoint_file* does not exist.
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
-        *barostat_freq* is set on a nonperiodic System or one carrying a
-        ``PythonForce``.
+        *barostat_freq* is set on a nonperiodic System.
+
+    Warns
+    -----
+    UserWarning
+        If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -2537,7 +2556,7 @@ def run_openmm_rpmd_prod(
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
-        _reject_barostat_on_python_force(system)
+        _warn_barostat_on_python_force(system)
         system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
 
     _load_plumed(system, plumed_script_path)
@@ -2739,8 +2758,12 @@ def run_openmm_adqtb_prod(
     FileNotFoundError
         If *checkpoint_file* does not exist.
     ValueError
-        If *barostat_freq* is set on a nonperiodic System or one carrying a
-        ``PythonForce``.
+        If *barostat_freq* is set on a nonperiodic System.
+
+    Warns
+    -----
+    UserWarning
+        If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
@@ -2749,7 +2772,7 @@ def run_openmm_adqtb_prod(
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
-        _reject_barostat_on_python_force(system)
+        _warn_barostat_on_python_force(system)
         system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
 
     _load_plumed(system, plumed_script_path)

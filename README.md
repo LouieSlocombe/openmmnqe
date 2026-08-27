@@ -79,8 +79,11 @@ Bridge from the classical preparation stages into RPMD-on-a-prepared-System thro
 binary `.chk`: an ordinary Context checkpoint only loads into an identical System, while the RPMD bead archive
 validates masses, topology, temperature, and periodicity but not forces, so it survives the System gaining a force.
 Stage options that mutate the System (`deuterate`, a non-None `barostat_freq`, `plumed_script_path`) mutate the held
-instance, so build a fresh `PreparedSystem` per mutating stage, and pass `barostat_freq=None` when the System carries
-a QM/MM force.
+instance, so build a fresh `PreparedSystem` per mutating stage. A barostat on a System carrying a `PythonForce` warns
+rather than refusing: OpenMM builds its molecule list from the bonded pairs each force reports and a `PythonForce`
+reports none, so those atoms are scaled one at a time instead of as molecules. That is still a valid volume move, but
+watch the acceptance rate and check the potential responds to the box vectors it is handed; pass `barostat_freq=None`
+to run at fixed volume instead.
 
 ## Examples
 
