@@ -250,6 +250,11 @@ def test_add_rpmd_reporters_builds_spread_centroid_and_beads(monkeypatch: pytest
         "RPMDBeadReporter",
         lambda **kwargs: ("beads", kwargs),
     )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDThermodynamicReporter",
+        lambda **kwargs: ("thermo", kwargs),
+    )
     simulation = SimpleNamespace(reporters=[])
     topology = SimpleNamespace(getNumAtoms=lambda: 4)
 
@@ -268,12 +273,17 @@ def test_add_rpmd_reporters_builds_spread_centroid_and_beads(monkeypatch: pytest
         "spread",
         "centroid",
         "beads",
+        "thermo",
     ]
     assert simulation.reporters[0][1]["atom_indices"] == [1, 2]
     assert simulation.reporters[0][1]["metric"] == "mean"
     assert simulation.reporters[0][1]["distance_pairs"] == [(0, 1), (3, 2)]
     assert simulation.reporters[1][1]["num_beads"] == 4
     assert simulation.reporters[2][1]["topology"] is topology
+    assert simulation.reporters[3][1] == {
+        "file": "rpmd_thermo.log",
+        "reportInterval": 10,
+    }
 
 
 def test_add_rpmd_reporters_omits_spread_without_atom_selection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -287,6 +297,11 @@ def test_add_rpmd_reporters_omits_spread_without_atom_selection(monkeypatch: pyt
         "RPMDBeadReporter",
         lambda **kwargs: ("beads", kwargs),
     )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDThermodynamicReporter",
+        lambda **kwargs: ("thermo", kwargs),
+    )
     simulation = SimpleNamespace(reporters=[])
 
     nqe_openmm._add_rpmd_reporters(simulation, object(), "rpmd", 10, 4, None)
@@ -294,6 +309,7 @@ def test_add_rpmd_reporters_omits_spread_without_atom_selection(monkeypatch: pyt
     assert [reporter[0] for reporter in simulation.reporters] == [
         "centroid",
         "beads",
+        "thermo",
     ]
 
 
@@ -813,3 +829,16 @@ def test_save_final_state_writes_current_box_for_periodic_system() -> None:
     assert [cryst1[i][i] for i in range(3)] == pytest.approx([2.5, 2.5, 2.5], abs=1e-3), (
         "the stage-final PDB must carry the post-barostat box, not the build-time one"
     )
+
+
+def test_close_rpmd_output_reporters_closes_the_thermodynamic_log(
+    tmp_path: Path,
+) -> None:
+    # The closing pass filters on type, so a reporter missing from that tuple
+    # would leave its log open and half-flushed.
+    reporter = nqe_openmm.RPMDThermodynamicReporter(tmp_path / "thermo.log", 10)
+    simulation = SimpleNamespace(reporters=[reporter])
+
+    nqe_openmm._close_rpmd_output_reporters(simulation, suppress_errors=False)
+
+    assert reporter._out.closed

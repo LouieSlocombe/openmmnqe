@@ -2,35 +2,83 @@
 
 OpenMM's own reporters see only the context, which for an ``RPMDIntegrator``
 holds a single copy of the system rather than the ring polymer.  Anything that
-needs the beads themselves -- their spread, their individual trajectories, or
-their centroid -- has to ask the integrator, which is what these three
-reporters do.  They are attached by the ``run_openmm_rpmd_*`` drivers in
-:mod:`openmmnqe.openmm`.
+needs the beads themselves -- their spread, their individual trajectories,
+their centroid, or their energies -- has to ask the integrator, which is what
+these four reporters do.  They are attached by the ``run_openmm_rpmd_*``
+drivers in :mod:`openmmnqe.openmm`.
 
-All three follow OpenMM's reporter protocol: ``describeNextReport`` says when
+All four follow OpenMM's reporter protocol: ``describeNextReport`` says when
 the next report is due and what state it needs, and ``report`` writes it.
 Use :func:`track_rpmd_atom_expansion` to attach the quantum-spread reporter
 for one target atom without constructing it directly, and
 :func:`plot_rpmd_atom_expansion` to plot the result against a centroid
 atom-pair distance or a supplied reference-path progress coordinate.
+
+:class:`RPMDThermodynamicReporter` covers the quantities a Context cannot
+give: the centroid-virial kinetic estimator, the mean bead potential energy,
+and the total quantum energy, alongside ring-polymer diagnostics that say
+whether the trajectory is worth analysing at all.  Call
+:func:`rpmd_thermodynamics` to compute the same set once, off any simulation,
+and :func:`rpmd_thermodynamic_averages` or :func:`plot_rpmd_thermodynamics`
+to read the log it writes back.
+
+Two obvious quantities are deliberately absent.  A heat capacity would need
+the exact centroid-virial estimator's second-derivative term, which OpenMM
+will not supply, and the fluctuation formula ``k_B beta**2 Var(E)`` that looks
+like a substitute is simply wrong for path integrals -- the estimator carries
+its own explicit ``beta`` dependence.  A centroid-virial pressure would need
+the true virial, which forces alone do not give under periodic boundary
+conditions.  Neither is worth a plausible-looking wrong number.
 """
 from __future__ import annotations
 
 import os
+import warnings
 from collections.abc import Iterable, Sequence
-from numbers import Integral
+from numbers import Integral, Real
 from types import TracebackType
-from typing import Any, Literal, Self
+from typing import Any, Literal, NamedTuple, Self
 
 import numpy as np
 import numpy.typing as npt
 import openmm.unit as unit
 from openmm import app, openmm
 
-from ._validation import require_integer
-from .tools import centroid_positions
+from ._validation import require_integer, require_positive_finite_scalar_in_unit
+from .tools import _particle_masses_dalton, centroid_positions
 
 _SPREAD_METRICS = {"rms", "mean"}
+
+_BOLTZMANN_KJ_PER_MOL_K = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(
+    unit.kilojoule_per_mole / unit.kelvin
+)
+
+# Column order of the thermodynamic log, as ``(result key, header)`` pairs.
+# The reporter writes them in this order and the reader and plot helpers
+# resolve columns through it, so the three cannot drift apart.
+_THERMO_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("time", "Time(ps)"),
+    ("kinetic_centroid_virial", "KE_cv(kJ/mol)"),
+    ("potential_mean", "PE_mean(kJ/mol)"),
+    ("energy_quantum", "E_quantum(kJ/mol)"),
+    ("potential_sd", "PE_sd(kJ/mol)"),
+    ("energy_ring", "E_ring(kJ/mol)"),
+    ("energy_spring", "E_spring(kJ/mol)"),
+    ("temperature_ring", "T_ring(K)"),
+    ("temperature_centroid", "T_centroid(K)"),
+)
+
+_THERMO_UNITS: dict[str, Any] = {
+    "time": unit.picosecond,
+    "kinetic_centroid_virial": unit.kilojoule_per_mole,
+    "potential_mean": unit.kilojoule_per_mole,
+    "energy_quantum": unit.kilojoule_per_mole,
+    "potential_sd": unit.kilojoule_per_mole,
+    "energy_ring": unit.kilojoule_per_mole,
+    "energy_spring": unit.kilojoule_per_mole,
+    "temperature_ring": unit.kelvin,
+    "temperature_centroid": unit.kelvin,
+}
 
 
 def _bead_coordinates(integrator: openmm.RPMDIntegrator,
@@ -703,6 +751,54 @@ def track_rpmd_atom_expansion(simulation: app.Simulation, atom_index: int,
     return reporter
 
 
+def _read_reporter_log(file: str | os.PathLike[str],
+                       description: str,
+                       ) -> tuple[list[str], np.ndarray]:
+    """
+    Read any of this module's tab-separated, Step-first reporter logs.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log to read.
+    description : str
+        What the log is, used verbatim in error messages, e.g.
+        ``"expansion log"``.
+
+    Returns
+    -------
+    header : list of str
+        Column names, the first of which is ``"Step"``.
+    values : numpy.ndarray
+        Row values, shaped ``(n_rows, len(header))``.
+
+    Raises
+    ------
+    ValueError
+        If the header is malformed or duplicated, the file holds no data
+        rows, or a row does not match the header.
+    """
+    with open(file) as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        has_data = any(line.strip() for line in handle)
+    if len(header) < 2 or header[0] != "Step":
+        raise ValueError(f"{description} must start with a Step column")
+    if len(set(header)) != len(header):
+        raise ValueError(f"{description} contains duplicate column names")
+    if not has_data:
+        raise ValueError(f"{description} contains no data rows")
+
+    try:
+        values = np.loadtxt(file, delimiter="\t", skiprows=1, ndmin=2)
+    except ValueError as exc:
+        raise ValueError(
+            f"could not parse {description} {file!s}"
+        ) from exc
+    if values.shape[1] != len(header):
+        raise ValueError(f"{description} rows do not match its header")
+    return header, values
+
+
 def _read_expansion_log(file: str | os.PathLike[str],
                         ) -> tuple[list[str], np.ndarray]:
     """
@@ -726,23 +822,7 @@ def _read_expansion_log(file: str | os.PathLike[str],
         If the header is malformed or duplicated, the file holds no data
         rows, or a row does not match the header.
     """
-    with open(file) as handle:
-        header = handle.readline().rstrip("\n").split("\t")
-        has_data = any(line.strip() for line in handle)
-    if len(header) < 2 or header[0] != "Step":
-        raise ValueError("expansion log must start with a Step column")
-    if len(set(header)) != len(header):
-        raise ValueError("expansion log contains duplicate column names")
-    if not has_data:
-        raise ValueError("expansion log contains no data rows")
-
-    try:
-        values = np.loadtxt(file, delimiter="\t", skiprows=1, ndmin=2)
-    except ValueError as exc:
-        raise ValueError(f"could not parse expansion log {file!s}") from exc
-    if values.shape[1] != len(header):
-        raise ValueError("expansion log rows do not match its header")
-    return header, values
+    return _read_reporter_log(file, "expansion log")
 
 
 def _select_log_columns(header: list[str],
@@ -803,21 +883,21 @@ def _column_label(column: str) -> str:
     Parameters
     ----------
     column : str
-        Column name, e.g. ``"Rg_Proton_H1(nm)"``.
+        Column name, e.g. ``"Rg_Proton_H1(nm)"`` or ``"KE_cv(kJ/mol)"``.
 
     Returns
     -------
     str
         The name without its observable prefix or unit suffix, e.g.
-        ``"Proton_H1"``.
+        ``"Proton_H1"`` or ``"KE_cv"``.
     """
     label = column
     for prefix in ("Expansion_", "Rg_", "Distance_"):
         if label.startswith(prefix):
             label = label[len(prefix):]
             break
-    if label.endswith("(nm)"):
-        label = label[:-4]
+    if label.endswith(")") and "(" in label:
+        label = label[:label.rindex("(")]
     return label
 
 
@@ -1325,3 +1405,760 @@ class RPMDCentroidReporter:
             self.close()
         except Exception:
             pass
+
+
+class _BeadThermodynamicStates(NamedTuple):
+    """
+    One pass of bead states, as bare arrays in OpenMM's MD units.
+
+    Attributes
+    ----------
+    positions : numpy.ndarray
+        Bead positions in nanometres, shaped ``(n_beads, n_atoms, 3)``.
+    velocities : numpy.ndarray
+        Bead velocities in nanometres per picosecond, same shape.
+    forces : numpy.ndarray
+        Forces on each bead in kJ/mol/nm, same shape.
+    potential : numpy.ndarray
+        Potential energy of each bead in kJ/mol, shaped ``(n_beads,)``.
+    kinetic : numpy.ndarray
+        Kinetic energy of each bead in kJ/mol, shaped ``(n_beads,)``.
+    time : float
+        Simulation time in picoseconds.
+    """
+
+    positions: npt.NDArray[np.float64]
+    velocities: npt.NDArray[np.float64]
+    forces: npt.NDArray[np.float64]
+    potential: npt.NDArray[np.float64]
+    kinetic: npt.NDArray[np.float64]
+    time: float
+
+
+def _thermodynamic_degrees_of_freedom(system: openmm.System) -> int:
+    """
+    Count the momentum degrees of freedom of one ring-polymer copy.
+
+    This follows the same rule as ``openmm.app.StateDataReporter``: three per
+    particle that has mass, less one per distance constraint, less three more
+    when the system removes centre-of-mass motion.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System the ring polymer is built from.
+
+    Returns
+    -------
+    int
+        Degrees of freedom of a single copy.
+
+    Raises
+    ------
+    ValueError
+        If the count is not positive, which means the system is entirely
+        massless or over-constrained.
+    """
+    zero_mass = 0 * unit.dalton
+    dof = 3 * sum(
+        1
+        for index in range(system.getNumParticles())
+        if system.getParticleMass(index) > zero_mass
+    )
+    dof -= system.getNumConstraints()
+    if any(
+        isinstance(system.getForce(index), openmm.CMMotionRemover)
+        for index in range(system.getNumForces())
+    ):
+        dof -= 3
+    if dof <= 0:
+        raise ValueError(
+            "system has no positive degrees of freedom to report on"
+        )
+    return dof
+
+
+def _bead_thermodynamic_states(integrator: openmm.RPMDIntegrator,
+                               ) -> _BeadThermodynamicStates:
+    """
+    Read positions, velocities, forces and energies of every bead in one pass.
+
+    Each bead costs a force evaluation, so all four quantities are asked for
+    in a single ``getState`` call per copy rather than one call each.
+
+    ``enforcePeriodicBox`` is deliberately left False.  Wrapping each copy
+    into the box independently can place beads of one ring polymer on
+    opposite sides of it, which would wreck the bead-centroid displacements
+    the virial estimator is built from.  The raw stored coordinates are
+    contiguous within a ring polymer, so they need no unwrapping -- unlike
+    :func:`_simulation_bead_coordinates`, which wants wrapped molecules and
+    therefore has to undo the wrapping itself.
+
+    Parameters
+    ----------
+    integrator : openmm.RPMDIntegrator
+        The integrator holding the ring polymer.
+
+    Returns
+    -------
+    _BeadThermodynamicStates
+        Bead arrays in nm, nm/ps, kJ/mol/nm and kJ/mol, plus the time in ps.
+    """
+    positions = []
+    velocities = []
+    forces = []
+    potential = []
+    kinetic = []
+    time = 0.0
+
+    for bead in range(integrator.getNumCopies()):
+        state = integrator.getState(
+            copy=bead,
+            getPositions=True,
+            getVelocities=True,
+            getForces=True,
+            getEnergy=True,
+            enforcePeriodicBox=False,
+        )
+        positions.append(
+            state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+        )
+        velocities.append(
+            state.getVelocities(asNumpy=True).value_in_unit(
+                unit.nanometer / unit.picosecond
+            )
+        )
+        forces.append(
+            state.getForces(asNumpy=True).value_in_unit(
+                unit.kilojoule_per_mole / unit.nanometer
+            )
+        )
+        potential.append(
+            state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
+        )
+        kinetic.append(
+            state.getKineticEnergy().value_in_unit(unit.kilojoule_per_mole)
+        )
+        if bead == 0:
+            time = float(state.getTime().value_in_unit(unit.picosecond))
+
+    return _BeadThermodynamicStates(
+        positions=np.asarray(positions, dtype=np.float64),
+        velocities=np.asarray(velocities, dtype=np.float64),
+        forces=np.asarray(forces, dtype=np.float64),
+        potential=np.asarray(potential, dtype=np.float64),
+        kinetic=np.asarray(kinetic, dtype=np.float64),
+        time=time,
+    )
+
+
+def rpmd_thermodynamics(simulation: app.Simulation, *,
+                        temperature: unit.Quantity | float | None = None,
+                        degrees_of_freedom: int | None = None,
+                        ) -> dict[str, unit.Quantity]:
+    r"""
+    Compute the ring polymer's thermodynamic estimators for the current state.
+
+    The physically meaningful quantities are ``kinetic_centroid_virial``,
+    ``potential_mean`` and their sum ``energy_quantum``.  The centroid-virial
+    kinetic estimator is
+
+    .. math::
+
+        K_{cv} = \frac{d}{2\beta} - \frac{1}{2P}\sum_{i=1}^{P}
+                 \left(\mathbf{r}_i-\bar{\mathbf{r}}\right)\cdot\mathbf{F}_i
+
+    with ``d`` the degrees of freedom of one copy, ``P`` the bead count and
+    ``F_i`` the force on bead ``i``.  It is far quieter than the primitive
+    estimator, whose variance grows with ``P``.  The potential estimator is
+    the mean bead potential energy :math:`\frac{1}{P}\sum_i V(\mathbf{r}_i)`.
+
+    The remaining entries are diagnostics rather than observables.
+    ``energy_ring`` is the ring-polymer Hamiltonian reported by
+    ``RPMDIntegrator.getTotalEnergy()`` -- bead kinetic and potential energies
+    plus the harmonic springs -- and is worth watching for drift, not for
+    physics.  ``energy_spring`` is the spring term alone, obtained by
+    subtracting the bead energies from it, which keeps this function free of
+    any assumption about OpenMM's internal spring frequency.
+    ``temperature_ring`` and ``temperature_centroid`` should both sit at the
+    integrator's setpoint once the thermostat has taken hold, the first
+    covering all ``P`` copies and the second the centroid mode alone.
+
+    Every bead read is a force evaluation, so one call costs roughly what one
+    RPMD step does.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation driven by an ``openmm.RPMDIntegrator``.
+    temperature : openmm.unit.Quantity or float or None, optional
+        Temperature the ring polymer is sampled at, in kelvin if given as a
+        bare number. With None, the integrator's own setpoint is used.
+        Default is None.
+    degrees_of_freedom : int or None, optional
+        Degrees of freedom of one copy. With None, they are counted from the
+        system by :func:`_thermodynamic_degrees_of_freedom`. Default is None.
+
+    Returns
+    -------
+    dict of str to openmm.unit.Quantity
+        One entry per key of ``_THERMO_COLUMNS``: ``time``,
+        ``kinetic_centroid_virial``, ``potential_mean``, ``energy_quantum``,
+        ``potential_sd``, ``energy_ring``, ``energy_spring``,
+        ``temperature_ring`` and ``temperature_centroid``.
+
+    Raises
+    ------
+    ValueError
+        If *temperature* is not finite and positive, *degrees_of_freedom* is
+        not positive, or the system has no degrees of freedom to report on.
+    TypeError
+        If *degrees_of_freedom* is not an integer.
+
+    Notes
+    -----
+    Forces from ``getForces`` exclude constraint forces, so the
+    centroid-virial estimator is biased for a system with rigid bonds or
+    rigid water. Run the beads flexible.
+
+    Under ring-polymer contraction the forces read back are the full,
+    uncontracted ones evaluated at each bead. That is the wanted behaviour --
+    the exact estimator applied to the approximate distribution the
+    contracted dynamics samples -- but it does mean these numbers describe
+    the full potential, not the contracted one.
+
+    Examples
+    --------
+    Take a single reading part way through a run::
+
+        from openmmnqe import rpmd_thermodynamics
+
+        values = rpmd_thermodynamics(simulation)
+        print(values["energy_quantum"])
+    """
+    integrator = simulation.integrator
+    if temperature is None:
+        temperature = integrator.getTemperature()
+    temperature_k = require_positive_finite_scalar_in_unit(
+        temperature,
+        unit.kelvin,
+        name="temperature",
+    )
+    if degrees_of_freedom is None:
+        dof = _thermodynamic_degrees_of_freedom(simulation.system)
+    else:
+        dof = require_integer(
+            degrees_of_freedom,
+            name="degrees_of_freedom",
+            minimum=1,
+        )
+    masses = _particle_masses_dalton(simulation.system)
+
+    values = _rpmd_thermodynamic_values(integrator, temperature_k, dof, masses)
+    return {key: value * _THERMO_UNITS[key] for key, value in values.items()}
+
+
+def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
+                               temperature_k: float,
+                               dof: int,
+                               masses: np.ndarray,
+                               ) -> dict[str, float]:
+    """
+    Evaluate the estimators from already-resolved constants.
+
+    Split out from :func:`rpmd_thermodynamics` so a reporter can look the
+    temperature, degree-of-freedom count and particle masses up once rather
+    than at every report; on a solvated system the mass read alone is tens of
+    milliseconds.
+
+    Parameters
+    ----------
+    integrator : openmm.RPMDIntegrator
+        The integrator holding the ring polymer.
+    temperature_k : float
+        Sampling temperature in kelvin.
+    dof : int
+        Degrees of freedom of one copy.
+    masses : numpy.ndarray
+        Particle masses in daltons, shaped ``(n_particles,)``.
+
+    Returns
+    -------
+    dict of str to float
+        One entry per key of ``_THERMO_COLUMNS``, in the units of
+        ``_THERMO_UNITS``.
+    """
+    n_beads = integrator.getNumCopies()
+    states = _bead_thermodynamic_states(integrator)
+    kt = _BOLTZMANN_KJ_PER_MOL_K * temperature_k
+
+    centroid = states.positions.mean(axis=0)
+    virial = float(np.sum((states.positions - centroid) * states.forces))
+    kinetic_centroid_virial = 0.5 * dof * kt - 0.5 * virial / n_beads
+
+    potential_mean = float(states.potential.mean())
+    potential_sd = float(states.potential.std())
+
+    energy_ring = float(
+        integrator.getTotalEnergy().value_in_unit(unit.kilojoule_per_mole)
+    )
+    energy_spring = energy_ring - float(
+        states.potential.sum() + states.kinetic.sum()
+    )
+
+    # Ring-polymer momenta are sampled at P times the physical temperature,
+    # which is where the extra factor of P in the normalisation comes from.
+    temperature_ring = 2.0 * float(states.kinetic.sum()) / (
+        dof * n_beads ** 2 * _BOLTZMANN_KJ_PER_MOL_K
+    )
+
+    centroid_velocity = states.velocities.mean(axis=0)
+    kinetic_centroid = 0.5 * float(
+        np.sum(masses[:, np.newaxis] * centroid_velocity ** 2)
+    )
+    temperature_centroid = (
+        2.0 * kinetic_centroid / (dof * _BOLTZMANN_KJ_PER_MOL_K)
+    )
+
+    return {
+        "time": states.time,
+        "kinetic_centroid_virial": kinetic_centroid_virial,
+        "potential_mean": potential_mean,
+        "energy_quantum": kinetic_centroid_virial + potential_mean,
+        "potential_sd": potential_sd,
+        "energy_ring": energy_ring,
+        "energy_spring": energy_spring,
+        "temperature_ring": temperature_ring,
+        "temperature_centroid": temperature_centroid,
+    }
+
+
+class RPMDThermodynamicReporter:
+    """
+    Log ring-polymer thermodynamic estimators during an RPMD simulation.
+
+    Writes one tab-separated row per report, holding the centroid-virial
+    kinetic estimator, the mean bead potential energy and their sum, followed
+    by the ring-polymer diagnostics described in
+    :func:`rpmd_thermodynamics`.  An RPMD ``Context`` state cannot supply any
+    of these: it mirrors a single copy, so its energy is not a bead average
+    and its kinetic temperature is not the ring polymer's.
+
+    Each report reads every bead once, which costs about as much as one RPMD
+    step. At the drivers' default report interval of 1000 steps that is a
+    fraction of a percent.  The degree-of-freedom count and the particle
+    masses are resolved on the first report and cached, since nothing in a run
+    can change them.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Path to write the thermodynamic log to.
+    reportInterval : int
+        Interval between reports, in steps.
+    temperature : openmm.unit.Quantity or float or None, optional
+        Temperature the ring polymer is sampled at, in kelvin if given as a
+        bare number. With None, the integrator's setpoint is read at every
+        report, so a temperature ramp is followed. Default is None.
+    degrees_of_freedom : int or None, optional
+        Degrees of freedom of one copy. With None, they are counted from the
+        system. Default is None.
+
+    Warns
+    -----
+    UserWarning
+        If the system carries constraints. ``getForces`` omits constraint
+        forces, so the centroid-virial estimator is biased for a constrained
+        system.
+    """
+
+    def __init__(self, file: str | os.PathLike[str], reportInterval: int,
+                 temperature: unit.Quantity | float | None = None,
+                 degrees_of_freedom: int | None = None) -> None:
+        self._reportInterval = require_integer(
+            reportInterval,
+            name="reportInterval",
+            minimum=1,
+        )
+        if temperature is not None:
+            require_positive_finite_scalar_in_unit(
+                temperature,
+                unit.kelvin,
+                name="temperature",
+            )
+        if degrees_of_freedom is not None:
+            degrees_of_freedom = require_integer(
+                degrees_of_freedom,
+                name="degrees_of_freedom",
+                minimum=1,
+            )
+        self._temperature = temperature
+        self._degrees_of_freedom = degrees_of_freedom
+        self._dof: int | None = None
+        self._masses: np.ndarray | None = None
+
+        header = "Step\t" + "\t".join(
+            column for _, column in _THERMO_COLUMNS
+        )
+        self._out = open(file, "w")
+        self._out.write(header + "\n")
+
+    def _prepare(self, simulation: app.Simulation) -> None:
+        """
+        Resolve and cache the constants of the run, warning once on the way.
+
+        The degree-of-freedom count and the particle masses are read from the
+        System, which neither the beads nor the integrator can change, so they
+        are looked up on the first report and kept.
+        """
+        if self._masses is not None:
+            return
+
+        system = simulation.system
+        if self._degrees_of_freedom is None:
+            self._dof = _thermodynamic_degrees_of_freedom(system)
+        else:
+            self._dof = self._degrees_of_freedom
+        self._masses = _particle_masses_dalton(system)
+
+        if system.getNumConstraints() > 0:
+            warnings.warn(
+                "centroid-virial kinetic energy is biased by constraints: "
+                "OpenMM's forces omit constraint forces, so run the ring "
+                "polymer flexible if the reported energies are to be trusted",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
+        """
+        Report when the next report is due and what state it needs.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Returns
+        -------
+        tuple
+            ``(steps, positions, velocities, forces, energies)``. No state is
+            requested: everything comes from the RPMD integrator instead.
+        """
+        steps = self._reportInterval - simulation.currentStep % self._reportInterval
+        return (steps, False, False, False, False)
+
+    def report(self, simulation: app.Simulation, state: openmm.State) -> None:
+        """
+        Write one row of ring-polymer thermodynamic estimators.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+        state : openmm.State
+            Unused; the bead states come from the RPMD integrator.
+        """
+        self._prepare(simulation)
+        assert self._dof is not None and self._masses is not None
+
+        temperature = self._temperature
+        if temperature is None:
+            temperature = simulation.integrator.getTemperature()
+        temperature_k = require_positive_finite_scalar_in_unit(
+            temperature,
+            unit.kelvin,
+            name="temperature",
+        )
+        values = _rpmd_thermodynamic_values(
+            simulation.integrator,
+            temperature_k,
+            self._dof,
+            self._masses,
+        )
+
+        line = f"{simulation.currentStep}"
+        for key, _ in _THERMO_COLUMNS:
+            line += f"\t{values[key]:.6f}"
+        self._out.write(line + "\n")
+        self._out.flush()
+
+    def close(self) -> None:
+        """Close the output file, safely allowing repeated calls."""
+        out = getattr(self, "_out", None)
+        if out is not None and not out.closed:
+            out.close()
+
+    def __enter__(self) -> Self:
+        """Return this reporter for use as a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the output file when leaving a context."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort fallback for callers that did not close the reporter."""
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def _read_thermodynamic_log(file: str | os.PathLike[str],
+                            ) -> tuple[list[str], np.ndarray]:
+    """
+    Read a tab-separated thermodynamic reporter log.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log written by :class:`RPMDThermodynamicReporter`.
+
+    Returns
+    -------
+    header : list of str
+        Column names, the first of which is ``"Step"``.
+    values : numpy.ndarray
+        Row values, shaped ``(n_rows, len(header))``.
+
+    Raises
+    ------
+    ValueError
+        If the header is malformed or duplicated, the file holds no data
+        rows, or a row does not match the header.
+    """
+    return _read_reporter_log(file, "thermodynamic log")
+
+
+def rpmd_thermodynamic_averages(file: str | os.PathLike[str], *,
+                                discard: float = 0.0,
+                                blocks: int = 5,
+                                ) -> dict[str, tuple[float, float]]:
+    """
+    Average a thermodynamic log, with block-averaged standard errors.
+
+    Consecutive samples from one trajectory are correlated, so the naive
+    ``std / sqrt(n)`` understates the uncertainty, often by a large factor.
+    The retained rows are instead split into *blocks* contiguous chunks and
+    the error taken from the scatter of the block means, which is only fooled
+    if the correlation time approaches the block length.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log written by :class:`RPMDThermodynamicReporter`.
+    discard : float, optional
+        Leading fraction of the rows to drop as equilibration, in ``[0, 1)``.
+        Default is 0.0.
+    blocks : int, optional
+        Number of blocks the retained rows are split into. Default is 5.
+
+    Returns
+    -------
+    dict of str to tuple of float
+        ``{column: (mean, standard_error)}`` for every column but ``"Step"``,
+        in the units the column name carries.
+
+    Raises
+    ------
+    ValueError
+        If *discard* is outside ``[0, 1)``, *blocks* is below 2, or too few
+        rows survive to fill the blocks.
+    TypeError
+        If *blocks* is not an integer.
+
+    Examples
+    --------
+    Drop the first tenth of a production log and average the rest::
+
+        from openmmnqe import rpmd_thermodynamic_averages
+
+        averages = rpmd_thermodynamic_averages("rpmd_prod_thermo.log", discard=0.1)
+        mean, error = averages["E_quantum(kJ/mol)"]
+    """
+    blocks = require_integer(blocks, name="blocks", minimum=2)
+    if isinstance(discard, bool) or not isinstance(discard, Real):
+        raise ValueError("discard must be a number in [0, 1)")
+    discard = float(discard)
+    if not np.isfinite(discard) or not 0.0 <= discard < 1.0:
+        raise ValueError("discard must be a number in [0, 1)")
+
+    header, values = _read_thermodynamic_log(file)
+    retained = values[int(discard * len(values)):]
+    if len(retained) < blocks:
+        raise ValueError(
+            f"thermodynamic log has {len(retained)} rows after discarding, "
+            f"too few for {blocks} blocks"
+        )
+
+    # Drop the leading remainder rather than the trailing one: the tail is the
+    # better-equilibrated end of a trajectory.
+    block_size = len(retained) // blocks
+    retained = retained[len(retained) - block_size * blocks:]
+    block_means = retained.reshape(blocks, block_size, -1).mean(axis=1)
+
+    means = retained.mean(axis=0)
+    errors = block_means.std(axis=0, ddof=1) / np.sqrt(blocks)
+    return {
+        name: (float(means[index]), float(errors[index]))
+        for index, name in enumerate(header)
+        if name != "Step"
+    }
+
+
+def plot_rpmd_thermodynamics(file: str | os.PathLike[str], *,
+                             energy_columns: str | Iterable[str] | None = None,
+                             temperature_columns: str | Iterable[str] | None = None,
+                             x_axis: Literal["time", "step"] = "time",
+                             energy_unit: Literal["kilojoule_per_mole", "kilocalorie_per_mole"] = "kilojoule_per_mole",
+                             filename: str | os.PathLike[str] | None = None,
+                             show: bool = False) -> tuple[Any, tuple[Any, ...]]:
+    """
+    Plot an RPMD thermodynamic log as energy and temperature traces.
+
+    Energies and temperatures are drawn in stacked panels sharing the time or
+    step axis, which is the view that answers the two questions a log like
+    this is kept for: has the thermostat settled, and is the ring-polymer
+    Hamiltonian drifting.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Tab-separated output from :class:`RPMDThermodynamicReporter`.
+    energy_columns : str or iterable of str or None, optional
+        Energy columns to draw. By default all of them are used, which
+        includes the ring-polymer Hamiltonian and spring energy; those are
+        orders of magnitude larger than the estimators, so a selection such
+        as ``["KE_cv(kJ/mol)", "PE_mean(kJ/mol)", "E_quantum(kJ/mol)"]`` is
+        usually the readable choice.
+    temperature_columns : str or iterable of str or None, optional
+        Temperature columns to draw. By default all of them are used.
+    x_axis : {"time", "step"}, optional
+        Whether to plot against simulation time or step number. Default is
+        ``"time"``.
+    energy_unit : {"kilojoule_per_mole", "kilocalorie_per_mole"}, optional
+        Unit used for the plotted energies. Logs are stored in kJ/mol.
+        Default is ``"kilojoule_per_mole"``.
+    filename : str or os.PathLike or None, optional
+        If given, save the figure at this path.
+    show : bool, optional
+        Display the figure with Matplotlib. Default is False.
+
+    Returns
+    -------
+    tuple
+        ``(figure, axes)`` where *axes* holds the energy axis and, when any
+        temperature column is drawn, the temperature axis.
+
+    Raises
+    ------
+    ImportError
+        If Matplotlib is not installed.
+    ValueError
+        If *x_axis* or *energy_unit* is unknown, a requested column is
+        absent, no energy column is selected, or a plotted value is not
+        finite.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise ImportError(
+            "plot_rpmd_thermodynamics requires matplotlib; install the "
+            "'plot' optional dependency"
+        ) from exc
+
+    energy_units = {
+        "kilojoule_per_mole": (1.0, "kJ/mol"),
+        "kilocalorie_per_mole": (
+            (1.0 * unit.kilojoule_per_mole).value_in_unit(
+                unit.kilocalorie_per_mole
+            ),
+            "kcal/mol",
+        ),
+    }
+    if energy_unit not in energy_units:
+        choices = ", ".join(energy_units)
+        raise ValueError(f"energy_unit must be one of: {choices}")
+    if x_axis not in {"time", "step"}:
+        raise ValueError('x_axis must be one of: step, time')
+    scale, unit_label = energy_units[energy_unit]
+
+    header, values = _read_thermodynamic_log(file)
+    column_index = {name: index for index, name in enumerate(header)}
+    energy_columns = _select_log_columns(
+        header,
+        energy_columns,
+        ("KE_", "PE_", "E_"),
+        "energy",
+    )
+    if not energy_columns:
+        raise ValueError("thermodynamic log contains no energy columns")
+    temperature_columns = _select_log_columns(
+        header,
+        temperature_columns,
+        ("T_",),
+        "temperature",
+    )
+
+    if x_axis == "time" and "Time(ps)" in column_index:
+        x_values = values[:, column_index["Time(ps)"]]
+        x_label = "Time (ps)"
+    else:
+        x_values = values[:, column_index["Step"]]
+        x_label = "Step"
+
+    selected = [
+        column_index[name] for name in [*energy_columns, *temperature_columns]
+    ]
+    if not np.isfinite(values[:, selected]).all():
+        raise ValueError("selected thermodynamic-log values must be finite")
+
+    axes: tuple[Any, ...]
+    if temperature_columns:
+        figure, (energy_axis, temperature_axis) = plt.subplots(
+            2,
+            1,
+            sharex=True,
+            figsize=(6.4, 6.0),
+            gridspec_kw={"height_ratios": (1.3, 1), "hspace": 0.06},
+        )
+        axes = (energy_axis, temperature_axis)
+    else:
+        figure, energy_axis = plt.subplots(figsize=(6.4, 4.2))
+        temperature_axis = None
+        axes = (energy_axis,)
+
+    for column in energy_columns:
+        energy_axis.plot(
+            x_values,
+            values[:, column_index[column]] * scale,
+            label=_column_label(column),
+        )
+    energy_axis.set_ylabel(f"Energy ({unit_label})")
+    energy_axis.legend(frameon=False)
+
+    if temperature_axis is not None:
+        for column in temperature_columns:
+            temperature_axis.plot(
+                x_values,
+                values[:, column_index[column]],
+                label=_column_label(column),
+            )
+        temperature_axis.set_ylabel("Temperature (K)")
+        temperature_axis.set_xlabel(x_label)
+        temperature_axis.legend(frameon=False)
+    else:
+        energy_axis.set_xlabel(x_label)
+
+    if filename is not None:
+        figure.savefig(filename, dpi=300, bbox_inches="tight")
+    if show:
+        plt.show()
+    return figure, axes

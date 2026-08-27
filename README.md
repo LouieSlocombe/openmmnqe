@@ -161,6 +161,51 @@ umbrella windows, repeat each window's normalised centre for its reporter rows
 before concatenating the logs. Matplotlib is available through the `plot`
 optional dependency.
 
+## Ring-polymer thermodynamics
+
+Every RPMD stage writes `<prefix>_thermo.log` alongside its spread, centroid and
+bead outputs. An RPMD `Context` holds one copy of the system rather than the ring
+polymer, so its energy is not a bead average and its kinetic temperature is not
+the ring polymer's; the log is where the thermodynamics actually lives.
+
+The physical observables are the centroid-virial kinetic estimator `KE_cv`, the
+mean bead potential energy `PE_mean`, and their sum `E_quantum`. The rest are
+diagnostics: `E_ring` is the ring-polymer Hamiltonian, worth watching for drift
+rather than for physics, and `T_ring` and `T_centroid` should both settle at the
+integrator's setpoint.
+
+```python
+nqe.run_openmm_rpmd_prod(modeller, forcefield, n_report=1000)
+
+averages = nqe.rpmd_thermodynamic_averages("rpmd_prod_thermo.log", discard=0.1)
+energy, error = averages["E_quantum(kJ/mol)"]
+print(f"quantum internal energy {energy:.2f} +/- {error:.2f} kJ/mol")
+
+nqe.plot_rpmd_thermodynamics(
+    "rpmd_prod_thermo.log",
+    energy_columns=["KE_cv(kJ/mol)", "PE_mean(kJ/mol)", "E_quantum(kJ/mol)"],
+    filename="rpmd-thermodynamics.png",
+)
+```
+
+Errors come from block averaging, because consecutive samples down one
+trajectory are correlated and `std / sqrt(n)` would flatter them. Call
+`nqe.rpmd_thermodynamics(simulation)` to take the same set of readings once,
+outside any reporter.
+
+Each report reads every bead, costing about one RPMD step, so the default
+`n_report` of 1000 makes it a fraction of a percent. Two caveats are worth
+knowing: `KE_cv` is biased for a system with constraints, because OpenMM's
+forces omit constraint forces -- the reporter warns, and the fix is to run the
+beads flexible -- and under ring-polymer contraction the estimators describe the
+full potential rather than the contracted one that drives the dynamics.
+
+Heat capacity and pressure are deliberately absent. The centroid-virial heat
+capacity needs second derivatives OpenMM will not supply, and the
+`k_B beta^2 Var(E)` fluctuation formula that looks like a substitute is wrong
+for path integrals; a centroid-virial pressure needs the true virial, which
+forces alone do not give under periodic boundary conditions.
+
 ## Installation
 
 Some dependencies (openmm-ml, openmm-plumed) are not installable from PyPI, and openmm-plumed has to be compiled, so

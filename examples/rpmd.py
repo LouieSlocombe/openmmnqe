@@ -355,6 +355,67 @@ def run_rpmd_centroid_reporter() -> None:
     nqe.remove_file('centroid.pdb')
 
 
+def run_rpmd_thermodynamic_reporter() -> None:
+    """Log ring-polymer energy estimators, then average and plot the log."""
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
+
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    has_box = modeller.topology.getUnitCellDimensions() is not None
+    system = forcefield.createSystem(
+        modeller.topology,
+        nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+        nonbondedCutoff=1.0 * unit.nanometer,
+        # The centroid-virial estimator needs unconstrained forces, so the
+        # beads run fully flexible rather than with rigid bonds or water.
+        constraints=None,
+        rigidWater=False,
+        removeCMMotion=True,
+        hydrogenMass=None,
+    )
+
+    n_beads = 32
+    temperature = 300.0 * unit.kelvin
+    friction = 1.0 / unit.picosecond
+    dt = 0.5 * unit.femtosecond
+    integrator = openmm.RPMDIntegrator(n_beads,
+                                       temperature,
+                                       friction,
+                                       dt)
+
+    platform = openmm.Platform.getPlatformByName(device)
+    simulation = app.Simulation(modeller.topology, system, integrator, platform)
+
+    nqe.init_beads(modeller, simulation, n_beads)
+
+    simulation.reporters.append(nqe.RPMDThermodynamicReporter(
+        file="thermo.log",
+        reportInterval=10,
+    ))
+
+    nqe.step_rpmd(simulation, 500)
+
+    # One reading taken directly, without going through the log.
+    values = nqe.rpmd_thermodynamics(simulation)
+    print(f"quantum energy now: {values['energy_quantum']}", flush=True)
+
+    averages = nqe.rpmd_thermodynamic_averages("thermo.log", discard=0.2)
+    for column in ("KE_cv(kJ/mol)", "PE_mean(kJ/mol)", "E_quantum(kJ/mol)",
+                   "T_ring(K)", "T_centroid(K)"):
+        mean, error = averages[column]
+        print(f"{column:>20s}  {mean:12.3f} +/- {error:.3f}", flush=True)
+
+    nqe.plot_rpmd_thermodynamics(
+        "thermo.log",
+        energy_columns=["KE_cv(kJ/mol)", "PE_mean(kJ/mol)", "E_quantum(kJ/mol)"],
+        filename="rpmd-thermodynamics.png",
+    )
+
+    nqe.remove_file('thermo.log')
+    nqe.remove_file('rpmd-thermodynamics.png')
+
+
 def run_openmm_adqtb() -> None:
     """Run adQTB on a peptide, assigning particle types by element by hand."""
     print(flush=True)

@@ -248,6 +248,34 @@ def write_multimodel_pdb(topology: app.Topology, positions: unit.Quantity,
     app.PDBFile.writeModel(topology, positions, fh, modelIndex=model_index)
 
 
+def _particle_masses_dalton(system: openmm.System) -> np.ndarray:
+    """
+    Return ordered particle masses as finite, non-negative floats.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System whose particles are read, in index order.
+
+    Returns
+    -------
+    numpy.ndarray
+        Masses in daltons, shaped ``(n_particles,)``.
+
+    Raises
+    ------
+    ValueError
+        If any mass is not finite and non-negative.
+    """
+    masses = np.asarray([
+        system.getParticleMass(index).value_in_unit(unit.dalton)
+        for index in range(system.getNumParticles())
+    ], dtype=np.float64)
+    if not np.isfinite(masses).all() or np.any(masses < 0.0):
+        raise ValueError("RPMD System particle masses must be finite and non-negative")
+    return masses
+
+
 def centroid_positions(simulation: app.Simulation, n_atoms: int,
                        n_beads: int) -> unit.Quantity:
     """

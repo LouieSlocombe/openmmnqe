@@ -55,10 +55,12 @@ from .reporters import (
     RPMDBeadReporter,
     RPMDCentroidReporter,
     RPMDQuantumSpreadReporter,
+    RPMDThermodynamicReporter,
     _validate_observable_indices,
 )
 from .tools import (
     WorkflowDeuterationOption,
+    _particle_masses_dalton,
     centroid_positions,
     check_platform,
     deuterate_system,
@@ -254,34 +256,6 @@ def _topology_identity_signature(topology: app.Topology) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
-
-
-def _particle_masses_dalton(system: openmm.System) -> np.ndarray:
-    """
-    Return ordered particle masses as finite, non-negative floats.
-
-    Parameters
-    ----------
-    system : openmm.System
-        System whose particles are read, in index order.
-
-    Returns
-    -------
-    numpy.ndarray
-        Masses in daltons, shaped ``(n_particles,)``.
-
-    Raises
-    ------
-    ValueError
-        If any mass is not finite and non-negative.
-    """
-    masses = np.asarray([
-        system.getParticleMass(index).value_in_unit(unit.dalton)
-        for index in range(system.getNumParticles())
-    ], dtype=np.float64)
-    if not np.isfinite(masses).all() or np.any(masses < 0.0):
-        raise ValueError("RPMD System particle masses must be finite and non-negative")
-    return masses
 
 
 def _rpmd_temperature_kelvin(integrator: openmm.RPMDIntegrator) -> float:
@@ -829,8 +803,8 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
         Topology written into the PDB output and used to bounds-check the
         watched atoms.
     output_prefix : str
-        Prefix for ``<prefix>_spread.log``, ``<prefix>_centroid.pdb`` and the
-        per-bead ``<prefix>_bead_<i>.pdb`` files.
+        Prefix for ``<prefix>_spread.log``, ``<prefix>_centroid.pdb``, the
+        per-bead ``<prefix>_bead_<i>.pdb`` files and ``<prefix>_thermo.log``.
     n_report : int
         Interval between reports, in steps.
     n_beads : int
@@ -849,6 +823,18 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
     ValueError
         If *distance_pairs* is given without *atoms_to_watch*, or an index
         lies outside *topology*.
+
+    Notes
+    -----
+    The thermodynamic reporter is always attached: an RPMD Context carries no
+    meaningful energy or temperature, so without it a run leaves no energy
+    trace at all.  Each of its reports reads every bead once, costing roughly
+    one RPMD step; at the drivers' default *n_report* of 1000 that is a
+    fraction of a percent.
+
+    Under ring-polymer contraction its estimators use the full, uncontracted
+    forces evaluated at each bead, so they describe the full potential rather
+    than the contracted one that drives the dynamics.
     """
     if distance_pairs is not None and atoms_to_watch is None:
         raise ValueError("distance_pairs require atoms_to_watch")
@@ -880,6 +866,11 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
         num_beads=n_beads,
     ))
 
+    simulation.reporters.append(RPMDThermodynamicReporter(
+        file=f'{output_prefix}_thermo.log',
+        reportInterval=n_report,
+    ))
+
 
 def _close_rpmd_output_reporters(
     simulation: app.Simulation,
@@ -892,6 +883,7 @@ def _close_rpmd_output_reporters(
         RPMDQuantumSpreadReporter,
         RPMDCentroidReporter,
         RPMDBeadReporter,
+        RPMDThermodynamicReporter,
     )
     for reporter in simulation.reporters:
         if not isinstance(reporter, reporter_types):
