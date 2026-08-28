@@ -64,4 +64,34 @@ These behave the same across every stage:
 `output_prefix`
 : Names every file the stage writes.
 
+`seed`
+: Fixes every random stream the stage draws. See [](#reproducibility).
+
 Full signatures are in [](../api/openmm.rst).
+
+## Reproducibility
+
+Left alone, OpenMM takes the starting velocities, the thermostat noise and the
+barostat's volume moves from system entropy, so two runs of the same script
+never agree exactly. `seed` fixes all of them, and one seed is meant to be
+handed to the whole workflow:
+
+```python
+nqe.run_openmm_heating(modeller, forcefield, output_prefix="heat", seed=2024)
+nqe.run_openmm_npt(modeller, forcefield, output_prefix="npt", seed=2024)
+nqe.run_openmm_prod(modeller, forcefield, output_prefix="prod", seed=2024)
+```
+
+It is a *master* seed rather than the number passed straight to OpenMM. Each
+stage splits it into one independent stream per consumer, so the thermostat is
+never driven by the numbers that chose the velocities -- which would correlate
+the noise with the state it acts on -- and a stream keeps its meaning whichever
+stages draw it. The two nuclear-quantum-effect routes split it the same way:
+{func}`~openmmnqe.openmm.run_openmm_rpmd_equilibration` places the ring polymer
+from one stream and drives the PILE thermostat from another, so the beads and
+their noise are independent.
+
+Reproducibility holds for the same platform, hardware, and OpenMM build.
+Neither a change of platform nor the same platform on a different GPU is
+expected to agree bit for bit, so a comparison that has to be exact -- the H
+and D runs of a kinetic isotope effect, say -- belongs on one machine.

@@ -108,6 +108,63 @@ def test_rpmd_stages_run_on_a_prepared_system(one_particle_system: tuple[app.Mod
         assert archive["step_count"].item() == 8
 
 
+def test_seeded_production_reproduces_its_trajectory_bit_for_bit(
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    # The point of every stage taking a seed: two runs of the same stage agree
+    # exactly, and two seeds do not. Without one, the Langevin thermostat and
+    # the starting velocities are both drawn from system entropy.
+    modeller, forcefield = one_particle_system
+
+    def trajectory_of(output_prefix: str, seed: int | None) -> bytes:
+        nqe.run_openmm_prod(
+            modeller,
+            nqe.PreparedSystem(forcefield.createSystem(modeller.topology)),
+            barostat_freq=None,
+            steps=50,
+            n_report=10,
+            output_prefix=output_prefix,
+            platform_name="Reference",
+            seed=seed,
+        )
+        return Path(f"{output_prefix}_steps.pdb").read_bytes()
+
+    seeded = trajectory_of("seeded", 11)
+
+    assert trajectory_of("repeated", 11) == seeded
+    assert trajectory_of("reseeded", 12) != seeded
+    assert trajectory_of("unseeded", None) != seeded
+
+
+def test_seeded_rpmd_equilibration_reproduces_every_bead(
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    # The ring polymer is placed by NumPy and thermostatted by OpenMM, so this
+    # covers both halves of the split: one master seed fixes each.
+    modeller, forcefield = one_particle_system
+    prepared = nqe.PreparedSystem(forcefield.createSystem(modeller.topology))
+
+    def beads_of(output_prefix: str, seed: int | None) -> np.ndarray:
+        nqe.run_openmm_rpmd_equilibration(
+            modeller,
+            prepared,
+            output_prefix=output_prefix,
+            n_beads=4,
+            n_1=2,
+            n_2=3,
+            n_report=5,
+            platform_name="Reference",
+            seed=seed,
+        )
+        with np.load(f"{output_prefix}.chk", allow_pickle=False) as archive:
+            return archive["positions_nm"]
+
+    seeded = beads_of("rpmd_seeded", 3)
+
+    assert np.array_equal(beads_of("rpmd_repeated", 3), seeded)
+    assert not np.array_equal(beads_of("rpmd_reseeded", 4), seeded)
+
+
 def test_production_rejects_default_barostat_for_nonperiodic_system(
     one_particle_system: tuple[app.Modeller, Any],
 ) -> None:

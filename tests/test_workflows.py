@@ -66,6 +66,10 @@ class _Barostat:
         self.kind = kind
         self.args = args
         self._group = 0
+        self.random_seeds = []
+
+    def setRandomNumberSeed(self, seed: int) -> None:
+        self.random_seeds.append(seed)
 
     def setForceGroup(self, group: int) -> None:
         self._group = group
@@ -104,13 +108,16 @@ class _Context:
     def __init__(self) -> None:
         self.positions = []
         self.velocity_temperatures = []
+        self.velocity_seeds = []
         self.parameters = []
 
     def setPositions(self, positions: Any) -> None:
         self.positions.append(positions)
 
-    def setVelocitiesToTemperature(self, temperature: unit.Quantity) -> None:
+    def setVelocitiesToTemperature(self, temperature: unit.Quantity,
+                                   seed: int | None = None) -> None:
         self.velocity_temperatures.append(temperature)
+        self.velocity_seeds.append(seed)
 
     def setParameter(self, name: str, value: Any) -> None:
         self.parameters.append((name, value))
@@ -655,7 +662,9 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
     assert runtime.calls.rpmd_steps == [(simulation, 2), (simulation, 5)]
     assert simulation.context.positions == []
     assert simulation.context.velocity_temperatures == []
-    initialization_seed, thermostat_seed = nqe_openmm._split_rpmd_seed(1234)
+    initialization_seed, thermostat_seed = nqe_openmm._derive_seeds(
+        1234, "initialization", "thermostat"
+    )
     assert integrator.random_seeds == [thermostat_seed]
     assert runtime.calls.bead_initializations == [(
         (runtime.modeller, simulation, 8),
@@ -679,9 +688,197 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
 
 
 @pytest.mark.parametrize("seed", [-1, 1.5, True])
-def test_split_rpmd_seed_rejects_invalid_values(seed: Any) -> None:
+def test_derive_seeds_rejects_invalid_values(seed: Any) -> None:
     with pytest.raises(ValueError, match="seed must be"):
-        nqe_openmm._split_rpmd_seed(seed)
+        nqe_openmm._derive_seeds(seed, "thermostat")
+
+
+def test_derive_seeds_rejects_unregistered_streams() -> None:
+    with pytest.raises(KeyError, match="unknown seed stream"):
+        nqe_openmm._derive_seeds(1, "entropy")
+
+
+def test_derive_seeds_leaves_every_stream_unseeded_without_a_master_seed() -> None:
+    assert nqe_openmm._derive_seeds(None, "thermostat", "barostat") == (
+        None,
+        None,
+    )
+
+
+def test_derive_seeds_gives_each_stream_its_own_reproducible_value() -> None:
+    streams = ("initialization", "thermostat", "velocities", "barostat")
+
+    first = nqe_openmm._derive_seeds(7, *streams)
+
+    assert first == nqe_openmm._derive_seeds(7, *streams)
+    assert len(set(first)) == len(streams)
+    assert first != nqe_openmm._derive_seeds(8, *streams)
+
+
+def test_derive_seeds_ignores_which_other_streams_were_asked_for() -> None:
+    # A stage drawing two streams and one drawing four have to agree on what
+    # a shared stream means, or a single master seed could not reproduce a
+    # whole workflow rather than one stage of it.
+    alone = nqe_openmm._derive_seeds(99, "thermostat")
+    _, alongside, _ = nqe_openmm._derive_seeds(
+        99, "velocities", "thermostat", "barostat"
+    )
+
+    assert alone == (alongside,)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2**31, 2**64 + 3])
+def test_derive_seeds_keeps_openmm_streams_in_its_positive_range(
+    seed: int,
+) -> None:
+    # Zero is what OpenMM reads as "pick one for me", which is the seed=None
+    # path, so no explicit master seed may ever derive it.
+    derived = nqe_openmm._derive_seeds(
+        seed, "thermostat", "velocities", "barostat"
+    )
+
+    assert all(1 <= value <= 2_147_483_646 for value in derived)
+
+
+# Every fixture-drivable stage, and the random streams it draws.
+# run_openmm_steered is absent because it runs no dynamics of its own; the
+# delegation test below covers it instead.
+_SEEDED_STAGES = [
+    pytest.param(
+        nqe_openmm.run_openmm_relaxation, ("thermostat",), id="relaxation"
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_relaxation_simple,
+        ("thermostat",),
+        id="relaxation_simple",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_heating,
+        ("thermostat", "velocities"),
+        id="heating",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_npt,
+        ("thermostat", "velocities", "barostat"),
+        id="npt",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_prod,
+        ("thermostat", "velocities", "barostat"),
+        id="prod",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_rpmd_equilibration,
+        ("thermostat",),
+        id="rpmd_equilibration",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_rpmd_contracted,
+        ("thermostat", "barostat"),
+        id="rpmd_contracted",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_rpmd_prod,
+        ("thermostat", "barostat"),
+        id="rpmd_prod",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_adqtb_eq,
+        ("thermostat", "velocities"),
+        id="adqtb_eq",
+    ),
+    pytest.param(
+        nqe_openmm.run_openmm_adqtb_prod,
+        ("thermostat", "barostat"),
+        id="adqtb_prod",
+    ),
+]
+
+
+@pytest.mark.parametrize(("stage", "streams"), _SEEDED_STAGES)
+def test_every_stage_fixes_each_random_stream_it_draws(
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., Any],
+    streams: tuple[str, ...],
+) -> None:
+    runtime = workflow_runtime
+
+    stage(runtime.modeller, forcefield=object(), seed=4321)
+
+    expected = dict(
+        zip(streams, nqe_openmm._derive_seeds(4321, *streams), strict=True)
+    )
+    context = runtime.calls.simulations[0].context
+    barostat_seeds = [
+        seed
+        for barostat in runtime.calls.barostats
+        for seed in barostat.random_seeds
+    ]
+
+    assert runtime.calls.integrators[0].random_seeds == [expected["thermostat"]]
+    assert context.velocity_seeds == (
+        [expected["velocities"]] if "velocities" in expected else []
+    )
+    assert barostat_seeds == (
+        [expected["barostat"]] if "barostat" in expected else []
+    )
+
+
+@pytest.mark.parametrize(("stage", "streams"), _SEEDED_STAGES)
+def test_no_stage_fixes_a_random_stream_without_a_master_seed(
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., Any],
+    streams: tuple[str, ...],
+) -> None:
+    runtime = workflow_runtime
+
+    stage(runtime.modeller, forcefield=object())
+
+    context = runtime.calls.simulations[0].context
+
+    assert runtime.calls.integrators[0].random_seeds == []
+    assert all(
+        barostat.random_seeds == [] for barostat in runtime.calls.barostats
+    )
+    # No seed argument at all, so OpenMM falls back to its entropy source.
+    assert set(context.velocity_seeds) <= {None}
+
+
+def test_one_master_seed_still_gives_each_consumer_its_own_numbers(
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    # A single seed must not reach the thermostat, the velocity draw and the
+    # barostat as the same number: correlated streams are not three
+    # independent sources of noise.
+    runtime = workflow_runtime
+
+    nqe_openmm.run_openmm_prod(runtime.modeller, forcefield=object(), seed=5)
+
+    context = runtime.calls.simulations[0].context
+    drawn = (
+        runtime.calls.integrators[0].random_seeds
+        + runtime.calls.barostats[0].random_seeds
+        + context.velocity_seeds
+    )
+
+    assert len(set(drawn)) == 3
+
+
+def test_steered_md_hands_its_seed_to_the_production_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delegated = []
+    monkeypatch.setattr(
+        nqe_openmm,
+        "run_openmm_prod",
+        lambda *args, **kwargs: delegated.append(kwargs),
+    )
+
+    nqe_openmm.run_openmm_steered(
+        object(), object(), Path("PLUMED"), steps=4, seed=17
+    )
+
+    assert delegated[0]["seed"] == 17
 
 
 def test_rpmd_production_loads_checkpoint_and_saves_centroid(

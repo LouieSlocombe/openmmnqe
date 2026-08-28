@@ -28,8 +28,9 @@ restart, preserving the state their production integrator needs. RPMD restart
 files contain every bead rather than an ordinary single-Context checkpoint.
 The shared arguments behave the same throughout -- *potential* with *ml_idx*
 runs an ML/MM mixed system and forces the CUDA platform,
-*plumed_script_path* attaches a bias, and *output_prefix* names every file the
-stage writes.
+*plumed_script_path* attaches a bias, *output_prefix* names every file the
+stage writes, and *seed* fixes every random stream the stage draws, so that
+the run reproduces bit for bit.
 """
 from __future__ import annotations
 
@@ -152,6 +153,120 @@ def _validate_rpmd_contractions(
             )
         normalized[group] = count
     return normalized
+
+
+# Ordered registry of the independent random streams a stage can draw from.
+# Two consumers sharing a stream would correlate -- a thermostat driven by the
+# same numbers that chose the starting velocities is not the same run twice --
+# so each gets its own child of the master seed's SeedSequence. The order is
+# part of the derivation, since a stream is identified by its index here:
+# appending a name leaves every seed already in use meaning what it did, and
+# reordering silently changes all of them.
+_SEED_STREAMS: tuple[str, ...] = (
+    "initialization",  # NumPy generator placing the RPMD beads
+    "thermostat",      # Langevin, RPMD PILE, or QTB integrator noise
+    "velocities",      # Context.setVelocitiesToTemperature
+    "barostat",        # Monte Carlo barostat volume moves
+)
+
+# NumPy takes any 32-bit value; OpenMM reads zero as a request for a
+# non-deterministic seed, so its streams are mapped onto the positive range.
+_NUMPY_SEED_STREAMS = frozenset({"initialization"})
+
+
+def _derive_seeds(seed: int | None, *streams: str) -> tuple[int | None, ...]:
+    """
+    Derive one independent seed per named stream from a master seed.
+
+    Parameters
+    ----------
+    seed : int or None
+        Non-negative master seed, or None to leave every stream
+        non-deterministic.
+    *streams : str
+        Names from :data:`_SEED_STREAMS`, one per seed wanted, returned in the
+        order given.
+
+    Returns
+    -------
+    tuple of (int or None)
+        One seed per requested stream, or all None if *seed* is None. Seeds
+        bound for OpenMM are never zero, which OpenMM would read as a request
+        for a non-deterministic seed.
+
+    Raises
+    ------
+    KeyError
+        If a name is not a registered stream.
+    ValueError
+        If *seed* is a bool, not an integer, or negative.
+    """
+    for name in streams:
+        if name not in _SEED_STREAMS:
+            raise KeyError(f"unknown seed stream {name!r}")
+    if seed is None:
+        return tuple(None for _ in streams)
+    if (
+        isinstance(seed, (bool, np.bool_))
+        or not isinstance(seed, (int, np.integer))
+        or seed < 0
+    ):
+        raise ValueError("seed must be a non-negative integer or None")
+
+    # Spawning the whole registry rather than only what was asked for is what
+    # ties a stream's value to its index, so two stages given the same master
+    # seed agree on what "velocities" means however many streams either draws.
+    children = np.random.SeedSequence(int(seed)).spawn(len(_SEED_STREAMS))
+    derived: list[int] = []
+    for name in streams:
+        child = children[_SEED_STREAMS.index(name)]
+        raw = int(child.generate_state(1, dtype=np.uint32)[0])
+        if name in _NUMPY_SEED_STREAMS:
+            derived.append(raw)
+        else:
+            # Zero is reserved for the seed=None path, so that every explicit
+            # master seed stays reproducible.
+            derived.append(raw % 2_147_483_647 or 1)
+    return tuple(derived)
+
+
+def _seed_random_stream(target: Any, seed: int | None) -> None:
+    """
+    Fix an OpenMM integrator's or barostat's random stream.
+
+    Parameters
+    ----------
+    target : object
+        Any OpenMM object carrying ``setRandomNumberSeed``, i.e. an integrator
+        or a Monte Carlo barostat.
+    seed : int or None
+        Seed to set, or None to leave OpenMM's own non-deterministic choice in
+        place.
+    """
+    if seed is not None:
+        target.setRandomNumberSeed(seed)
+
+
+def _set_velocities_to_temperature(simulation: app.Simulation,
+                                   temperature: unit.Quantity,
+                                   seed: int | None) -> None:
+    """
+    Draw fresh Maxwell-Boltzmann velocities at *temperature*.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation whose Context is given the new velocities.
+    temperature : openmm.unit.Quantity
+        Temperature the velocities are drawn at.
+    seed : int or None
+        Seed for the draw. None is not passed through as a seed at all, so
+        that OpenMM falls back to its own entropy source.
+    """
+    if seed is None:
+        simulation.context.setVelocitiesToTemperature(temperature)
+    else:
+        simulation.context.setVelocitiesToTemperature(temperature, seed)
 
 
 def _validate_pdb_identity_name(name: str, description: str,
@@ -1440,6 +1555,7 @@ def run_openmm_relaxation(
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
+        seed: int | None = None,
 ) -> None:
     """
     Minimise in stages, easing the backbone restraints as it goes.
@@ -1490,10 +1606,16 @@ def run_openmm_relaxation(
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    seed : int or None, optional
+        Master random seed, fixing the Langevin integrator's random stream.
+        Minimisation draws no random numbers, so this changes nothing in the
+        structure written here; it is accepted so that one seed can be handed
+        to every stage of a workflow alike. Default is None.
     """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
+    thermostat_seed, = _derive_seeds(seed, "thermostat")
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
@@ -1516,6 +1638,7 @@ def run_openmm_relaxation(
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
                                                  time_step)
+    _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(current_positions)
 
@@ -1549,6 +1672,7 @@ def run_openmm_relaxation_simple(
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
+        seed: int | None = None,
 ) -> None:
     """
     Perform a simple, unrestrained energy minimisation.
@@ -1581,13 +1705,20 @@ def run_openmm_relaxation_simple(
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    seed : int or None, optional
+        Master random seed, fixing the Langevin integrator's random stream.
+        Minimisation itself draws no random numbers, but that stream is part
+        of the checkpoint this stage writes, so a seed is what makes the
+        checkpoint reproduce byte for byte. Default is None.
     """
+    thermostat_seed, = _derive_seeds(seed, "thermostat")
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
                                                  time_step)
+    _seed_random_stream(integrator, thermostat_seed)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
@@ -1618,6 +1749,7 @@ def run_openmm_heating(
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
+        seed: int | None = None,
 ) -> None:
     """
     Heat a system from 0 K to temperature, under backbone restraints.
@@ -1670,7 +1802,15 @@ def run_openmm_heating(
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for the starting velocities and the Langevin thermostat, making the
+        run reproducible. If None, OpenMM chooses both non-deterministically.
+        Default is None.
     """
+    thermostat_seed, velocity_seed = _derive_seeds(
+        seed, "thermostat", "velocities"
+    )
     target_temp_kelvin = require_positive_finite_scalar_in_unit(
         target_temp,
         unit.kelvin,
@@ -1708,6 +1848,7 @@ def run_openmm_heating(
     integrator = openmm.LangevinMiddleIntegrator(current_temp,
                                                  gamma,
                                                  time_step)
+    _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
 
@@ -1722,7 +1863,7 @@ def run_openmm_heating(
         print(f"\n-> Heating to {temp}...", flush=True)
         integrator.setTemperature(temp)
         if temp == temp_step:
-            simulation.context.setVelocitiesToTemperature(temp)
+            _set_velocities_to_temperature(simulation, temp, velocity_seed)
         simulation.step(steps_per_stage)
         temp += temp_step
 
@@ -1730,7 +1871,7 @@ def run_openmm_heating(
     integrator.setTemperature(target_temp)
     if target_temp <= temp_step:
         # The ramp never ran, so this stage is also where the velocities start.
-        simulation.context.setVelocitiesToTemperature(target_temp)
+        _set_velocities_to_temperature(simulation, target_temp, velocity_seed)
     simulation.step(steps_per_stage)
     print("\n--- Heating Complete ---", flush=True)
     print(f"Running final equilibration at {target_temp} for {steps_final} steps...", flush=True)
@@ -1760,6 +1901,7 @@ def run_openmm_npt(
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
+        seed: int | None = None,
 ) -> None:
     """
     Run a two-phase NPT density equilibration.
@@ -1813,10 +1955,18 @@ def run_openmm_npt(
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for the starting velocities, the Langevin thermostat, and the
+        barostat's volume moves, making the run reproducible. If None, OpenMM
+        chooses each non-deterministically. Default is None.
     """
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
+    thermostat_seed, velocity_seed, barostat_seed = _derive_seeds(
+        seed, "thermostat", "velocities", "barostat"
+    )
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
@@ -1824,7 +1974,9 @@ def run_openmm_npt(
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
-        system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+        barostat = openmm.MonteCarloBarostat(pressure, temperature, barostat_freq)
+        _seed_random_stream(barostat, barostat_seed)
+        system.addForce(barostat)
 
     restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
     restraint.addGlobalParameter("k", k * unit.kilojoules_per_mole / (unit.nanometer ** 2))
@@ -1840,9 +1992,10 @@ def run_openmm_npt(
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
                                                  time_step)
+    _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
-    simulation.context.setVelocitiesToTemperature(temperature)
+    _set_velocities_to_temperature(simulation, temperature, velocity_seed)
 
     _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
                             stdout_volume=True)
@@ -1877,6 +2030,7 @@ def run_openmm_prod(
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
+        seed: int | None = None,
 ) -> None:
     """
     Run an NPT production MD simulation, optionally with PLUMED enhanced sampling.
@@ -1925,7 +2079,15 @@ def run_openmm_prod(
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for the starting velocities, the Langevin thermostat, and the
+        barostat's volume moves, making the run reproducible. If None, OpenMM
+        chooses each non-deterministically. Default is None.
     """
+    thermostat_seed, velocity_seed, barostat_seed = _derive_seeds(
+        seed, "thermostat", "velocities", "barostat"
+    )
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
@@ -1933,15 +2095,18 @@ def run_openmm_prod(
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     if barostat_freq is not None:
-        system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+        barostat = openmm.MonteCarloBarostat(pressure, temperature, barostat_freq)
+        _seed_random_stream(barostat, barostat_seed)
+        system.addForce(barostat)
 
     _load_plumed(system, plumed_script_path)
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
                                                  time_step)
+    _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
-    simulation.context.setVelocitiesToTemperature(temperature)
+    _set_velocities_to_temperature(simulation, temperature, velocity_seed)
 
     _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
                             checkpoint_interval=n_report * 10)
@@ -1970,6 +2135,7 @@ def run_openmm_steered(
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
+        seed: int | None = None,
 ) -> str:
     """
     Run a steered MD simulation, dragging a collective variable with PLUMED.
@@ -2028,6 +2194,10 @@ def run_openmm_steered(
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    seed : int or None, optional
+        Master random seed, handed to :func:`run_openmm_prod`. A value makes
+        the pulling run reproducible, which is what lets a set of paths differ
+        only in the schedule that pulled them. Default is None.
 
     Returns
     -------
@@ -2059,63 +2229,12 @@ def run_openmm_steered(
                     deuterate_option=deuterate_option,
                     potential=potential,
                     ml_idx=ml_idx,
-                    calculator=calculator)
+                    calculator=calculator,
+                    seed=seed)
 
     traj_file = f'{output_prefix}_steps.pdb'
     print(f"Steered trajectory written to {traj_file}", flush=True)
     return traj_file
-
-
-def _split_rpmd_seed(seed: int | None) -> tuple[int | None, int | None]:
-    """
-    Derive independent NumPy and OpenMM seeds from one master seed.
-
-    Bead initialisation and the PILE thermostat draw from separate streams,
-    so one master seed is split rather than reused: sharing it would
-    correlate the starting ring polymer with its thermostat noise.
-
-    Parameters
-    ----------
-    seed : int or None
-        Non-negative master seed, or None to leave both streams
-        non-deterministic.
-
-    Returns
-    -------
-    initialization_seed : int or None
-        Seed for the NumPy generator that places the beads.
-    thermostat_seed : int or None
-        Seed for the OpenMM PILE thermostat. Never zero, which OpenMM reads
-        as a request for a non-deterministic seed.
-
-    Raises
-    ------
-    ValueError
-        If *seed* is a bool, not an integer, or negative.
-    """
-    if seed is None:
-        return None, None
-    if (
-        isinstance(seed, (bool, np.bool_))
-        or not isinstance(seed, (int, np.integer))
-        or seed < 0
-    ):
-        raise ValueError("seed must be a non-negative integer or None")
-
-    initialization_sequence, thermostat_sequence = np.random.SeedSequence(
-        int(seed)
-    ).spawn(2)
-    initialization_seed = int(
-        initialization_sequence.generate_state(1, dtype=np.uint32)[0]
-    )
-    thermostat_seed = int(
-        thermostat_sequence.generate_state(1, dtype=np.uint32)[0]
-    ) % 2_147_483_647
-    # OpenMM assigns a non-deterministic seed when given 0, so reserve zero for
-    # the seed=None path and keep every explicit master seed reproducible.
-    if thermostat_seed == 0:
-        thermostat_seed = 1
-    return initialization_seed, thermostat_seed
 
 
 def run_openmm_rpmd_equilibration(
@@ -2201,15 +2320,16 @@ def run_openmm_rpmd_equilibration(
         Atom pairs whose centroid distances are written alongside the spread
         values. Requires *atoms_to_watch*. Default is None.
     """
-    initialization_seed, thermostat_seed = _split_rpmd_seed(seed)
+    initialization_seed, thermostat_seed = _derive_seeds(
+        seed, "initialization", "thermostat"
+    )
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep)
-    if thermostat_seed is not None:
-        integrator.setRandomNumberSeed(thermostat_seed)
+    _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     with _finalize_rpmd_reporters(simulation):
@@ -2284,6 +2404,7 @@ def run_openmm_rpmd_contracted(
         calculator: Any = None,
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+        seed: int | None = None,
 ) -> None:
     """
     Run a contracted ring-polymer MD (RPMD) production simulation.
@@ -2349,6 +2470,12 @@ def run_openmm_rpmd_contracted(
     distance_pairs_to_watch : iterable of pair of int or None, optional
         Atom pairs whose centroid distances are written alongside the spread
         values. Requires *atoms_to_watch*. Default is None.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for the PILE thermostat and the barostat's volume moves, making the
+        run reproducible. The ring polymer itself comes from
+        *checkpoint_file*, so it is unaffected. If None, OpenMM chooses both
+        non-deterministically. Default is None.
 
     Raises
     ------
@@ -2357,7 +2484,7 @@ def run_openmm_rpmd_contracted(
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
         a contraction is invalid, or *barostat_freq* is set on a nonperiodic
-        System.
+        System, or *seed* is negative or not an integer.
 
     Warns
     -----
@@ -2366,6 +2493,9 @@ def run_openmm_rpmd_contracted(
     """
     n_beads = _validate_rpmd_n_beads(n_beads)
     contractions = _validate_rpmd_contractions(contractions, n_beads)
+    thermostat_seed, barostat_seed = _derive_seeds(
+        seed, "thermostat", "barostat"
+    )
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
@@ -2374,7 +2504,9 @@ def run_openmm_rpmd_contracted(
 
     if barostat_freq is not None:
         _warn_barostat_on_python_force(system)
-        system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
+        barostat = openmm.RPMDMonteCarloBarostat(pressure, barostat_freq)
+        _seed_random_stream(barostat, barostat_seed)
+        system.addForce(barostat)
 
     _load_plumed(system, plumed_script_path)
 
@@ -2408,6 +2540,7 @@ def run_openmm_rpmd_contracted(
 
     print(f"\nInitializing RPMDIntegrator with contractions: {contractions}", flush=True)
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep, contractions)
+    _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
@@ -2467,6 +2600,7 @@ def run_openmm_rpmd_prod(
         calculator: Any = None,
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+        seed: int | None = None,
 ) -> None:
     """
     Run a full ring-polymer MD (RPMD) production simulation.
@@ -2527,6 +2661,12 @@ def run_openmm_rpmd_prod(
     distance_pairs_to_watch : iterable of pair of int or None, optional
         Atom pairs whose centroid distances are written alongside the spread
         values. Requires *atoms_to_watch*. Default is None.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for the PILE thermostat and the barostat's volume moves, making the
+        run reproducible. The ring polymer itself comes from
+        *checkpoint_file*, so it is unaffected. If None, OpenMM chooses both
+        non-deterministically. Default is None.
 
     Raises
     ------
@@ -2534,13 +2674,17 @@ def run_openmm_rpmd_prod(
         If *checkpoint_file* does not exist.
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
-        *barostat_freq* is set on a nonperiodic System.
+        *barostat_freq* is set on a nonperiodic System, or *seed* is negative
+        or not an integer.
 
     Warns
     -----
     UserWarning
         If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
+    thermostat_seed, barostat_seed = _derive_seeds(
+        seed, "thermostat", "barostat"
+    )
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
@@ -2549,13 +2693,16 @@ def run_openmm_rpmd_prod(
 
     if barostat_freq is not None:
         _warn_barostat_on_python_force(system)
-        system.addForce(openmm.RPMDMonteCarloBarostat(pressure, barostat_freq))
+        barostat = openmm.RPMDMonteCarloBarostat(pressure, barostat_freq)
+        _seed_random_stream(barostat, barostat_seed)
+        system.addForce(barostat)
 
     _load_plumed(system, plumed_script_path)
     integrator = openmm.RPMDIntegrator(n_beads,
                                        temperature,
                                        gamma,
                                        time_step)
+    _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
@@ -2602,6 +2749,7 @@ def run_openmm_adqtb_eq(
         potential: Any = None,
         ml_idx: list[int] | None = None,
         calculator: Any = None,
+        seed: int | None = None,
 ) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) equilibration simulation.
@@ -2645,7 +2793,15 @@ def run_openmm_adqtb_eq(
         Atom indices for the ML region. Default is None.
     calculator : object or None, optional
         Optional calculator object to pass to the ML potential. Default is None.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for the starting velocities and the quantum thermal bath, making the
+        run reproducible. If None, OpenMM chooses both non-deterministically.
+        Default is None.
     """
+    thermostat_seed, velocity_seed = _derive_seeds(
+        seed, "thermostat", "velocities"
+    )
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
@@ -2654,10 +2810,11 @@ def run_openmm_adqtb_eq(
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
+    _seed_random_stream(integrator, thermostat_seed)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
-    simulation.context.setVelocitiesToTemperature(temperature)
+    _set_velocities_to_temperature(simulation, temperature, velocity_seed)
 
     _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
                             checkpoint_interval=n_report * 10)
@@ -2689,6 +2846,7 @@ def run_openmm_adqtb_prod(
         ml_idx: list[int] | None = None,
         calculator: Any = None,
         checkpoint_file: str = 'adqtb_ready.chk',
+        seed: int | None = None,
 ) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) production simulation.
@@ -2744,19 +2902,29 @@ def run_openmm_adqtb_prod(
         Path to the adQTB equilibration checkpoint. The checkpoint contains
         the adapted friction spectrum as well as coordinates and velocities.
         Default is ``'adqtb_ready.chk'``.
+    seed : int or None, optional
+        Master random seed. A value derives independent deterministic streams
+        for the quantum thermal bath and the barostat's volume moves, making
+        the run reproducible. Velocities and the adapted friction spectrum
+        come from *checkpoint_file*, so they are unaffected. If None, OpenMM
+        chooses both non-deterministically. Default is None.
 
     Raises
     ------
     FileNotFoundError
         If *checkpoint_file* does not exist.
     ValueError
-        If *barostat_freq* is set on a nonperiodic System.
+        If *barostat_freq* is set on a nonperiodic System, or *seed* is
+        negative or not an integer.
 
     Warns
     -----
     UserWarning
         If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
+    thermostat_seed, barostat_seed = _derive_seeds(
+        seed, "thermostat", "barostat"
+    )
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
@@ -2765,13 +2933,16 @@ def run_openmm_adqtb_prod(
 
     if barostat_freq is not None:
         _warn_barostat_on_python_force(system)
-        system.addForce(openmm.MonteCarloBarostat(pressure, temperature, barostat_freq))
+        barostat = openmm.MonteCarloBarostat(pressure, temperature, barostat_freq)
+        _seed_random_stream(barostat, barostat_seed)
+        system.addForce(barostat)
 
     _load_plumed(system, plumed_script_path)
 
     integrator = openmm.QTBIntegrator(temperature, gamma, time_step)
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
+    _seed_random_stream(integrator, thermostat_seed)
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     _load_checkpoint(simulation, checkpoint_file)
