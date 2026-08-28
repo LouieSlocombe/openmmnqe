@@ -1,0 +1,31 @@
+# Read the Docs build configuration.
+# https://docs.readthedocs.com/platform/stable/config-file/v2.html
+#
+# The package is deliberately NOT installed. Its runtime dependencies are
+# conda-only (openmm, openmm-ml, openmm-plumed, pdbfixer) or git-only
+# (forcefill, reactiontools), and openmm-plumed has to be compiled -- see
+# build_tools/README.md. docs/conf.py puts the checkout on sys.path and mocks
+# them instead, which keeps this build under a minute.
+
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    # Matches requires-python and the CI lint job.
+    python: "3.12"
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: true
+
+python:
+  install:
+    # Not `path: .` with extra_requirements -- that installs the project and
+    # its dependencies, which would try to resolve openmm>=8.5.2 (PyPI has
+    # only 8.3.0) and openmmplumed (not on PyPI at all). This file is kept
+    # identical to the [docs] extra in pyproject.toml.
+    - requirements: docs/requirements.txt
+
+formats:
+  - htmlzip

@@ -651,7 +651,7 @@ def remove_file_pattern(pattern: str) -> None:
     Parameters
     ----------
     pattern : str
-        The glob pattern to match files (e.g., "*.txt" for all text files).
+        The glob pattern to match files (e.g. ``*.txt`` for all text files).
     """
     for path in glob.glob(pattern):
         try:

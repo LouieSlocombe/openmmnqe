@@ -1,0 +1,13 @@
+# Doc toolchain for the Read the Docs build (.readthedocs.yaml) and the docs job
+# in .github/workflows/ci.yml. Kept identical to the [docs] extra in
+# pyproject.toml; tests/test_package_metadata.py asserts the two agree.
+#
+# openmmnqe itself is not installed here: docs/conf.py mocks its conda-only and
+# git-only dependencies. numpy and scipy are installed for real so that the
+# numpy.typing annotations resolve and intersphinx can link them.
+sphinx>=8.2,<10
+furo>=2024.8.6
+myst-parser>=4,<6
+sphinx-copybutton>=0.5.2
+numpy
+scipy

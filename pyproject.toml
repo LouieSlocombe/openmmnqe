@@ -50,6 +50,20 @@ dev = [
     "matplotlib",
     "mypy",
 ]
+# Kept byte-identical to docs/requirements.txt, which Read the Docs installs
+# instead of this extra -- RTD cannot request an extra without also installing
+# the project, and openmmnqe's runtime dependencies are not pip-installable.
+# tests/test_package_metadata.py asserts the two lists agree. numpy and scipy
+# are restated here even though they are hard dependencies, so that equality
+# check is a plain comparison.
+docs = [
+    "sphinx>=8.2,<10",
+    "furo>=2024.8.6",
+    "myst-parser>=4,<6",
+    "sphinx-copybutton>=0.5.2",
+    "numpy",
+    "scipy",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -92,3 +92,17 @@ def test_critical_dependency_minimums_are_declared() -> None:
     dependencies = set(_project_metadata()["dependencies"])
     assert "openmm>=8.5.2" in dependencies
     assert "openmmml>=1.6" in dependencies
+
+
+def test_docs_requirements_match_docs_extra() -> None:
+    # Read the Docs installs docs/requirements.txt rather than the [docs]
+    # extra, because it cannot request an extra without also installing the
+    # project -- and openmmnqe's runtime dependencies are not pip-installable.
+    # That leaves two lists that have to say the same thing, so pin them here.
+    extra = _project_metadata()["optional-dependencies"]["docs"]
+    requirements = [
+        line.strip()
+        for line in (PROJECT_ROOT / "docs" / "requirements.txt").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert requirements == list(extra)
