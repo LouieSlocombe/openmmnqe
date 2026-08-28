@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import openmm.app as app
 import openmm.unit as unit
 import pytest
 from openmm import Vec3
@@ -17,8 +18,12 @@ import openmmnqe.openmm as nqe_openmm
 class _Topology:
     def __init__(self) -> None:
         self._atoms = [
-            SimpleNamespace(index=0, name="CA"),
-            SimpleNamespace(index=1, name="SIDE"),
+            SimpleNamespace(
+                index=0, name="CA", element=app.Element.getBySymbol("C"),
+            ),
+            SimpleNamespace(
+                index=1, name="SIDE", element=app.Element.getBySymbol("H"),
+            ),
         ]
 
     def atoms(self) -> Iterator[SimpleNamespace]:
@@ -32,6 +37,13 @@ class _System:
     def __init__(self) -> None:
         self.forces = []
         self.periodic = True
+        self.masses = [12.011, 1.008]
+
+    def getNumParticles(self) -> int:
+        return len(self.masses)
+
+    def getParticleMass(self, index: int) -> unit.Quantity:
+        return self.masses[index] * unit.dalton
 
     def addForce(self, force: Any) -> int:
         self.forces.append(force)
@@ -87,6 +99,21 @@ class _Integrator:
         self.segment_lengths = []
         self.adaptation_rates = []
         self.random_seeds = []
+        self.particle_types: dict[int, int] = {}
+
+    def setParticleType(self, particle: int, type_index: int) -> None:
+        self.particle_types[particle] = type_index
+
+    def getParticleTypes(self) -> dict[int, int]:
+        return dict(self.particle_types)
+
+    def getStepSize(self) -> unit.Quantity:
+        if self.step_sizes:
+            return self.step_sizes[-1]
+        return self.args[2]
+
+    def getSegmentLength(self) -> unit.Quantity:
+        return self.segment_lengths[-1]
 
     def setTemperature(self, temperature: unit.Quantity) -> None:
         self.temperatures.append(temperature)
@@ -154,6 +181,7 @@ def workflow_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         deuterations=[],
         plumed=[],
         standard_reporters=[],
+        adqtb_reporters=[],
         rpmd_progress_reporters=[],
         rpmd_reporters=[],
         rpmd_steps=[],
@@ -213,6 +241,11 @@ def workflow_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         nqe_openmm,
         "_add_standard_reporters",
         lambda *args, **kwargs: calls.standard_reporters.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "_add_adqtb_reporters",
+        lambda *args, **kwargs: calls.adqtb_reporters.append((args, kwargs)),
     )
     monkeypatch.setattr(
         nqe_openmm,
@@ -551,7 +584,7 @@ def test_rpmd_reporter_finalizer_closes_outputs_on_success_and_failure(
     monkeypatch.setattr(nqe_openmm, "RPMDBeadReporter", Reporter)
 
     successful = Reporter()
-    with nqe_openmm._finalize_rpmd_reporters(
+    with nqe_openmm._finalize_reporters(
         SimpleNamespace(reporters=[successful]),
     ):
         pass
@@ -560,7 +593,7 @@ def test_rpmd_reporter_finalizer_closes_outputs_on_success_and_failure(
     close_failure = Reporter(OSError("close failed"))
     still_closed = Reporter()
     with pytest.raises(OSError, match="close failed"):
-        with nqe_openmm._finalize_rpmd_reporters(
+        with nqe_openmm._finalize_reporters(
             SimpleNamespace(reporters=[close_failure, still_closed]),
         ):
             pass
@@ -569,7 +602,7 @@ def test_rpmd_reporter_finalizer_closes_outputs_on_success_and_failure(
 
     failing = Reporter(OSError("close failed"))
     with pytest.raises(RuntimeError, match="simulation failed"):
-        with nqe_openmm._finalize_rpmd_reporters(
+        with nqe_openmm._finalize_reporters(
             SimpleNamespace(reporters=[failing]),
         ):
             raise RuntimeError("simulation failed")
@@ -1116,10 +1149,17 @@ def test_adqtb_equilibration_configures_adaptation_and_checkpoint_reporting(
     assert simulation.context.positions == [runtime.modeller.positions]
     assert _temperature_values(simulation.context.velocity_temperatures) == [300.0]
     assert simulation.steps == [14]
-    assert runtime.calls.standard_reporters == [
+    assert runtime.calls.standard_reporters == []
+    assert runtime.calls.adqtb_reporters == [
         (
             (simulation, "adqtb", 6),
-            {"pdb_steps": True, "checkpoint_interval": 60},
+            {
+                "segment_steps": 800,
+                "type_names": {0: "H", 1: "C"},
+                "friction_log": True,
+                "checkpoint_interval": 60,
+            },
         )
     ]
+    assert integrator.particle_types == {0: 1, 1: 0}
     assert runtime.calls.saved == [((simulation, "adqtb"), {})]

@@ -888,7 +888,7 @@ def test_save_final_state_writes_current_box_for_periodic_system() -> None:
     )
 
 
-def test_close_rpmd_output_reporters_closes_the_thermodynamic_log(
+def test_close_output_reporters_closes_the_thermodynamic_log(
     tmp_path: Path,
 ) -> None:
     # The closing pass filters on type, so a reporter missing from that tuple
@@ -896,6 +896,6 @@ def test_close_rpmd_output_reporters_closes_the_thermodynamic_log(
     reporter = nqe_openmm.RPMDThermodynamicReporter(tmp_path / "thermo.log", 10)
     simulation = SimpleNamespace(reporters=[reporter])
 
-    nqe_openmm._close_rpmd_output_reporters(simulation, suppress_errors=False)
+    nqe_openmm._close_output_reporters(simulation, suppress_errors=False)
 
     assert reporter._out.closed

@@ -11,6 +11,7 @@ authoritative list of what is public.
 .. toctree::
    :maxdepth: 2
 
+   adqtb
    io
    openmm
    reporters

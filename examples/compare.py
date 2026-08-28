@@ -226,19 +226,22 @@ def run_parahydrogen() -> None:
         integrator.setParticleType(i, 0)
     integrator.setDefaultAdaptationRate(0.5)
 
-    context = openmm.Context(system, integrator)
-    context.setPositions(positions)
-    openmm.LocalEnergyMinimizer.minimize(context)
-    context.setVelocitiesToTemperature(temperature)
+    simulation = app.Simulation(topology, system, integrator)
+    simulation.context.setPositions(positions)
+    openmm.LocalEnergyMinimizer.minimize(simulation.context)
+    simulation.context.setVelocitiesToTemperature(temperature)
 
-    for i in range(5):
-        integrator.step(10_000)
-        plt.plot(integrator.getAdaptedFriction(0), label=f'{i}')
-    plt.xlim([0, 200])
-    plt.legend()
-    plt.show()
+    # Log the adapted friction every segment, so the equilibration can be
+    # shown to have converged rather than assumed to have.
+    with nqe.track_adqtb_friction(simulation, 'compare_friction.log'):
+        simulation.step(50_000)
 
-    qtb_rdf = compute_rdf(context, particles, box_size)
+    for label, verdict in nqe.adqtb_convergence('compare_friction.log').items():
+        print(f"{label}: converged={verdict.converged} "
+              f"drift ratio {verdict.drift_ratio:.2f}")
+    nqe.plot_adqtb_friction_spectra('compare_friction.log', show=True)
+
+    qtb_rdf = compute_rdf(simulation.context, particles, box_size)
 
     plt.plot(classical_rdf, label="Classical")
     plt.plot(rpmd_rdf, label="RPMD")

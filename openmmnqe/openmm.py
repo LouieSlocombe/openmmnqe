@@ -52,6 +52,7 @@ from openmmml import MLPotential
 from openmmplumed import PlumedForce
 
 from ._validation import require_integer, require_positive_finite_scalar_in_unit
+from .adqtb import QTBFrictionReporter
 from .reporters import (
     RPMDBeadReporter,
     RPMDCentroidReporter,
@@ -66,6 +67,7 @@ from .tools import (
     check_platform,
     deuterate_system,
     init_beads,
+    set_adqtb_particle_types_by_element,
     step_rpmd,
 )
 
@@ -987,7 +989,279 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
     ))
 
 
-def _close_rpmd_output_reporters(
+# The adQTB noise buffer is transformed with a mixed-radix FFT, so a segment
+# has to span a number of steps whose only prime factors are these.
+_ADQTB_SEGMENT_FACTORS = (2, 3, 5, 7)
+
+
+def _validate_adqtb_segment(segment_length: unit.Quantity,
+                            time_step: unit.Quantity) -> int:
+    """
+    Return the number of steps in an adQTB segment, rejecting bad lengths.
+
+    OpenMM raises on both of these conditions, but only once the Context is
+    being built, which is after the System has been parameterised and any ML
+    potential loaded.  Checking here costs nothing and fails in the second it
+    takes to read the arguments.
+
+    Parameters
+    ----------
+    segment_length : openmm.unit.Quantity
+        Length of one adaptation segment.
+    time_step : openmm.unit.Quantity
+        Integration step size.
+
+    Returns
+    -------
+    int
+        Number of integration steps in one segment.
+
+    Raises
+    ------
+    ValueError
+        If the segment is not a whole number of steps, or that number has a
+        prime factor larger than seven.
+    """
+    step_size = require_positive_finite_scalar_in_unit(
+        time_step, unit.picosecond, name="time_step",
+    )
+    length = require_positive_finite_scalar_in_unit(
+        segment_length, unit.picosecond, name="segment_length",
+    )
+    steps = int(round(length / step_size))
+    if steps < 1 or abs(steps * step_size - length) > 1e-9:
+        raise ValueError(
+            f"segment_length must be a whole number of time steps, but "
+            f"{length} ps is not a multiple of {step_size} ps"
+        )
+    remainder = steps
+    for factor in _ADQTB_SEGMENT_FACTORS:
+        while remainder % factor == 0:
+            remainder //= factor
+    if remainder != 1:
+        raise ValueError(
+            f"segment_length must span a number of steps whose only prime "
+            f"factors are 2, 3, 5 and 7, but it spans {steps} steps"
+        )
+    return steps
+
+
+def _adqtb_particle_labels(topology: app.Topology,
+                           system: openmm.System) -> list[str]:
+    """
+    Label every particle by element, splitting a symbol when masses differ.
+
+    ``deuterate_system`` edits masses without touching elements, so grouping
+    on the element symbol alone would put hydrogen and deuterium in the same
+    bath.  An adapted spectrum is mass-dependent -- that is the whole point
+    of it -- so a particle whose mass has been moved away from its element's
+    standard value gets a label, and therefore a bath, of its own.  OpenMM
+    enforces this too: a Context refuses to build when one particle type
+    spans more than one mass, so without the split a deuterated run would
+    not start at all.
+
+    Parameters
+    ----------
+    topology : openmm.app.Topology
+        Topology naming the elements, in particle order.
+    system : openmm.System
+        System the masses are read from.
+
+    Returns
+    -------
+    list of str
+        One label per particle, e.g. ``["H", "H2.014", "O"]``.
+
+    Raises
+    ------
+    ValueError
+        If the topology and System disagree on the particle count, which
+        means extra particles the elements cannot describe.
+    """
+    masses = _particle_masses_dalton(system)
+    elements = [atom.element for atom in topology.atoms()]
+    if len(elements) != len(masses):
+        raise ValueError(
+            f"topology has {len(elements)} atoms but the System has "
+            f"{len(masses)} particles; pass particle_types explicitly"
+        )
+    labels = []
+    for element, mass in zip(elements, masses, strict=True):
+        if element is None:
+            labels.append("X")
+            continue
+        standard = element.mass.value_in_unit(unit.dalton)
+        if abs(mass - standard) > 1e-3:
+            labels.append(f"{element.symbol}{mass:.3f}")
+        else:
+            labels.append(element.symbol)
+    return labels
+
+
+def _assign_adqtb_particle_types(
+    integrator: openmm.QTBIntegrator,
+    topology: app.Topology,
+    system: openmm.System,
+    particle_types: Literal["element", "none"] | Mapping[int, int] | None,
+) -> dict[int, str] | None:
+    """
+    Assign the integrator's particle types before its Context is created.
+
+    Without this every particle adapts a spectrum of its own, which is both
+    far noisier at a given adaptation rate and unreadable once logged.
+
+    Parameters
+    ----------
+    integrator : openmm.QTBIntegrator
+        Integrator whose types are set, in place.
+    topology : openmm.app.Topology
+        Topology naming the elements.
+    system : openmm.System
+        System the masses are read from.
+    particle_types : {"element", "none"} or mapping of int to int or None
+        ``"element"`` groups by element and mass, ``"none"`` and None leave
+        the types alone, and a mapping assigns particle index to type index
+        directly.
+
+    Returns
+    -------
+    dict of int to str or None
+        Labels for each assigned type, for the friction log's column names,
+        or None when the caller supplied the types itself.
+
+    Raises
+    ------
+    ValueError
+        If *particle_types* is neither a recognised keyword nor a mapping.
+    """
+    if particle_types is None or particle_types == "none":
+        return None
+    if particle_types == "element":
+        label_to_type = set_adqtb_particle_types_by_element(
+            integrator,
+            particle_elements=_adqtb_particle_labels(topology, system),
+            system=system,
+        )
+        return {index: label for label, index in label_to_type.items()}
+    if isinstance(particle_types, Mapping):
+        for particle, type_index in particle_types.items():
+            integrator.setParticleType(
+                require_integer(particle, name="particle index", minimum=0),
+                require_integer(type_index, name="particle type", minimum=0),
+            )
+        return None
+    raise ValueError(
+        "particle_types must be 'element', 'none', or a mapping of particle "
+        "index to type index"
+    )
+
+
+def _add_adqtb_progress_reporters(simulation: app.Simulation,
+                                  output_prefix: str, n_report: int) -> None:
+    """
+    Append Context-independent progress reporters for an adQTB run.
+
+    An adQTB thermostat drives the velocities to a quantum distribution, so
+    the standard estimators of temperature and pressure, which assume a
+    classical one, do not describe the run; OpenMM's own documentation warns
+    that they "do not produce correct results for an adQTB simulation".
+    Step, time, potential energy, speed and box volume remain meaningful, so
+    the kinetic and total energies and the temperature are deliberately
+    omitted here, exactly as they are for RPMD.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation the reporters are appended to.
+    output_prefix : str
+        Prefix for the ``<prefix>.log`` progress log.
+    n_report : int
+        Interval between reports, in steps.
+    """
+    simulation.reporters.append(app.StateDataReporter(
+        sys.stdout,
+        n_report,
+        step=True,
+        potentialEnergy=True,
+        speed=True,
+    ))
+    simulation.reporters.append(app.StateDataReporter(
+        f'{output_prefix}.log',
+        n_report,
+        step=True,
+        time=True,
+        potentialEnergy=True,
+        volume=True,
+        speed=True,
+    ))
+
+
+def _add_adqtb_reporters(simulation: app.Simulation, output_prefix: str,
+                         n_report: int, *, segment_steps: int,
+                         type_names: dict[int, str] | None,
+                         friction_log: bool,
+                         checkpoint_interval: int | None) -> None:
+    """
+    Append the adQTB reporter set: trajectory, progress, friction spectra.
+
+    The friction reporter runs at the adaptation cadence rather than at
+    *n_report*: OpenMM adapts exactly once per segment, and a row per
+    segment is what makes each row-to-row difference one
+    fluctuation-dissipation correction.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation the reporters are appended to.
+    output_prefix : str
+        Prefix for ``<prefix>_steps.pdb``, ``<prefix>.log``,
+        ``<prefix>.chk`` and ``<prefix>_friction.log``.
+    n_report : int
+        Interval between trajectory and progress reports, in steps.
+    segment_steps : int
+        Number of steps in one adaptation segment.
+    type_names : dict of int to str or None
+        Labels for the friction log's columns, one per particle type.
+    friction_log : bool
+        Whether to write ``<prefix>_friction.log`` at all.
+    checkpoint_interval : int or None
+        Interval between ``<prefix>.chk`` checkpoints, or None for no
+        checkpoint reporter.
+
+    Warns
+    -----
+    UserWarning
+        If a friction log was asked for but no particle types are assigned,
+        in which case every particle would adapt its own spectrum and the
+        log would carry one block of columns per atom.
+    """
+    simulation.reporters.append(
+        app.PDBReporter(f'{output_prefix}_steps.pdb', n_report)
+    )
+    _add_adqtb_progress_reporters(simulation, output_prefix, n_report)
+    if checkpoint_interval is not None:
+        simulation.reporters.append(
+            app.CheckpointReporter(f'{output_prefix}.chk', checkpoint_interval)
+        )
+    if not friction_log:
+        return
+    if not dict(simulation.integrator.getParticleTypes()):
+        warnings.warn(
+            "no adQTB particle types are assigned, so every particle adapts "
+            "its own noise spectrum; skipping the friction log",
+            UserWarning,
+            stacklevel=2,
+        )
+        return
+    simulation.reporters.append(QTBFrictionReporter(
+        f'{output_prefix}_friction.log',
+        segment_steps,
+        simulation.integrator,
+        type_names,
+    ))
+
+
+def _close_output_reporters(
     simulation: app.Simulation,
     *,
     suppress_errors: bool,
@@ -995,6 +1269,7 @@ def _close_rpmd_output_reporters(
     """Close every package-owned reporter attached to *simulation*."""
     first_error: Exception | None = None
     reporter_types = (
+        QTBFrictionReporter,
         RPMDQuantumSpreadReporter,
         RPMDCentroidReporter,
         RPMDBeadReporter,
@@ -1013,17 +1288,17 @@ def _close_rpmd_output_reporters(
 
 
 @contextmanager
-def _finalize_rpmd_reporters(
+def _finalize_reporters(
     simulation: app.Simulation,
 ) -> Iterator[None]:
-    """Ensure RPMD output reporters close on normal and exceptional exits."""
+    """Ensure package output reporters close on normal and exceptional exits."""
     try:
         yield
     except BaseException:
-        _close_rpmd_output_reporters(simulation, suppress_errors=True)
+        _close_output_reporters(simulation, suppress_errors=True)
         raise
     else:
-        _close_rpmd_output_reporters(simulation, suppress_errors=False)
+        _close_output_reporters(simulation, suppress_errors=False)
 
 
 def _save_rpmd_restart(simulation: app.Simulation, checkpoint_file: str,
@@ -2332,7 +2607,7 @@ def run_openmm_rpmd_equilibration(
     _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
-    with _finalize_rpmd_reporters(simulation):
+    with _finalize_reporters(simulation):
         _add_rpmd_reporters(
             simulation,
             modeller.topology,
@@ -2545,7 +2820,7 @@ def run_openmm_rpmd_contracted(
 
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
-    with _finalize_rpmd_reporters(simulation):
+    with _finalize_reporters(simulation):
         _add_rpmd_reporters(
             simulation,
             modeller.topology,
@@ -2706,7 +2981,7 @@ def run_openmm_rpmd_prod(
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
-    with _finalize_rpmd_reporters(simulation):
+    with _finalize_reporters(simulation):
         _add_rpmd_reporters(
             simulation,
             modeller.topology,
@@ -2750,6 +3025,8 @@ def run_openmm_adqtb_eq(
         ml_idx: list[int] | None = None,
         calculator: Any = None,
         seed: int | None = None,
+        particle_types: Literal["element", "none"] | Mapping[int, int] | None = "element",
+        friction_log: bool = True,
 ) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) equilibration simulation.
@@ -2798,7 +3075,20 @@ def run_openmm_adqtb_eq(
         for the starting velocities and the quantum thermal bath, making the
         run reproducible. If None, OpenMM chooses both non-deterministically.
         Default is None.
+    particle_types : {"element", "none"} or dict of int to int or None, optional
+        How the bath groups particles. ``"element"`` gives every element its
+        own adapted noise spectrum, splitting a symbol when masses differ so
+        that deuterium does not share hydrogen's bath. ``"none"`` and None
+        leave the types unset, which makes every particle adapt a spectrum of
+        its own. A mapping assigns particle index to type index directly.
+        Default is ``"element"``.
+    friction_log : bool, optional
+        Write ``<prefix>_friction.log``, one row of adapted friction spectra
+        per adaptation segment, for :mod:`openmmnqe.adqtb` to read back.
+        Skipped with a warning when no particle types are assigned. Default
+        is True.
     """
+    segment_steps = _validate_adqtb_segment(segment_length, time_step)
     thermostat_seed, velocity_seed = _derive_seeds(
         seed, "thermostat", "velocities"
     )
@@ -2811,16 +3101,22 @@ def run_openmm_adqtb_eq(
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
     _seed_random_stream(integrator, thermostat_seed)
+    type_names = _assign_adqtb_particle_types(
+        integrator, modeller.topology, system, particle_types,
+    )
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)
     _set_velocities_to_temperature(simulation, temperature, velocity_seed)
 
-    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
-                            checkpoint_interval=n_report * 10)
-    print(f"Starting production run for {steps} steps...", flush=True)
-    simulation.step(steps)
-    print("Production run complete.", flush=True)
+    _add_adqtb_reporters(simulation, output_prefix, n_report,
+                         segment_steps=segment_steps, type_names=type_names,
+                         friction_log=friction_log,
+                         checkpoint_interval=n_report * 10)
+    with _finalize_reporters(simulation):
+        print(f"Starting production run for {steps} steps...", flush=True)
+        simulation.step(steps)
+        print("Production run complete.", flush=True)
 
     _save_final_state(simulation, output_prefix)
 
@@ -2847,6 +3143,8 @@ def run_openmm_adqtb_prod(
         calculator: Any = None,
         checkpoint_file: str = 'adqtb_ready.chk',
         seed: int | None = None,
+        particle_types: Literal["element", "none"] | Mapping[int, int] | None = "element",
+        friction_log: bool = True,
 ) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) production simulation.
@@ -2908,6 +3206,18 @@ def run_openmm_adqtb_prod(
         the run reproducible. Velocities and the adapted friction spectrum
         come from *checkpoint_file*, so they are unaffected. If None, OpenMM
         chooses both non-deterministically. Default is None.
+    particle_types : {"element", "none"} or dict of int to int or None, optional
+        How the bath groups particles. ``"element"`` gives every element its
+        own adapted noise spectrum, splitting a symbol when masses differ so
+        that deuterium does not share hydrogen's bath. ``"none"`` and None
+        leave the types unset, which makes every particle adapt a spectrum of
+        its own. A mapping assigns particle index to type index directly.
+        Default is ``"element"``.
+    friction_log : bool, optional
+        Write ``<prefix>_friction.log``, one row of adapted friction spectra
+        per adaptation segment, for :mod:`openmmnqe.adqtb` to read back.
+        Skipped with a warning when no particle types are assigned. Default
+        is True.
 
     Raises
     ------
@@ -2922,6 +3232,7 @@ def run_openmm_adqtb_prod(
     UserWarning
         If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
+    segment_steps = _validate_adqtb_segment(segment_length, time_step)
     thermostat_seed, barostat_seed = _derive_seeds(
         seed, "thermostat", "barostat"
     )
@@ -2943,14 +3254,20 @@ def run_openmm_adqtb_prod(
     integrator.setSegmentLength(segment_length)
     integrator.setDefaultAdaptationRate(adaptation_rate)
     _seed_random_stream(integrator, thermostat_seed)
+    type_names = _assign_adqtb_particle_types(
+        integrator, modeller.topology, system, particle_types,
+    )
 
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     _load_checkpoint(simulation, checkpoint_file)
 
-    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
-                            checkpoint_interval=n_report * 10)
-    print(f"Starting production run for {steps} steps...", flush=True)
-    simulation.step(steps)
-    print("Production run complete.", flush=True)
+    _add_adqtb_reporters(simulation, output_prefix, n_report,
+                         segment_steps=segment_steps, type_names=type_names,
+                         friction_log=friction_log,
+                         checkpoint_interval=n_report * 10)
+    with _finalize_reporters(simulation):
+        print(f"Starting production run for {steps} steps...", flush=True)
+        simulation.step(steps)
+        print("Production run complete.", flush=True)
 
     _save_final_state(simulation, output_prefix)

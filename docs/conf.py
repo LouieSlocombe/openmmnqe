@@ -135,7 +135,12 @@ napoleon_include_init_with_doc = False  # constructor args live in the class doc
 napoleon_include_private_with_doc = False
 napoleon_use_param = True
 napoleon_use_rtype = True
-napoleon_use_ivar = False
+# A NamedTuple's fields are already class attributes, so autodoc documents
+# them itself; an "Attributes" section rendered as .. attribute:: directives
+# would then describe each one twice and fail the -W build. Emitting :ivar:
+# field lists instead keeps the descriptions without registering a second
+# object for the same name.
+napoleon_use_ivar = True
 napoleon_preprocess_types = False
 
 

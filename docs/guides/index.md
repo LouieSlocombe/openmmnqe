@@ -10,6 +10,7 @@ scripts in [`examples/`](../examples.md).
 workflow
 nqe-methods
 reporters
+adqtb-verification
 enhanced-sampling
 potentials
 ```

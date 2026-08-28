@@ -592,6 +592,37 @@ def run_openmm_adqtb_prod() -> None:
     nqe.remove_file_pattern('adqtb_prod*')
 
 
+def run_adqtb_verification() -> None:
+    """Equilibrate an adQTB run, then show that its friction has converged."""
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    # particle_types="element" is the default, so every element adapts one
+    # spectrum and <prefix>_friction.log carries one block of columns each.
+    nqe.run_openmm_adqtb_eq(modeller,
+                            forcefield,
+                            segment_length=0.5 * unit.picosecond,
+                            time_step=0.5 * unit.femtosecond,
+                            platform_name=device,
+                            n_report=10_000,
+                            steps=200_000,
+                            output_prefix='adqtb_ready')
+
+    log = 'adqtb_ready_friction.log'
+    for label, verdict in nqe.adqtb_convergence(log).items():
+        state = "converged" if verdict.converged else "STILL ADAPTING"
+        print(f"{label}: {state}, drift ratio {verdict.drift_ratio:.2f}, "
+              f"max |gamma_r - 1| {verdict.max_deviation:.3f}, "
+              f"{verdict.clamped_fraction:.1%} of bins clamped at zero")
+
+    nqe.plot_adqtb_friction_spectra(log, filename='adqtb_friction.png')
+    nqe.plot_adqtb_fdt_residual(log, filename='adqtb_residual.png')
+
+
 EXAMPLES = {
     name.removeprefix("run_"): function
     for name, function in list(globals().items())

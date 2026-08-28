@@ -57,9 +57,15 @@ wavelength = nqe.get_thermal_de_broglie_wavelength(mass, temperature)
 ```
 
 The bath needs to know which particles are which, because it adapts a separate
-random force spectrum per type.
-{func}`~openmmnqe.tools.set_adqtb_particle_types_by_element` assigns one type
-per element, which is the usual choice.
+random force spectrum per type, and a particle left untyped gets a type to
+itself. Both drivers therefore default to `particle_types="element"`, which
+assigns one type per element through
+{func}`~openmmnqe.tools.set_adqtb_particle_types_by_element`, splitting a
+symbol when masses differ so that deuterium does not share hydrogen's bath.
+
+Adaptation has to have converged before the production run means anything.
+Both drivers log the adapted spectra to `<prefix>_friction.log`, and
+[verifying an adQTB run](adqtb-verification.md) covers how to read that back.
 
 ## Isotope effects
 

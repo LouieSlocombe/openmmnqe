@@ -64,6 +64,18 @@ import os as _os
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 
+from .adqtb import (
+    QTBConvergence,
+    QTBFrictionReporter,
+    adqtb_convergence,
+    adqtb_fdt_residual,
+    adqtb_frequencies,
+    adqtb_friction,
+    adqtb_friction_spectra,
+    plot_adqtb_fdt_residual,
+    plot_adqtb_friction_spectra,
+    track_adqtb_friction,
+)
 from .io import (
     center_in_box,
     convert_sdfs_to_pdb,
@@ -126,11 +138,18 @@ from .tools import (
 
 __all__ = [
     "PreparedSystem",
+    "QTBConvergence",
+    "QTBFrictionReporter",
     "RPMDBeadReporter",
     "RPMDCentroidReporter",
     "RPMDQuantumSpreadReporter",
     "RPMDThermodynamicReporter",
     "__version__",
+    "adqtb_convergence",
+    "adqtb_fdt_residual",
+    "adqtb_frequencies",
+    "adqtb_friction",
+    "adqtb_friction_spectra",
     "angle_between_atoms",
     "atom_indices_from_vmd_picks",
     "center_in_box",
@@ -150,6 +169,8 @@ __all__ = [
     "list_files_with_pattern",
     "move_pdb_to_origin",
     "openmm_nqe_dir",
+    "plot_adqtb_fdt_residual",
+    "plot_adqtb_friction_spectra",
     "plot_rpmd_atom_expansion",
     "plot_rpmd_thermodynamics",
     "relabel_residues_in_pdb",
@@ -174,6 +195,7 @@ __all__ = [
     "save_pdb_selection",
     "set_adqtb_particle_types_by_element",
     "step_rpmd",
+    "track_adqtb_friction",
     "track_rpmd_atom_expansion",
     "write_multimodel_pdb",
     "xyz_to_sdf",
