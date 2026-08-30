@@ -886,6 +886,67 @@ def test_rpmd_thermodynamics_reads_every_bead_once_without_wrapping() -> None:
     )
 
 
+def _virtual_site_simulation() -> SimpleNamespace:
+    """
+    Two massive particles plus the average site they carry, over two beads.
+
+    Particle 2 is a ``TwoParticleAverageSite(0, 1, 0.25, 0.75)``, so its bead
+    displacement is the same weighted average of its parents'. With the site's
+    own force redistributed onto those parents in the 0.25/0.75 ratio, the
+    site row's virial contribution is identically equal to the parents' --
+    which is exactly why summing every row would double-count it.
+
+    Displacements about the centroid are (-0.1, -0.3, -0.25) nm for bead 0 and
+    the negatives of those for bead 1, so the virial over the massive rows is
+    (0.1 + 0.9) + (0.2 + 1.8) = 3.0 kJ/mol, and over every row 6.0 kJ/mol.
+    """
+    states = [
+        _ThermoState(
+            positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.75, 0.0, 0.0]],
+            velocities=np.zeros((3, 3)),
+            forces=[[-1.0, 0.0, 0.0], [-3.0, 0.0, 0.0], [-4.0, 0.0, 0.0]],
+            potential=1.0,
+            kinetic=5.0,
+        ),
+        _ThermoState(
+            positions=[[0.2, 0.0, 0.0], [1.6, 0.0, 0.0], [1.25, 0.0, 0.0]],
+            velocities=np.zeros((3, 3)),
+            forces=[[2.0, 0.0, 0.0], [6.0, 0.0, 0.0], [8.0, 0.0, 0.0]],
+            potential=3.0,
+            kinetic=7.0,
+        ),
+    ]
+    system = openmm.System()
+    system.addParticle(1.0 * unit.dalton)
+    system.addParticle(1.0 * unit.dalton)
+    system.addParticle(0.0 * unit.dalton)
+    system.setVirtualSite(2, openmm.TwoParticleAverageSite(0, 1, 0.25, 0.75))
+    return SimpleNamespace(
+        integrator=_ThermoIntegrator(states, total_energy=100.0),
+        system=system,
+        currentStep=40,
+    )
+
+
+def test_virtual_site_forces_are_not_double_counted_in_the_virial() -> None:
+    simulation = _virtual_site_simulation()
+
+    values = rpmd_thermodynamics(simulation)
+    kinetic = values["kinetic_centroid_virial"].value_in_unit(
+        unit.kilojoule_per_mole
+    )
+
+    # dof counts the two massive particles only, and the virial over those
+    # rows is 3.0 kJ/mol shared between two beads.
+    kt = _BOLTZMANN * 300.0
+    assert _thermodynamic_degrees_of_freedom(simulation.system) == 6
+    assert kinetic == pytest.approx(0.5 * 6 * kt - 0.75)
+
+    # Summing every row instead would land 0.75 kJ/mol lower, because the
+    # site's contribution exactly repeats its parents'.
+    assert kinetic != pytest.approx(0.5 * 6 * kt - 1.5)
+
+
 def test_rpmd_thermodynamics_honours_temperature_and_dof_overrides() -> None:
     simulation = _hand_built_simulation()
 

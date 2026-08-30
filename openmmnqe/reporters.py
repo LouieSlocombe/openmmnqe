@@ -1503,6 +1503,11 @@ def rpmd_thermodynamics(simulation: app.Simulation, *,
     centroid-virial estimator is biased for a system with rigid bonds or
     rigid water. Run the beads flexible.
 
+    Only particles with mass contribute to the virial. OpenMM reports the
+    force on a virtual site as well as the shares that force redistributes
+    onto the site's parents, and for an average site the two are identically
+    equal, so counting every row would count the site twice.
+
     Under ring-polymer contraction the forces read back are the full,
     uncontracted ones evaluated at each bead. That is the wanted behaviour --
     the exact estimator applied to the approximate distribution the
@@ -1574,8 +1579,16 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
     states = _bead_thermodynamic_states(integrator)
     kt = _BOLTZMANN_KJ_PER_MOL_K * temperature_k
 
+    # Only massive particles carry the virial. OpenMM reports a virtual
+    # site's own force as well as the shares it redistributes onto its
+    # parents, so summing every row counts the site twice; for an average
+    # site the two are identically equal. A frozen particle contributes
+    # nothing either way, because its beads never separate.
+    massive = masses > 0.0
     centroid = states.positions.mean(axis=0)
-    virial = float(np.sum((states.positions - centroid) * states.forces))
+    virial = float(np.sum(
+        ((states.positions - centroid) * states.forces)[:, massive, :]
+    ))
     kinetic_centroid_virial = 0.5 * dof * kt - 0.5 * virial / n_beads
 
     potential_mean = float(states.potential.mean())
