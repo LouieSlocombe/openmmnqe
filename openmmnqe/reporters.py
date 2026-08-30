@@ -49,7 +49,12 @@ import numpy.typing as npt
 import openmm.unit as unit
 from openmm import app, openmm
 
-from ._logs import _column_label, _read_reporter_log, _select_log_columns
+from ._logs import (
+    _block_averaged_columns,
+    _column_label,
+    _read_reporter_log,
+    _select_log_columns,
+)
 from ._validation import require_integer, require_positive_finite_scalar_in_unit
 from .tools import _particle_masses_dalton, centroid_positions
 
@@ -1549,6 +1554,8 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
                                temperature_k: float,
                                dof: int,
                                masses: np.ndarray,
+                               *,
+                               states: _BeadThermodynamicStates | None = None,
                                ) -> dict[str, float]:
     """
     Evaluate the estimators from already-resolved constants.
@@ -1568,6 +1575,11 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
         Degrees of freedom of one copy.
     masses : numpy.ndarray
         Particle masses in daltons, shaped ``(n_particles,)``.
+    states : _BeadThermodynamicStates or None, optional
+        Bead states already read from *integrator*. If None they are read
+        here. Passing them lets a caller that needs the beads for something
+        else share the one pass rather than paying for a second set of force
+        evaluations. Default is None.
 
     Returns
     -------
@@ -1576,7 +1588,8 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
         ``_THERMO_UNITS``.
     """
     n_beads = integrator.getNumCopies()
-    states = _bead_thermodynamic_states(integrator)
+    if states is None:
+        states = _bead_thermodynamic_states(integrator)
     kt = _BOLTZMANN_KJ_PER_MOL_K * temperature_k
 
     # Only massive particles carry the virial. OpenMM reports a virtual
@@ -1878,34 +1891,48 @@ def rpmd_thermodynamic_averages(file: str | os.PathLike[str], *,
         averages = rpmd_thermodynamic_averages("rpmd_prod_thermo.log", discard=0.1)
         mean, error = averages["E_quantum(kJ/mol)"]
     """
-    blocks = require_integer(blocks, name="blocks", minimum=2)
-    if isinstance(discard, bool) or not isinstance(discard, Real):
-        raise ValueError("discard must be a number in [0, 1)")
-    discard = float(discard)
-    if not np.isfinite(discard) or not 0.0 <= discard < 1.0:
-        raise ValueError("discard must be a number in [0, 1)")
+    return _block_averaged_columns(
+        file,
+        "thermodynamic log",
+        discard=discard,
+        blocks=blocks,
+    )
 
-    header, values = _read_thermodynamic_log(file)
-    retained = values[int(discard * len(values)):]
-    if len(retained) < blocks:
-        raise ValueError(
-            f"thermodynamic log has {len(retained)} rows after discarding, "
-            f"too few for {blocks} blocks"
-        )
 
-    # Drop the leading remainder rather than the trailing one: the tail is the
-    # better-equilibrated end of a trajectory.
-    block_size = len(retained) // blocks
-    retained = retained[len(retained) - block_size * blocks:]
-    block_means = retained.reshape(blocks, block_size, -1).mean(axis=1)
+def _energy_unit_scale(energy_unit: str) -> tuple[float, str]:
+    """
+    Resolve an energy-unit name to its scale factor and axis label.
 
-    means = retained.mean(axis=0)
-    errors = block_means.std(axis=0, ddof=1) / np.sqrt(blocks)
-    return {
-        name: (float(means[index]), float(errors[index]))
-        for index, name in enumerate(header)
-        if name != "Step"
+    Parameters
+    ----------
+    energy_unit : str
+        ``"kilojoule_per_mole"`` or ``"kilocalorie_per_mole"``.
+
+    Returns
+    -------
+    scale : float
+        Factor converting a logged kJ/mol value into *energy_unit*.
+    label : str
+        Compact unit name for an axis label, e.g. ``"kJ/mol"``.
+
+    Raises
+    ------
+    ValueError
+        If *energy_unit* is not one this module plots.
+    """
+    energy_units = {
+        "kilojoule_per_mole": (1.0, "kJ/mol"),
+        "kilocalorie_per_mole": (
+            (1.0 * unit.kilojoule_per_mole).value_in_unit(
+                unit.kilocalorie_per_mole
+            ),
+            "kcal/mol",
+        ),
     }
+    if energy_unit not in energy_units:
+        choices = ", ".join(energy_units)
+        raise ValueError(f"energy_unit must be one of: {choices}")
+    return energy_units[energy_unit]
 
 
 def plot_rpmd_thermodynamics(file: str | os.PathLike[str], *,
@@ -1969,21 +1996,9 @@ def plot_rpmd_thermodynamics(file: str | os.PathLike[str], *,
             "'plot' optional dependency"
         ) from exc
 
-    energy_units = {
-        "kilojoule_per_mole": (1.0, "kJ/mol"),
-        "kilocalorie_per_mole": (
-            (1.0 * unit.kilojoule_per_mole).value_in_unit(
-                unit.kilocalorie_per_mole
-            ),
-            "kcal/mol",
-        ),
-    }
-    if energy_unit not in energy_units:
-        choices = ", ".join(energy_units)
-        raise ValueError(f"energy_unit must be one of: {choices}")
+    scale, unit_label = _energy_unit_scale(energy_unit)
     if x_axis not in {"time", "step"}:
         raise ValueError('x_axis must be one of: step, time')
-    scale, unit_label = energy_units[energy_unit]
 
     header, values = _read_thermodynamic_log(file)
     column_index = {name: index for index, name in enumerate(header)}

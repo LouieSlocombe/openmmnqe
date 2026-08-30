@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
+from numbers import Real
 
 import numpy as np
+
+from ._validation import require_integer
 
 
 def _read_reporter_log(file: str | os.PathLike[str],
@@ -132,10 +135,79 @@ def _column_label(column: str) -> str:
         ``"Proton_H1"`` or ``"KE_cv"``.
     """
     label = column
-    for prefix in ("Expansion_", "Rg_", "Distance_"):
+    for prefix in ("Expansion_", "Rg_", "Distance_", "Kcv_"):
         if label.startswith(prefix):
             label = label[len(prefix):]
             break
     if label.endswith(")") and "(" in label:
         label = label[:label.rindex("(")]
     return label
+
+
+def _block_averaged_columns(file: str | os.PathLike[str],
+                            description: str, *,
+                            discard: float = 0.0,
+                            blocks: int = 5,
+                            ) -> dict[str, tuple[float, float]]:
+    """
+    Average every non-``Step`` column of a reporter log, with block errors.
+
+    Consecutive samples from one trajectory are correlated, so the naive
+    ``std / sqrt(n)`` understates the uncertainty. The retained rows are
+    instead split into *blocks* contiguous chunks and the error taken from
+    the scatter of the block means.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log to average.
+    description : str
+        What the log is, used verbatim in error messages, e.g.
+        ``"thermodynamic log"``.
+    discard : float, optional
+        Leading fraction of the rows to drop as equilibration, in ``[0, 1)``.
+        Default is 0.0.
+    blocks : int, optional
+        Number of blocks the retained rows are split into. Default is 5.
+
+    Returns
+    -------
+    dict of str to tuple of float
+        ``{column: (mean, standard_error)}`` for every column but ``"Step"``.
+
+    Raises
+    ------
+    ValueError
+        If *discard* is outside ``[0, 1)``, *blocks* is below 2, or too few
+        rows survive to fill the blocks.
+    TypeError
+        If *blocks* is not an integer.
+    """
+    blocks = require_integer(blocks, name="blocks", minimum=2)
+    if isinstance(discard, bool) or not isinstance(discard, Real):
+        raise ValueError("discard must be a number in [0, 1)")
+    discard = float(discard)
+    if not np.isfinite(discard) or not 0.0 <= discard < 1.0:
+        raise ValueError("discard must be a number in [0, 1)")
+
+    header, values = _read_reporter_log(file, description)
+    retained = values[int(discard * len(values)):]
+    if len(retained) < blocks:
+        raise ValueError(
+            f"{description} has {len(retained)} rows after discarding, "
+            f"too few for {blocks} blocks"
+        )
+
+    # Drop the leading remainder rather than the trailing one: the tail is the
+    # better-equilibrated end of a trajectory.
+    block_size = len(retained) // blocks
+    retained = retained[len(retained) - block_size * blocks:]
+    block_means = retained.reshape(blocks, block_size, -1).mean(axis=1)
+
+    means = retained.mean(axis=0)
+    errors = block_means.std(axis=0, ddof=1) / np.sqrt(blocks)
+    return {
+        name: (float(means[index]), float(errors[index]))
+        for index, name in enumerate(header)
+        if name != "Step"
+    }
