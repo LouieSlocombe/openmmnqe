@@ -4,7 +4,8 @@ openmmnqe: OpenMM workflows for nuclear quantum effects and enhanced sampling.
 Bundles structure edits (:mod:`openmmnqe.io`), OpenMM simulation stages
 including RPMD and adQTB nuclear-quantum-effect integrators and ML/MM
 potentials (:mod:`openmmnqe.openmm`), RPMD reporters
-(:mod:`openmmnqe.reporters`), ring-polymer rate dynamics
+(:mod:`openmmnqe.reporters`), equilibrium isotope effects
+(:mod:`openmmnqe.isotopes`), ring-polymer rate dynamics
 (:mod:`openmmnqe.rates`) and assorted simulation-setup utilities
 (:mod:`openmmnqe.tools`).
 
@@ -95,6 +96,13 @@ from .io import (
     save_pdb_selection,
     xyz_to_sdf,
 )
+from .isotopes import (
+    IsotopeFreeEnergy,
+    MassIntegrationNodes,
+    rpmd_fractionation_factor,
+    rpmd_isotope_free_energy,
+    rpmd_mass_integration_nodes,
+)
 from .openmm import (
     PreparedSystem,
     run_openmm_adqtb_eq,
@@ -156,6 +164,8 @@ from .tools import (
 )
 
 __all__ = [
+    "IsotopeFreeEnergy",
+    "MassIntegrationNodes",
     "PreparedSystem",
     "QTBConvergence",
     "QTBFrictionReporter",
@@ -205,8 +215,11 @@ __all__ = [
     "remove_file_pattern",
     "remove_residues_in_pdb",
     "rpmd_energy_conservation",
+    "rpmd_fractionation_factor",
+    "rpmd_isotope_free_energy",
     "rpmd_kinetic_decomposition",
     "rpmd_kinetic_decomposition_averages",
+    "rpmd_mass_integration_nodes",
     "rpmd_rate",
     "rpmd_thermodynamic_averages",
     "rpmd_thermodynamics",

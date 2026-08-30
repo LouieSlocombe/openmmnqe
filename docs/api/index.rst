@@ -13,6 +13,7 @@ authoritative list of what is public.
 
    adqtb
    io
+   isotopes
    openmm
    rates
    reporters

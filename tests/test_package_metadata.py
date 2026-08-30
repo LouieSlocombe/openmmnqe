@@ -10,6 +10,8 @@ import openmmnqe
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_PUBLIC_API = {
+    "IsotopeFreeEnergy",
+    "MassIntegrationNodes",
     "PreparedSystem",
     "QTBConvergence",
     "QTBFrictionReporter",
@@ -59,8 +61,11 @@ EXPECTED_PUBLIC_API = {
     "remove_file_pattern",
     "remove_residues_in_pdb",
     "rpmd_energy_conservation",
+    "rpmd_fractionation_factor",
+    "rpmd_isotope_free_energy",
     "rpmd_kinetic_decomposition",
     "rpmd_kinetic_decomposition_averages",
+    "rpmd_mass_integration_nodes",
     "rpmd_rate",
     "rpmd_thermodynamic_averages",
     "rpmd_thermodynamics",
