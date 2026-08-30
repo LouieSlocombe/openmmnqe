@@ -178,8 +178,9 @@ nitpick_ignore_regex = [
         r"|pdbfixer|rdkit|reactiontools)(\..*)?",
     ),
     # Private helpers named in the narrative parts of docstrings but
-    # deliberately not published.
-    (r"py:.*", r"_\w+"),
+    # deliberately not published, bare or fully qualified -- the dotted form
+    # is what :show-inheritance: emits for a private base class.
+    (r"py:.*", r"(\w+\.)*_\w+"),
     # NumPy docstrings write prose into the type line ("int, optional",
     # "{'all', 'water'}, optional"). Napoleon splits that line on commas and
     # the Python domain then tries to resolve each fragment as a class. These

@@ -3,12 +3,14 @@
 OpenMM's own reporters see only the `Context`, which for an `RPMDIntegrator`
 holds a single copy of the system rather than the ring polymer. Anything that
 needs the beads themselves — their spread, their individual trajectories, their
-centroid, or their energies — has to ask the integrator. That is what these six
-reporters do. The `run_openmm_rpmd_*` drivers attach the first four for you;
-the per-atom kinetic decomposition and the velocity recorder are opt-in,
-because each reads the beads a second time per report.
+centroid, or their energies — has to ask the integrator. That is what six of
+these seven reporters do. The `run_openmm_rpmd_*` drivers attach the first four
+for you; the per-atom kinetic decomposition and the velocity recorder are
+opt-in, because each reads the beads a second time per report. The seventh has
+nothing to do with beads: it records a classical run's velocities into the same
+archive, which is the baseline a ring-polymer spectrum is read against.
 
-All six follow OpenMM's reporter protocol: `describeNextReport` says when the
+All seven follow OpenMM's reporter protocol: `describeNextReport` says when the
 next report is due and what state it needs, and `report` writes it.
 
 | Reporter | Writes |
@@ -19,6 +21,7 @@ next report is due and what state it needs, and `report` writes it.
 | {class}`~openmmnqe.reporters.RPMDThermodynamicReporter` | Ring-polymer thermodynamic estimators |
 | {class}`~openmmnqe.reporters.RPMDKineticDecompositionReporter` | Per-atom quantum kinetic energy |
 | {class}`~openmmnqe.reporters.RPMDVelocityReporter` | Centroid velocities, for spectra |
+| {class}`~openmmnqe.reporters.VelocityArchiveReporter` | A classical run's velocities, same archive |
 
 ## Quantum spread
 
@@ -46,6 +49,59 @@ matters for.
 The centroid reporter is the one to use for anything that expects a normal
 trajectory, since the centroid is the closest classical analogue of "the
 position of the atom".
+
+## Trajectory formats
+
+Every stage writes a PDB by default, and for a long solvated run that is the
+wrong choice: PDB is text, so it is roughly an order of magnitude larger than
+DCD and two larger than XTC, and it is slower to write and to read back. The
+bead reporter is the sharpest case — one whole trajectory per bead.
+
+`trajectory` takes a bare format name, or a
+{class}`~openmmnqe.openmm.TrajectoryOptions` when the interval or an atom subset
+matters too:
+
+```{literalinclude} ../../examples/rpmd.py
+:pyobject: run_rpmd_binary_trajectory
+:language: python
+```
+
+| Format | Notes |
+|---|---|
+| `pdb` | The default. Self-describing, and what {func}`reactiontools.path_from_steered_md` reads unaided. Large and slow. |
+| `dcd` | Compact binary, from OpenMM. Needs no extra dependency. |
+| `xtc` | Smaller still, from OpenMM. Lossy: coordinates are quantized to 1e-3 nm. |
+| `h5` | mdtraj's HDF5. The only format carrying velocities and topology in one file; needs `pip install openmmnqe[traj]`, and cannot be written from bead states. |
+| `none` | No trajectory, for a run analysed entirely through its logs. |
+
+Because DCD and XTC carry no topology of their own, a stage writing one also
+writes `<prefix>_topology.pdb` up front — before the run has had a chance to
+crash without it. That is the file to pass as `top=` to mdtraj, or to
+{func}`reactiontools.path_from_steered_md`. An atom subset is applied to it
+too, so the two always match, and chains and residues survive the selection so
+a `resname` query still works downstream.
+
+## Velocities and spectra
+
+Positions alone cannot give a vibrational density of states.
+{class}`~openmmnqe.reporters.VelocityArchiveReporter` records a classical run's
+velocities into a `.npz` archive, and
+{class}`~openmmnqe.reporters.RPMDVelocityReporter` records a ring polymer's
+centroid velocities into the same one — so
+{func}`~openmmnqe.reporters.velocity_autocorrelation` and
+{func}`~openmmnqe.reporters.vibrational_spectrum` read either without knowing
+which wrote it. That is what makes the classical spectrum a like-for-like
+baseline. Ask for one with `velocity_record_interval` on any stage:
+
+```{literalinclude} ../../examples/rates.py
+:pyobject: run_classical_spectrum
+:language: python
+```
+
+Frames are held in memory until the run ends, so pass `velocity_atom_indices`:
+every frame otherwise costs `3 * n_atoms` doubles. A spectrum also wants frames
+close enough together to resolve the fastest mode, which is a much finer
+cadence than the logs want — hence a separate interval rather than `n_report`.
 
 ## Thermodynamics
 

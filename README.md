@@ -167,6 +167,18 @@ umbrella windows, repeat each window's normalised centre for its reporter rows
 before concatenating the logs. Matplotlib is available through the `plot`
 optional dependency.
 
+## Trajectory formats
+
+Every stage writes a PDB trajectory by default, which is self-describing but
+large and slow. Pass `trajectory='dcd'` or `'xtc'` for anything long — a
+solvated production run especially — and the stage writes
+`<prefix>_topology.pdb` alongside, so the binary trajectory stays readable.
+`trajectory='h5'` needs `pip install openmmnqe[traj]` and is the only format
+that can carry velocities in the trajectory itself; `trajectory='none'` writes
+none at all. `velocity_record_interval` writes a `<prefix>_velocities.npz`
+archive on any stage, classical or ring-polymer, and
+`nqe.vibrational_spectrum` turns it into a vibrational density of states.
+
 ## Ring-polymer thermodynamics
 
 Every RPMD stage writes `<prefix>_thermo.log` alongside its spread, centroid and

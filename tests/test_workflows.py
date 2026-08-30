@@ -407,7 +407,14 @@ def test_heating_reaches_target_exactly_and_initializes_velocities_once(
     ]
     assert simulation.steps == expected_steps
     assert runtime.calls.standard_reporters == [
-        ((simulation, "heated", 11), {"pdb_steps": True})
+        (
+            (simulation, "heated", 11),
+            {
+                "trajectory": nqe_openmm.TrajectoryOptions("pdb", 11),
+                "velocity_record_interval": None,
+                "velocity_atom_indices": None,
+            },
+        )
     ]
     assert runtime.calls.saved == [((simulation, "heated"), {})]
 
@@ -476,7 +483,12 @@ def test_npt_runs_restrained_and_unrestrained_phases_without_optional_barostat(
     assert runtime.calls.standard_reporters == [
         (
             (simulation, "npt", 13),
-            {"pdb_steps": True, "stdout_volume": True},
+            {
+                "trajectory": nqe_openmm.TrajectoryOptions("pdb", 13),
+                "stdout_volume": True,
+                "velocity_record_interval": None,
+                "velocity_atom_indices": None,
+            },
         )
     ]
     assert runtime.calls.saved == [((simulation, "npt"), {})]
@@ -513,7 +525,12 @@ def test_classical_production_wires_optional_features_and_periodic_checkpoint(
     assert runtime.calls.standard_reporters == [
         (
             (simulation, "prod", 7),
-            {"pdb_steps": True, "checkpoint_interval": 70},
+            {
+                "trajectory": nqe_openmm.TrajectoryOptions("pdb", 7),
+                "checkpoint_interval": 70,
+                "velocity_record_interval": None,
+                "velocity_atom_indices": None,
+            },
         )
     ]
     assert runtime.calls.saved == [((simulation, "prod"), {})]
@@ -571,9 +588,48 @@ def test_steered_md_accepts_inline_or_file_plumed_input(
     assert kwargs["n_report"] == 4
     assert kwargs["barostat_freq"] is None
     assert trajectory == "pull_steps.pdb"
+    assert kwargs["trajectory"] == nqe_openmm.TrajectoryOptions("pdb", 4)
     if expected_contents is not None:
         with open(expected_path) as handle:
             assert handle.read() == expected_contents
+
+
+@pytest.mark.parametrize(
+    ("traj_format", "expected"),
+    [("pdb", "pull_steps.pdb"), ("dcd", "pull_steps.dcd"), ("xtc", "pull_steps.xtc")],
+)
+def test_steered_md_returns_the_path_its_format_actually_wrote(
+    monkeypatch: pytest.MonkeyPatch, traj_format: str, expected: str,
+) -> None:
+    monkeypatch.setattr(
+        nqe_openmm, "run_openmm_prod", lambda *args, **kwargs: None,
+    )
+
+    trajectory = nqe_openmm.run_openmm_steered(
+        object(),
+        object(),
+        "DISTANCE ATOMS=1,2\n",
+        steps=40,
+        output_prefix="pull",
+        n_report=4,
+        trajectory=traj_format,
+    )
+
+    assert trajectory == expected
+
+
+def test_steered_md_rejects_a_run_that_would_write_no_trajectory() -> None:
+    # The stage's whole product is a path to a trajectory, so there is no
+    # sensible thing to return without one.
+    with pytest.raises(ValueError, match="trajectory to return"):
+        nqe_openmm.run_openmm_steered(
+            object(),
+            object(),
+            "DISTANCE ATOMS=1,2\n",
+            steps=40,
+            output_prefix="pull",
+            trajectory="none",
+        )
 
 
 def test_rpmd_reporter_finalizer_closes_outputs_on_success_and_failure(
@@ -720,6 +776,7 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
                 "expansion_metric": "mean",
                 "distance_pairs": [(0, 1)],
                 "kinetic_decomposition": False,
+                "trajectory": nqe_openmm.TrajectoryOptions("pdb", 9),
             },
         )
     ]
@@ -986,6 +1043,7 @@ def test_rpmd_production_loads_checkpoint_and_saves_centroid(
                 "velocity_record_interval": None,
                 "velocity_atom_indices": None,
                 "kinetic_decomposition": False,
+                "trajectory": nqe_openmm.TrajectoryOptions("pdb", 5),
             },
         )
     ]
@@ -1076,6 +1134,9 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
                 "expansion_metric": "mean",
                 "distance_pairs": [(0, 1)],
                 "kinetic_decomposition": False,
+                "trajectory": nqe_openmm.TrajectoryOptions("pdb", 1_000),
+                "velocity_record_interval": None,
+                "velocity_atom_indices": None,
             },
         )
     ]
@@ -1204,9 +1265,12 @@ def test_adqtb_equilibration_configures_adaptation_and_checkpoint_reporting(
             {
                 "segment_steps": 800,
                 "type_names": {0: "H", 1: "C"},
-                "friction_log": True,
-                "checkpoint_interval": 60,
-            },
+                    "friction_log": True,
+                    "checkpoint_interval": 60,
+                "trajectory": nqe_openmm.TrajectoryOptions("pdb", 6),
+                "velocity_record_interval": None,
+                "velocity_atom_indices": None,
+                },
         )
     ]
     assert integrator.particle_types == {0: 1, 1: 0}

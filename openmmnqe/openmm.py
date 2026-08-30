@@ -33,8 +33,10 @@ files contain every bead rather than an ordinary single-Context checkpoint.
 The shared arguments behave the same throughout -- *potential* with *ml_idx*
 runs an ML/MM mixed system and forces the CUDA platform,
 *plumed_script_path* attaches a bias, *output_prefix* names every file the
-stage writes, and *seed* fixes every random stream the stage draws, so that
-the run reproduces bit for bit.
+stage writes, *trajectory* picks the format that file is written in -- PDB by
+default, but ``'dcd'`` or ``'xtc'`` for anything long enough that PDB text
+becomes the expensive part -- and *seed* fixes every random stream the stage
+draws, so that the run reproduces bit for bit.
 """
 from __future__ import annotations
 
@@ -47,7 +49,7 @@ import warnings
 import zipfile
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal, overload
+from typing import Any, Literal, NamedTuple, overload
 
 import numpy as np
 import openmm.unit as unit
@@ -58,12 +60,16 @@ from openmmplumed import PlumedForce
 from ._validation import require_integer, require_positive_finite_scalar_in_unit
 from .adqtb import QTBFrictionReporter
 from .reporters import (
+    _TRAJECTORY_FORMATS,
+    _TRAJECTORY_SUFFIX,
     RPMDBeadReporter,
     RPMDCentroidReporter,
     RPMDKineticDecompositionReporter,
     RPMDQuantumSpreadReporter,
     RPMDThermodynamicReporter,
     RPMDVelocityReporter,
+    TrajectoryFormat,
+    VelocityArchiveReporter,
     _validate_observable_indices,
 )
 from .tools import (
@@ -824,35 +830,289 @@ def _is_inline_plumed_input(plumed_input: str | os.PathLike[str]) -> bool:
     return plumed_input.isupper()
 
 
-def _add_standard_reporters(simulation: app.Simulation, output_prefix: str,
-                            n_report: int, pdb_steps: bool = False,
-                            stdout_volume: bool = False,
-                            checkpoint_interval: int | None = None) -> None:
+class TrajectoryOptions(NamedTuple):
     """
-    Append the standard reporter set shared by the classical drivers.
+    How a stage writes its trajectory.
 
-    Order: optional PDB trajectory, stdout state data, ``.log`` state data,
-    optional periodic checkpoint.
+    Every driver takes this as its *trajectory* argument, and accepts a bare
+    format name in its place -- ``trajectory='dcd'`` is the whole of the
+    common case.  Pass the tuple when a long run wants more than the format:
+    a coarser interval than the logs use, or a subset of the atoms.
+
+    PDB is the default because it is the only self-describing format, and
+    the one :func:`reactiontools.path_from_steered_md` reads without help.
+    It is also the wrong choice for anything long: a solvated system writes
+    roughly an order of magnitude more bytes as PDB text than as DCD, and
+    another as XTC, and it is slower to write and to read back.  For a
+    500,000-step solvated run, pick a binary format.
+
+    Attributes
+    ----------
+    format : {"pdb", "dcd", "xtc", "h5", "none"}
+        Trajectory format. ``'dcd'`` and ``'xtc'`` come from OpenMM;
+        ``'h5'`` needs mdtraj and is the only one that can carry velocities
+        alongside the positions. ``'none'`` writes no trajectory at all,
+        which is what a run analysed entirely through the logs wants.
+        Default is ``'pdb'``.
+    interval : int or None
+        Steps between frames. Default is None, meaning the stage's
+        *n_report* -- the same cadence as the logs. Set it higher to keep
+        frequent logs and a sparse trajectory.
+    atom_indices : sequence of int or None
+        Atoms to write. Default is None, every atom. Selecting the solute is
+        usually the largest saving available, and chains and residues are
+        preserved so a ``resname`` selection still works downstream.
+    velocities : bool
+        Whether to record velocities alongside positions. Only ``'h5'`` can,
+        and asking for it in another format is an error rather than a
+        silently dropped request. Default is False.
+    enforce_periodic_box : bool or None
+        Whether to wrap molecules into the periodic box. Default is None,
+        which leaves OpenMM's own choice alone: wrap if the system is
+        periodic.
+
+    See Also
+    --------
+    openmmnqe.reporters.VelocityArchiveReporter : Velocities as an archive a
+        spectrum reads, which is the other way to get them and does not need
+        mdtraj.
+    """
+
+    format: TrajectoryFormat = "pdb"
+    interval: int | None = None
+    atom_indices: Sequence[int] | None = None
+    velocities: bool = False
+    enforce_periodic_box: bool | None = None
+
+
+#: The default every stage falls back to: a PDB at the reporting interval,
+#: which is what the package wrote before formats were selectable.
+_DEFAULT_TRAJECTORY = TrajectoryOptions()
+
+
+def _resolve_trajectory_options(
+    trajectory: TrajectoryFormat | TrajectoryOptions,
+    n_report: int,
+) -> TrajectoryOptions:
+    """
+    Normalize a driver's *trajectory* argument and validate it.
+
+    Called at the top of every stage, before the system is built, so a typo
+    in a format name costs nothing rather than surfacing after the
+    minimisation.
+
+    Parameters
+    ----------
+    trajectory : str or TrajectoryOptions
+        A bare format name, or the full options tuple.
+    n_report : int
+        The stage's reporting interval, used when the options leave
+        ``interval`` unset.
+
+    Returns
+    -------
+    TrajectoryOptions
+        The options with ``interval`` filled in and every field checked.
+
+    Raises
+    ------
+    TypeError
+        If ``interval`` or an atom index is not an integer.
+    ValueError
+        If the format is unknown, ``interval`` is not positive,
+        ``atom_indices`` is empty or holds a duplicate or negative index, or
+        velocities were asked for in a format that cannot carry them.
+    """
+    options = (TrajectoryOptions(trajectory)
+               if isinstance(trajectory, str)
+               else trajectory)
+
+    if options.format not in _TRAJECTORY_FORMATS:
+        raise ValueError(
+            f"unknown trajectory format {options.format!r}; use one of "
+            f"{', '.join(map(repr, _TRAJECTORY_FORMATS))}"
+        )
+    if options.velocities and options.format != "h5":
+        raise ValueError(
+            f"trajectory format {options.format!r} cannot carry velocities; "
+            "use format='h5', or record an archive with "
+            "velocity_record_interval"
+        )
+
+    interval = require_integer(
+        n_report if options.interval is None else options.interval,
+        name="trajectory interval",
+        minimum=1,
+    )
+    atom_indices = options.atom_indices
+    if atom_indices is not None:
+        indices = [
+            require_integer(index, name=f"atom_indices[{position}]", minimum=0)
+            for position, index in enumerate(atom_indices)
+        ]
+        if not indices:
+            raise ValueError("atom_indices must not be empty")
+        if len(set(indices)) != len(indices):
+            raise ValueError("atom_indices contains duplicate indices")
+        atom_indices = indices
+
+    return options._replace(interval=interval, atom_indices=atom_indices)
+
+
+def _make_trajectory_reporter(file_name: str, options: TrajectoryOptions,
+                              ) -> Any:
+    """
+    Build the reporter that writes a Context-based trajectory.
+
+    Parameters
+    ----------
+    file_name : str
+        Path to write, suffix included.
+    options : TrajectoryOptions
+        Resolved options; ``interval`` must already be filled in.
+
+    Returns
+    -------
+    object
+        An OpenMM-protocol reporter.
+
+    Raises
+    ------
+    ImportError
+        If ``'h5'`` was asked for and mdtraj is not installed.
+    """
+    atom_subset = (None if options.atom_indices is None
+                   else list(options.atom_indices))
+    if options.format == "h5":
+        # Imported here rather than at module scope: mdtraj is needed for
+        # this one format, is slow to import, and keeping it out of the
+        # module keeps the package importable -- and the docs buildable --
+        # without it.
+        try:
+            from mdtraj.reporters import HDF5Reporter
+        except ImportError as exc:
+            raise ImportError(
+                "trajectory format 'h5' needs mdtraj: "
+                "pip install 'openmmnqe[traj]', or "
+                "conda install -c conda-forge mdtraj"
+            ) from exc
+        return HDF5Reporter(
+            file_name,
+            options.interval,
+            velocities=options.velocities,
+            atomSubset=atom_subset,
+            enforcePeriodicBox=options.enforce_periodic_box,
+        )
+
+    reporter_types = {
+        "pdb": app.PDBReporter,
+        "dcd": app.DCDReporter,
+        "xtc": app.XTCReporter,
+    }
+    return reporter_types[options.format](
+        file_name,
+        options.interval,
+        enforcePeriodicBox=options.enforce_periodic_box,
+        atomSubset=atom_subset,
+    )
+
+
+def _write_trajectory_topology(simulation: app.Simulation, output_prefix: str,
+                               options: TrajectoryOptions) -> None:
+    """
+    Write ``<prefix>_topology.pdb`` beside a binary trajectory.
+
+    DCD and XTC carry no topology, so without this the trajectory is
+    unreadable. The end-of-stage structure will not serve: it is written
+    last, so a crashed run has none, it holds every atom even when the
+    trajectory holds a subset, and on an RPMD stage it is a centroid rather
+    than a bead. This one is written up front, from the positions the first
+    frame will hold, and is what ``top=`` wants in mdtraj or
+    :func:`reactiontools.path_from_steered_md`.
+
+    Nothing is written for a self-describing format.
 
     Parameters
     ----------
     simulation : openmm.app.Simulation
-        Simulation the reporters are appended to.
+        Simulation whose Context holds the starting positions.
+    output_prefix : str
+        Prefix for the file written.
+    options : TrajectoryOptions
+        Resolved options; only binary formats produce a file.
+    """
+    if options.format not in ("dcd", "xtc"):
+        return
+    topology = simulation.topology
+    if simulation.system.usesPeriodicBoundaryConditions():
+        box_vectors = simulation.context.getState().getPeriodicBoxVectors()
+        topology.setPeriodicBoxVectors(box_vectors)
+    positions = simulation.context.getState(getPositions=True).getPositions()
+    if options.atom_indices is not None:
+        modeller = app.Modeller(topology, positions)
+        keep = frozenset(options.atom_indices)
+        modeller.delete([
+            atom for atom in modeller.topology.atoms()
+            if atom.index not in keep
+        ])
+        topology, positions = modeller.topology, modeller.positions
+    with open(f'{output_prefix}_topology.pdb', 'w') as f:
+        app.PDBFile.writeFile(topology, positions, f)
+
+
+def _add_standard_reporters(simulation: app.Simulation, output_prefix: str,
+                            n_report: int, *,
+                            trajectory: TrajectoryOptions,
+                            stdout_volume: bool = False,
+                            checkpoint_interval: int | None = None,
+                            velocity_record_interval: int | None = None,
+                            velocity_atom_indices: Sequence[int] | None = None,
+                            ) -> None:
+    """
+    Append the standard reporter set shared by the classical drivers.
+
+    Order: trajectory, stdout state data, ``.log`` state data, optional
+    periodic checkpoint, optional velocity archive.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation the reporters are appended to. Its Context must already
+        hold positions, which a binary format's companion topology needs.
     output_prefix : str
         Prefix for the files written, giving ``<prefix>.log`` and friends.
     n_report : int
         Interval between reports, in steps.
-    pdb_steps : bool, optional
-        Also write a ``<prefix>_steps.pdb`` trajectory. Default is False.
+    trajectory : TrajectoryOptions
+        Resolved trajectory options, giving ``<prefix>_steps`` plus the
+        format's suffix, and ``<prefix>_topology.pdb`` alongside a binary
+        format.
     stdout_volume : bool, optional
         Include box volume in the stdout report, which is worth having under
         a barostat. Default is False.
     checkpoint_interval : int or None, optional
         Interval between ``<prefix>.chk`` checkpoints. With None, no
         checkpoint reporter is added. Default is None.
+    velocity_record_interval : int or None, optional
+        Interval between frames of a ``<prefix>_velocities.npz`` archive.
+        With None, no archive is written. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms the archive keeps. Default is None, every atom.
+
+    Raises
+    ------
+    ValueError
+        If *velocity_atom_indices* is given without
+        *velocity_record_interval*, which would otherwise silently record
+        nothing.
     """
-    if pdb_steps:
-        simulation.reporters.append(app.PDBReporter(f'{output_prefix}_steps.pdb', n_report))
+    if trajectory.format != "none":
+        suffix = _TRAJECTORY_SUFFIX[trajectory.format]
+        simulation.reporters.append(_make_trajectory_reporter(
+            f'{output_prefix}_steps{suffix}',
+            trajectory,
+        ))
+        _write_trajectory_topology(simulation, output_prefix, trajectory)
     simulation.reporters.append(app.StateDataReporter(sys.stdout,
                                                       n_report,
                                                       step=True,
@@ -872,6 +1132,48 @@ def _add_standard_reporters(simulation: app.Simulation, output_prefix: str,
     if checkpoint_interval is not None:
         simulation.reporters.append(app.CheckpointReporter(f'{output_prefix}.chk',
                                                            checkpoint_interval))
+    _add_velocity_archive_reporter(simulation, output_prefix,
+                                   velocity_record_interval,
+                                   velocity_atom_indices)
+
+
+def _add_velocity_archive_reporter(
+    simulation: app.Simulation,
+    output_prefix: str,
+    velocity_record_interval: int | None,
+    velocity_atom_indices: Sequence[int] | None,
+) -> None:
+    """
+    Append the classical velocity archive, if one was asked for.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation the reporter is appended to.
+    output_prefix : str
+        Prefix for ``<prefix>_velocities.npz``.
+    velocity_record_interval : int or None
+        Interval between recorded frames. With None, nothing is attached.
+    velocity_atom_indices : sequence of int or None
+        Atoms the archive keeps, or None for every atom.
+
+    Raises
+    ------
+    ValueError
+        If atom indices are given without an interval, which would
+        otherwise silently record nothing.
+    """
+    if velocity_atom_indices is not None and velocity_record_interval is None:
+        raise ValueError(
+            "velocity_atom_indices require velocity_record_interval"
+        )
+    if velocity_record_interval is None:
+        return
+    simulation.reporters.append(VelocityArchiveReporter(
+        file=f'{output_prefix}_velocities.npz',
+        reportInterval=velocity_record_interval,
+        atom_indices=velocity_atom_indices,
+    ))
 
 
 def _add_rpmd_progress_reporters(simulation: app.Simulation,
@@ -917,6 +1219,7 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
                         velocity_record_interval: int | None = None,
                         velocity_atom_indices: Sequence[int] | None = None,
                         kinetic_decomposition: bool = False,
+                        trajectory: TrajectoryOptions = _DEFAULT_TRAJECTORY,
                         ) -> None:
     """
     Append the RPMD reporter trio: optional spread, then centroid and beads.
@@ -957,6 +1260,12 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
         writing per-atom centroid-virial kinetic energies for
         *atoms_to_watch* to ``<prefix>_kinetic.log``. Requires
         *atoms_to_watch*. Default is False.
+    trajectory : TrajectoryOptions, optional
+        Resolved trajectory options for the centroid and bead trajectories.
+        Its interval is not used: the bead states are read once per report
+        for every reporter here, so a second cadence would buy nothing.
+        Default writes PDB, which one file per bead makes the most expensive
+        output the package has.
 
     Raises
     ------
@@ -964,7 +1273,8 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
         If *distance_pairs* is given without *atoms_to_watch*, or an index
         lies outside *topology*, or *velocity_atom_indices* is given without
         *velocity_record_interval*, or *kinetic_decomposition* is set without
-        *atoms_to_watch*.
+        *atoms_to_watch*, or the trajectory format is one that cannot be
+        written from bead states.
 
     Notes
     -----
@@ -1007,19 +1317,26 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
                 atom_indices=atoms_to_watch,
             ))
 
-    simulation.reporters.append(RPMDCentroidReporter(
-        topology=topology,
-        file_name=f"{output_prefix}_centroid.pdb",
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
+    if trajectory.format != "none":
+        suffix = _TRAJECTORY_SUFFIX[trajectory.format]
+        simulation.reporters.append(RPMDCentroidReporter(
+            topology=topology,
+            file_name=f"{output_prefix}_centroid{suffix}",
+            reportInterval=n_report,
+            num_beads=n_beads,
+            format=trajectory.format,
+            atom_indices=trajectory.atom_indices,
+        ))
 
-    simulation.reporters.append(RPMDBeadReporter(
-        topology=topology,
-        file_base_name=output_prefix,
-        reportInterval=n_report,
-        num_beads=n_beads,
-    ))
+        simulation.reporters.append(RPMDBeadReporter(
+            topology=topology,
+            file_base_name=output_prefix,
+            reportInterval=n_report,
+            num_beads=n_beads,
+            format=trajectory.format,
+            atom_indices=trajectory.atom_indices,
+        ))
+        _write_trajectory_topology(simulation, output_prefix, trajectory)
 
     simulation.reporters.append(RPMDThermodynamicReporter(
         file=f'{output_prefix}_thermo.log',
@@ -1249,7 +1566,11 @@ def _add_adqtb_reporters(simulation: app.Simulation, output_prefix: str,
                          n_report: int, *, segment_steps: int,
                          type_names: dict[int, str] | None,
                          friction_log: bool,
-                         checkpoint_interval: int | None) -> None:
+                         checkpoint_interval: int | None,
+                         trajectory: TrajectoryOptions,
+                         velocity_record_interval: int | None = None,
+                         velocity_atom_indices: Sequence[int] | None = None,
+                         ) -> None:
     """
     Append the adQTB reporter set: trajectory, progress, friction spectra.
 
@@ -1263,8 +1584,8 @@ def _add_adqtb_reporters(simulation: app.Simulation, output_prefix: str,
     simulation : openmm.app.Simulation
         Simulation the reporters are appended to.
     output_prefix : str
-        Prefix for ``<prefix>_steps.pdb``, ``<prefix>.log``,
-        ``<prefix>.chk`` and ``<prefix>_friction.log``.
+        Prefix for ``<prefix>_steps`` plus the trajectory format's suffix,
+        ``<prefix>.log``, ``<prefix>.chk`` and ``<prefix>_friction.log``.
     n_report : int
         Interval between trajectory and progress reports, in steps.
     segment_steps : int
@@ -1276,6 +1597,13 @@ def _add_adqtb_reporters(simulation: app.Simulation, output_prefix: str,
     checkpoint_interval : int or None
         Interval between ``<prefix>.chk`` checkpoints, or None for no
         checkpoint reporter.
+    trajectory : TrajectoryOptions
+        Resolved trajectory options.
+    velocity_record_interval : int or None, optional
+        Interval between frames of a ``<prefix>_velocities.npz`` archive.
+        With None, no archive is written. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms the archive keeps. Default is None, every atom.
 
     Warns
     -----
@@ -1283,15 +1611,28 @@ def _add_adqtb_reporters(simulation: app.Simulation, output_prefix: str,
         If a friction log was asked for but no particle types are assigned,
         in which case every particle would adapt its own spectrum and the
         log would carry one block of columns per atom.
+
+    Raises
+    ------
+    ValueError
+        If *velocity_atom_indices* is given without
+        *velocity_record_interval*.
     """
-    simulation.reporters.append(
-        app.PDBReporter(f'{output_prefix}_steps.pdb', n_report)
-    )
+    if trajectory.format != "none":
+        suffix = _TRAJECTORY_SUFFIX[trajectory.format]
+        simulation.reporters.append(_make_trajectory_reporter(
+            f'{output_prefix}_steps{suffix}',
+            trajectory,
+        ))
+        _write_trajectory_topology(simulation, output_prefix, trajectory)
     _add_adqtb_progress_reporters(simulation, output_prefix, n_report)
     if checkpoint_interval is not None:
         simulation.reporters.append(
             app.CheckpointReporter(f'{output_prefix}.chk', checkpoint_interval)
         )
+    _add_velocity_archive_reporter(simulation, output_prefix,
+                                   velocity_record_interval,
+                                   velocity_atom_indices)
     if not friction_log:
         return
     if not dict(simulation.integrator.getParticleTypes()):
@@ -1315,20 +1656,40 @@ def _close_output_reporters(
     *,
     suppress_errors: bool,
 ) -> None:
-    """Close every package-owned reporter attached to *simulation*."""
+    """
+    Close every attached reporter that defines a ``close`` method.
+
+    The duck-type is the selector rather than a list of classes: no
+    ``openmm.app`` reporter defines ``close`` -- ``StateDataReporter``,
+    ``CheckpointReporter``, ``PDBReporter``, ``DCDReporter`` and
+    ``XTCReporter`` all finalize in ``__del__`` -- so having one picks out
+    exactly the reporters that need an explicit flush. That is this
+    package's own, whose archives are written on close, and mdtraj's
+    ``HDF5Reporter``, which is reached without importing mdtraj. A tuple of
+    classes would instead go quietly out of date every time a reporter is
+    added, which is how the velocity archive came to be written only by
+    ``__del__`` at garbage collection.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        Simulation whose reporters are closed.
+    suppress_errors : bool
+        If True, swallow the first error rather than re-raising it, which is
+        what an exceptional exit wants so the original exception survives.
+
+    Raises
+    ------
+    Exception
+        The first error raised while closing, unless *suppress_errors*.
+    """
     first_error: Exception | None = None
-    reporter_types = (
-        QTBFrictionReporter,
-        RPMDQuantumSpreadReporter,
-        RPMDCentroidReporter,
-        RPMDBeadReporter,
-        RPMDThermodynamicReporter,
-    )
     for reporter in simulation.reporters:
-        if not isinstance(reporter, reporter_types):
+        close = getattr(reporter, "close", None)
+        if not callable(close):
             continue
         try:
-            reporter.close()
+            close()
         except Exception as exc:
             if first_error is None:
                 first_error = exc
@@ -2074,6 +2435,9 @@ def run_openmm_heating(
         ml_idx: list[int] | None = None,
         calculator: Any = None,
         seed: int | None = None,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> None:
     """
     Heat a system from 0 K to temperature, under backbone restraints.
@@ -2131,7 +2495,23 @@ def run_openmm_heating(
         for the starting velocities and the Langevin thermostat, making the
         run reproducible. If None, OpenMM chooses both non-deterministically.
         Default is None.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
+    velocity_record_interval : int or None, optional
+        If set, also write ``<prefix>_velocities.npz`` every this many
+        steps, which :func:`~openmmnqe.reporters.vibrational_spectrum` turns
+        into a vibrational density of states. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose velocities are recorded. Requires
+        *velocity_record_interval*. Frames are held in memory until the run
+        ends, so a selection is what keeps a solvated run in RAM. Default is
+        None, which records every atom.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     thermostat_seed, velocity_seed = _derive_seeds(
         seed, "thermostat", "velocities"
     )
@@ -2177,31 +2557,37 @@ def run_openmm_heating(
     simulation.context.setPositions(modeller.positions)
 
     print(f"\n--- Starting Gentle Heating (0K -> {target_temp}) ---", flush=True)
-    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True)
+    _add_standard_reporters(simulation, output_prefix, n_report,
+                            trajectory=traj_options,
+                            velocity_record_interval=velocity_record_interval,
+                            velocity_atom_indices=velocity_atom_indices)
 
-    # The ramp stops one step short of the target and the target gets a stage of
-    # its own, so that a target which is not a whole multiple of temp_step is
-    # still reached exactly rather than being left at the multiple below it.
-    temp = temp_step
-    while temp < target_temp:
-        print(f"\n-> Heating to {temp}...", flush=True)
-        integrator.setTemperature(temp)
-        if temp == temp_step:
-            _set_velocities_to_temperature(simulation, temp, velocity_seed)
+    with _finalize_reporters(simulation):
+        # The ramp stops one step short of the target and the target gets a
+        # stage of its own, so that a target which is not a whole multiple of
+        # temp_step is still reached exactly rather than being left at the
+        # multiple below it.
+        temp = temp_step
+        while temp < target_temp:
+            print(f"\n-> Heating to {temp}...", flush=True)
+            integrator.setTemperature(temp)
+            if temp == temp_step:
+                _set_velocities_to_temperature(simulation, temp, velocity_seed)
+            simulation.step(steps_per_stage)
+            temp += temp_step
+
+        print(f"\n-> Heating to {target_temp}...", flush=True)
+        integrator.setTemperature(target_temp)
+        if target_temp <= temp_step:
+            # The ramp never ran, so this stage is also where the velocities
+            # start.
+            _set_velocities_to_temperature(simulation, target_temp, velocity_seed)
         simulation.step(steps_per_stage)
-        temp += temp_step
+        print("\n--- Heating Complete ---", flush=True)
+        print(f"Running final equilibration at {target_temp} for {steps_final} steps...", flush=True)
+        simulation.step(steps_final)
 
-    print(f"\n-> Heating to {target_temp}...", flush=True)
-    integrator.setTemperature(target_temp)
-    if target_temp <= temp_step:
-        # The ramp never ran, so this stage is also where the velocities start.
-        _set_velocities_to_temperature(simulation, target_temp, velocity_seed)
-    simulation.step(steps_per_stage)
-    print("\n--- Heating Complete ---", flush=True)
-    print(f"Running final equilibration at {target_temp} for {steps_final} steps...", flush=True)
-    simulation.step(steps_final)
-
-    _save_final_state(simulation, output_prefix)
+        _save_final_state(simulation, output_prefix)
     print(f"Saved equilibrated structure to {output_prefix}", flush=True)
 
 
@@ -2226,6 +2612,9 @@ def run_openmm_npt(
         ml_idx: list[int] | None = None,
         calculator: Any = None,
         seed: int | None = None,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> None:
     """
     Run a two-phase NPT density equilibration.
@@ -2284,7 +2673,23 @@ def run_openmm_npt(
         for the starting velocities, the Langevin thermostat, and the
         barostat's volume moves, making the run reproducible. If None, OpenMM
         chooses each non-deterministically. Default is None.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
+    velocity_record_interval : int or None, optional
+        If set, also write ``<prefix>_velocities.npz`` every this many
+        steps, which :func:`~openmmnqe.reporters.vibrational_spectrum` turns
+        into a vibrational density of states. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose velocities are recorded. Requires
+        *velocity_record_interval*. Frames are held in memory until the run
+        ends, so a selection is what keeps a solvated run in RAM. Default is
+        None, which records every atom.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     if backbone_names is None:
         backbone_names = ['CA', 'C', 'N', 'P', 'O3']
 
@@ -2321,17 +2726,21 @@ def run_openmm_npt(
     simulation.context.setPositions(modeller.positions)
     _set_velocities_to_temperature(simulation, temperature, velocity_seed)
 
-    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
-                            stdout_volume=True)
+    _add_standard_reporters(simulation, output_prefix, n_report,
+                            trajectory=traj_options,
+                            stdout_volume=True,
+                            velocity_record_interval=velocity_record_interval,
+                            velocity_atom_indices=velocity_atom_indices)
 
-    print("\n--- Phase 1: Restrained NPT (Relaxing Density) ---", flush=True)
-    simulation.step(n_1)
+    with _finalize_reporters(simulation):
+        print("\n--- Phase 1: Restrained NPT (Relaxing Density) ---", flush=True)
+        simulation.step(n_1)
 
-    print("\n--- Phase 2: Removing Restraints (Unrestrained NPT) ---", flush=True)
-    simulation.context.setParameter("k", 0.0)
-    simulation.step(n_2)
+        print("\n--- Phase 2: Removing Restraints (Unrestrained NPT) ---", flush=True)
+        simulation.context.setParameter("k", 0.0)
+        simulation.step(n_2)
 
-    _save_final_state(simulation, output_prefix)
+        _save_final_state(simulation, output_prefix)
 
     print(f"\nDensity equilibration complete. Saved to {output_prefix}", flush=True)
 
@@ -2355,6 +2764,9 @@ def run_openmm_prod(
         ml_idx: list[int] | None = None,
         calculator: Any = None,
         seed: int | None = None,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> None:
     """
     Run an NPT production MD simulation, optionally with PLUMED enhanced sampling.
@@ -2408,7 +2820,23 @@ def run_openmm_prod(
         for the starting velocities, the Langevin thermostat, and the
         barostat's volume moves, making the run reproducible. If None, OpenMM
         chooses each non-deterministically. Default is None.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
+    velocity_record_interval : int or None, optional
+        If set, also write ``<prefix>_velocities.npz`` every this many
+        steps, which :func:`~openmmnqe.reporters.vibrational_spectrum` turns
+        into a vibrational density of states. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose velocities are recorded. Requires
+        *velocity_record_interval*. Frames are held in memory until the run
+        ends, so a selection is what keeps a solvated run in RAM. Default is
+        None, which records every atom.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     thermostat_seed, velocity_seed, barostat_seed = _derive_seeds(
         seed, "thermostat", "velocities", "barostat"
     )
@@ -2432,13 +2860,17 @@ def run_openmm_prod(
     simulation.context.setPositions(modeller.positions)
     _set_velocities_to_temperature(simulation, temperature, velocity_seed)
 
-    _add_standard_reporters(simulation, output_prefix, n_report, pdb_steps=True,
-                            checkpoint_interval=n_report * 10)
-    print(f"Starting production run for {steps} steps...", flush=True)
-    simulation.step(steps)
-    print("Production run complete.", flush=True)
+    _add_standard_reporters(simulation, output_prefix, n_report,
+                            trajectory=traj_options,
+                            checkpoint_interval=n_report * 10,
+                            velocity_record_interval=velocity_record_interval,
+                            velocity_atom_indices=velocity_atom_indices)
+    with _finalize_reporters(simulation):
+        print(f"Starting production run for {steps} steps...", flush=True)
+        simulation.step(steps)
+        print("Production run complete.", flush=True)
 
-    _save_final_state(simulation, output_prefix)
+        _save_final_state(simulation, output_prefix)
 
 
 def run_openmm_steered(
@@ -2460,6 +2892,9 @@ def run_openmm_steered(
         ml_idx: list[int] | None = None,
         calculator: Any = None,
         seed: int | None = None,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> str:
     """
     Run a steered MD simulation, dragging a collective variable with PLUMED.
@@ -2522,12 +2957,41 @@ def run_openmm_steered(
         Master random seed, handed to :func:`run_openmm_prod`. A value makes
         the pulling run reproducible, which is what lets a set of paths differ
         only in the schedule that pulled them. Default is None.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
+    velocity_record_interval : int or None, optional
+        If set, also write ``<prefix>_velocities.npz`` every this many
+        steps, which :func:`~openmmnqe.reporters.vibrational_spectrum` turns
+        into a vibrational density of states. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose velocities are recorded. Requires
+        *velocity_record_interval*. Frames are held in memory until the run
+        ends, so a selection is what keeps a solvated run in RAM. Default is
+        None, which records every atom.
 
     Returns
     -------
     str
-        Path to the trajectory written by the run.
+        Path to the trajectory written by the run, suffix following
+        *trajectory*. For a binary format, pass ``<prefix>_topology.pdb`` as
+        :func:`reactiontools.path_from_steered_md`'s ``top`` alongside it.
+
+    Raises
+    ------
+    ValueError
+        If *trajectory* asks for no trajectory at all: this stage exists to
+        produce one, and has a path to return.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
+    if traj_options.format == "none":
+        raise ValueError(
+            "run_openmm_steered has a trajectory to return, so "
+            "trajectory='none' is not meaningful here"
+        )
     if _is_inline_plumed_input(plumed_input):
         assert isinstance(plumed_input, str)
         plumed_script_path = f'{output_prefix}_plumed.dat'
@@ -2554,9 +3018,12 @@ def run_openmm_steered(
                     potential=potential,
                     ml_idx=ml_idx,
                     calculator=calculator,
-                    seed=seed)
+                    seed=seed,
+                    trajectory=traj_options,
+                    velocity_record_interval=velocity_record_interval,
+                    velocity_atom_indices=velocity_atom_indices)
 
-    traj_file = f'{output_prefix}_steps.pdb'
+    traj_file = f'{output_prefix}_steps{_TRAJECTORY_SUFFIX[traj_options.format]}'
     print(f"Steered trajectory written to {traj_file}", flush=True)
     return traj_file
 
@@ -2584,6 +3051,7 @@ def run_openmm_rpmd_equilibration(
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
         kinetic_decomposition: bool = False,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
 ) -> None:
     """
     Equilibrate a ring-polymer molecular dynamics (RPMD) simulation.
@@ -2651,7 +3119,14 @@ def run_openmm_rpmd_equilibration(
         mass into an equilibrium isotope effect. Reads the beads a second
         time per report, so it is opt-in. Requires *atoms_to_watch*. Default
         is False.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     initialization_seed, thermostat_seed = _derive_seeds(
         seed, "initialization", "thermostat"
     )
@@ -2665,6 +3140,18 @@ def run_openmm_rpmd_equilibration(
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     with _finalize_reporters(simulation):
+        init_beads(
+            modeller,
+            simulation,
+            n_beads,
+            scale_factor=scale_factor,
+            seed=initialization_seed,
+        )
+
+        # Attached after init_beads, not before: a binary trajectory writes
+        # its companion topology from the Context's positions, and until the
+        # beads are placed there are none. init_beads only sets positions and
+        # velocities -- it never steps -- so no report is missed.
         _add_rpmd_reporters(
             simulation,
             modeller.topology,
@@ -2675,16 +3162,9 @@ def run_openmm_rpmd_equilibration(
             expansion_metric=expansion_metric,
             distance_pairs=distance_pairs_to_watch,
             kinetic_decomposition=kinetic_decomposition,
+            trajectory=traj_options,
         )
         _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
-
-        init_beads(
-            modeller,
-            simulation,
-            n_beads,
-            scale_factor=scale_factor,
-            seed=initialization_seed,
-        )
 
         print("\n--- Stage 1: Bead Expansion  ---", flush=True)
         integrator.setStepSize(timestep * 0.5)
@@ -2740,6 +3220,9 @@ def run_openmm_rpmd_contracted(
         kinetic_decomposition: bool = False,
         seed: int | None = None,
         apply_thermostat: bool = True,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> None:
     """
     Run a contracted ring-polymer MD (RPMD) production simulation.
@@ -2826,6 +3309,21 @@ def run_openmm_rpmd_contracted(
         required -- it sets the ring-polymer spring constants and so defines
         the Hamiltonian, not a thermostat target -- and *barostat_freq* must
         be None. *friction* is ignored by the dynamics. Default is True.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
+    velocity_record_interval : int or None, optional
+        If set, also write ``<prefix>_velocities.npz`` every this many
+        steps, which :func:`~openmmnqe.reporters.vibrational_spectrum` turns
+        into a vibrational density of states. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose velocities are recorded. Requires
+        *velocity_record_interval*. Frames are held in memory until the run
+        ends, so a selection is what keeps a solvated run in RAM. Default is
+        None, which records every atom.
 
     Raises
     ------
@@ -2842,6 +3340,7 @@ def run_openmm_rpmd_contracted(
     UserWarning
         If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     if not apply_thermostat and barostat_freq is not None:
         raise ValueError(
             "apply_thermostat=False is microcanonical; a Monte Carlo "
@@ -2915,6 +3414,9 @@ def run_openmm_rpmd_contracted(
             expansion_metric=expansion_metric,
             distance_pairs=distance_pairs_to_watch,
             kinetic_decomposition=kinetic_decomposition,
+            trajectory=traj_options,
+            velocity_record_interval=velocity_record_interval,
+            velocity_atom_indices=velocity_atom_indices,
         )
 
         _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
@@ -2966,6 +3468,7 @@ def run_openmm_rpmd_prod(
         snapshot_interval: int | None = None,
         velocity_record_interval: int | None = None,
         velocity_atom_indices: Sequence[int] | None = None,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
 ) -> None:
     """
     Run a full ring-polymer MD (RPMD) production simulation.
@@ -3071,6 +3574,12 @@ def run_openmm_rpmd_prod(
         Atoms whose centroid velocities are recorded. Requires
         *velocity_record_interval*. Default is None, which records every
         atom.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
 
     Raises
     ------
@@ -3090,6 +3599,7 @@ def run_openmm_rpmd_prod(
         If *barostat_freq* is set on a System carrying a ``PythonForce``, or
         if *snapshot_interval* exceeds *steps* so no snapshot is written.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     if not apply_thermostat and barostat_freq is not None:
         raise ValueError(
             "apply_thermostat=False is microcanonical; a Monte Carlo "
@@ -3148,6 +3658,7 @@ def run_openmm_rpmd_prod(
             velocity_record_interval=velocity_record_interval,
             velocity_atom_indices=velocity_atom_indices,
             kinetic_decomposition=kinetic_decomposition,
+            trajectory=traj_options,
         )
 
         _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
@@ -3199,6 +3710,9 @@ def run_openmm_adqtb_eq(
         seed: int | None = None,
         particle_types: Literal["element", "none"] | Mapping[int, int] | None = "element",
         friction_log: bool = True,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) equilibration simulation.
@@ -3259,7 +3773,23 @@ def run_openmm_adqtb_eq(
         per adaptation segment, for :mod:`openmmnqe.adqtb` to read back.
         Skipped with a warning when no particle types are assigned. Default
         is True.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
+    velocity_record_interval : int or None, optional
+        If set, also write ``<prefix>_velocities.npz`` every this many
+        steps, which :func:`~openmmnqe.reporters.vibrational_spectrum` turns
+        into a vibrational density of states. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose velocities are recorded. Requires
+        *velocity_record_interval*. Frames are held in memory until the run
+        ends, so a selection is what keeps a solvated run in RAM. Default is
+        None, which records every atom.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     segment_steps = _validate_adqtb_segment(segment_length, time_step)
     thermostat_seed, velocity_seed = _derive_seeds(
         seed, "thermostat", "velocities"
@@ -3284,7 +3814,10 @@ def run_openmm_adqtb_eq(
     _add_adqtb_reporters(simulation, output_prefix, n_report,
                          segment_steps=segment_steps, type_names=type_names,
                          friction_log=friction_log,
-                         checkpoint_interval=n_report * 10)
+                         checkpoint_interval=n_report * 10,
+                         trajectory=traj_options,
+                         velocity_record_interval=velocity_record_interval,
+                         velocity_atom_indices=velocity_atom_indices)
     with _finalize_reporters(simulation):
         print(f"Starting production run for {steps} steps...", flush=True)
         simulation.step(steps)
@@ -3317,6 +3850,9 @@ def run_openmm_adqtb_prod(
         seed: int | None = None,
         particle_types: Literal["element", "none"] | Mapping[int, int] | None = "element",
         friction_log: bool = True,
+        trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> None:
     """
     Run an adaptive quantum thermal bath (adQTB) production simulation.
@@ -3390,6 +3926,21 @@ def run_openmm_adqtb_prod(
         per adaptation segment, for :mod:`openmmnqe.adqtb` to read back.
         Skipped with a warning when no particle types are assigned. Default
         is True.
+    trajectory : str or TrajectoryOptions, optional
+        Trajectory format, or the full :class:`TrajectoryOptions` when the
+        interval or an atom subset matters too. Default is ``'pdb'``, which
+        is self-describing but slow and large; a long solvated run wants
+        ``'dcd'`` or ``'xtc'``, which write ``<prefix>_topology.pdb``
+        alongside so the result stays readable.
+    velocity_record_interval : int or None, optional
+        If set, also write ``<prefix>_velocities.npz`` every this many
+        steps, which :func:`~openmmnqe.reporters.vibrational_spectrum` turns
+        into a vibrational density of states. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose velocities are recorded. Requires
+        *velocity_record_interval*. Frames are held in memory until the run
+        ends, so a selection is what keeps a solvated run in RAM. Default is
+        None, which records every atom.
 
     Raises
     ------
@@ -3404,6 +3955,7 @@ def run_openmm_adqtb_prod(
     UserWarning
         If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
+    traj_options = _resolve_trajectory_options(trajectory, n_report)
     segment_steps = _validate_adqtb_segment(segment_length, time_step)
     thermostat_seed, barostat_seed = _derive_seeds(
         seed, "thermostat", "barostat"
@@ -3436,7 +3988,10 @@ def run_openmm_adqtb_prod(
     _add_adqtb_reporters(simulation, output_prefix, n_report,
                          segment_steps=segment_steps, type_names=type_names,
                          friction_log=friction_log,
-                         checkpoint_interval=n_report * 10)
+                         checkpoint_interval=n_report * 10,
+                         trajectory=traj_options,
+                         velocity_record_interval=velocity_record_interval,
+                         velocity_atom_indices=velocity_atom_indices)
     with _finalize_reporters(simulation):
         print(f"Starting production run for {steps} steps...", flush=True)
         simulation.step(steps)

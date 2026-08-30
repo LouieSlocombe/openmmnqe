@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -268,12 +269,20 @@ def test_load_plumed_is_optional_and_adds_script_force(monkeypatch: pytest.Monke
     assert constructed[0].script == "DISTANCE ATOMS=1,2\n"
 
 
+def _stub_trajectory_reporters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace every trajectory reporter with a tuple-returning stand-in."""
+    for name, label in (("PDBReporter", "pdb"),
+                        ("DCDReporter", "dcd"),
+                        ("XTCReporter", "xtc")):
+        monkeypatch.setattr(
+            nqe_openmm.app,
+            name,
+            lambda *args, _label=label, **kwargs: (_label, args, kwargs),
+        )
+
+
 def test_add_standard_reporters_builds_requested_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        nqe_openmm.app,
-        "PDBReporter",
-        lambda *args, **kwargs: ("pdb", args, kwargs),
-    )
+    _stub_trajectory_reporters(monkeypatch)
     monkeypatch.setattr(
         nqe_openmm.app,
         "StateDataReporter",
@@ -290,7 +299,7 @@ def test_add_standard_reporters_builds_requested_set(monkeypatch: pytest.MonkeyP
         simulation,
         output_prefix="run",
         n_report=25,
-        pdb_steps=True,
+        trajectory=nqe_openmm.TrajectoryOptions("pdb", 25),
         stdout_volume=True,
         checkpoint_interval=100,
     )
@@ -302,9 +311,75 @@ def test_add_standard_reporters_builds_requested_set(monkeypatch: pytest.MonkeyP
         "checkpoint",
     ]
     assert simulation.reporters[0][1] == ("run_steps.pdb", 25)
+    assert simulation.reporters[0][2] == {
+        "enforcePeriodicBox": None,
+        "atomSubset": None,
+    }
     assert simulation.reporters[1][2]["volume"] is True
     assert simulation.reporters[2][1] == ("run.log", 25)
     assert simulation.reporters[3][1] == ("run.chk", 100)
+
+
+@pytest.mark.parametrize(
+    ("traj_format", "suffix"),
+    [("dcd", ".dcd"), ("xtc", ".xtc")],
+)
+def test_add_standard_reporters_writes_binary_trajectory_and_topology(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    traj_format: str,
+    suffix: str,
+) -> None:
+    _stub_trajectory_reporters(monkeypatch)
+    monkeypatch.setattr(
+        nqe_openmm.app,
+        "StateDataReporter",
+        lambda *args, **kwargs: ("state", args, kwargs),
+    )
+    written: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        nqe_openmm,
+        "_write_trajectory_topology",
+        lambda simulation, prefix, options: written.append((prefix, options)),
+    )
+    simulation = SimpleNamespace(reporters=[])
+
+    nqe_openmm._add_standard_reporters(
+        simulation,
+        output_prefix="run",
+        n_report=25,
+        trajectory=nqe_openmm.TrajectoryOptions(
+            traj_format, 50, atom_indices=[0, 2],
+        ),
+    )
+
+    assert simulation.reporters[0][0] == traj_format
+    assert simulation.reporters[0][1] == (f"run_steps{suffix}", 50)
+    assert simulation.reporters[0][2]["atomSubset"] == [0, 2]
+    assert written == [
+        ("run", nqe_openmm.TrajectoryOptions(traj_format, 50, [0, 2])),
+    ]
+
+
+def test_add_standard_reporters_writes_no_trajectory_for_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_trajectory_reporters(monkeypatch)
+    monkeypatch.setattr(
+        nqe_openmm.app,
+        "StateDataReporter",
+        lambda *args, **kwargs: ("state", args, kwargs),
+    )
+    simulation = SimpleNamespace(reporters=[])
+
+    nqe_openmm._add_standard_reporters(
+        simulation,
+        output_prefix="run",
+        n_report=25,
+        trajectory=nqe_openmm.TrajectoryOptions("none", 25),
+    )
+
+    assert [reporter[0] for reporter in simulation.reporters] == ["state", "state"]
 
 
 def test_add_rpmd_progress_reporters_omit_context_thermodynamics(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1036,3 +1111,251 @@ def test_close_output_reporters_closes_the_thermodynamic_log(
     nqe_openmm._close_output_reporters(simulation, suppress_errors=False)
 
     assert reporter._out.closed
+
+
+# ---------------------------------------------------------------------------
+# Trajectory options
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_trajectory_options_accepts_a_bare_format_name() -> None:
+    options = nqe_openmm._resolve_trajectory_options("dcd", 500)
+
+    assert options == nqe.TrajectoryOptions("dcd", 500)
+
+
+def test_resolve_trajectory_options_defaults_the_interval_to_n_report() -> None:
+    assert nqe_openmm._resolve_trajectory_options(
+        nqe.TrajectoryOptions("xtc"), 250,
+    ).interval == 250
+    assert nqe_openmm._resolve_trajectory_options(
+        nqe.TrajectoryOptions("xtc", 40), 250,
+    ).interval == 40
+
+
+@pytest.mark.parametrize(
+    ("trajectory", "message"),
+    [
+        ("mp4", "unknown trajectory format"),
+        (nqe.TrajectoryOptions("dcd", velocities=True), "cannot carry velocities"),
+        (nqe.TrajectoryOptions("pdb", 0), "must be a positive integer"),
+        (nqe.TrajectoryOptions("pdb", atom_indices=[]), "must not be empty"),
+        (nqe.TrajectoryOptions("pdb", atom_indices=[1, 1]), "duplicate indices"),
+        (nqe.TrajectoryOptions("pdb", atom_indices=[-1]), "must be a non-negative"),
+    ],
+)
+def test_resolve_trajectory_options_rejects_bad_requests(
+    trajectory: Any, message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        nqe_openmm._resolve_trajectory_options(trajectory, 100)
+
+
+def test_resolve_trajectory_options_rejects_a_noninteger_interval() -> None:
+    with pytest.raises(TypeError):
+        nqe_openmm._resolve_trajectory_options(nqe.TrajectoryOptions("pdb", 1.5), 10)
+
+
+def test_make_trajectory_reporter_explains_a_missing_mdtraj(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+
+    def without_mdtraj(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name.startswith("mdtraj"):
+            raise ImportError("no mdtraj here")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_mdtraj)
+
+    with pytest.raises(ImportError, match=r"openmmnqe\[traj\]"):
+        nqe_openmm._make_trajectory_reporter(
+            "run_steps.h5", nqe.TrajectoryOptions("h5", 10),
+        )
+
+
+def test_write_trajectory_topology_only_fires_for_binary_formats(
+    tmp_path: Path, one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    modeller, forcefield = one_particle_system
+    system = forcefield.createSystem(modeller.topology)
+    simulation = app.Simulation(
+        modeller.topology,
+        system,
+        openmm.VerletIntegrator(0.001 * unit.picoseconds),
+        openmm.Platform.getPlatformByName("Reference"),
+    )
+    simulation.context.setPositions(modeller.positions)
+
+    for traj_format in ("pdb", "h5", "none"):
+        nqe_openmm._write_trajectory_topology(
+            simulation, f"self_{traj_format}", nqe.TrajectoryOptions(traj_format, 1),
+        )
+        assert not Path(f"self_{traj_format}_topology.pdb").exists()
+
+    nqe_openmm._write_trajectory_topology(
+        simulation, "binary", nqe.TrajectoryOptions("dcd", 1),
+    )
+    written = Path("binary_topology.pdb")
+    assert written.is_file()
+    assert "AR" in written.read_text()
+
+
+def test_close_output_reporters_closes_only_what_defines_close() -> None:
+    class _Closable:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    closable = _Closable()
+    # StateDataReporter has no close and finalizes in __del__; closing it here
+    # would close the stdout it was handed.
+    plain = SimpleNamespace(report=lambda *args: None)
+    simulation = SimpleNamespace(reporters=[closable, plain])
+
+    nqe_openmm._close_output_reporters(simulation, suppress_errors=False)
+
+    assert closable.closed is True
+    assert not hasattr(plain, "closed")
+
+
+def test_close_output_reporters_reports_or_suppresses_the_first_error() -> None:
+    def _raise() -> None:
+        raise RuntimeError("flush failed")
+
+    simulation = SimpleNamespace(reporters=[SimpleNamespace(close=_raise)])
+
+    with pytest.raises(RuntimeError, match="flush failed"):
+        nqe_openmm._close_output_reporters(simulation, suppress_errors=False)
+    nqe_openmm._close_output_reporters(simulation, suppress_errors=True)
+
+
+@pytest.mark.parametrize(
+    ("traj_format", "suffix"),
+    [("pdb", ".pdb"), ("dcd", ".dcd"), ("xtc", ".xtc"), ("h5", ".h5")],
+)
+def test_production_writes_the_requested_format_and_a_usable_topology(
+    one_particle_system: tuple[app.Modeller, Any],
+    traj_format: str,
+    suffix: str,
+) -> None:
+    mdtraj = pytest.importorskip("mdtraj")
+    modeller, forcefield = one_particle_system
+
+    nqe.run_openmm_prod(
+        modeller,
+        nqe.PreparedSystem(forcefield.createSystem(modeller.topology)),
+        barostat_freq=None,
+        steps=40,
+        n_report=8,
+        output_prefix=traj_format,
+        platform_name="Reference",
+        seed=11,
+        trajectory=traj_format,
+    )
+
+    trajectory = Path(f"{traj_format}_steps{suffix}")
+    assert trajectory.is_file()
+
+    topology = Path(f"{traj_format}_topology.pdb")
+    if traj_format in ("dcd", "xtc"):
+        # A binary trajectory carries no topology of its own, so the stage
+        # writes one up front -- before the run can crash without it.
+        assert topology.is_file()
+        loaded = mdtraj.load(str(trajectory), top=str(topology))
+    else:
+        assert not topology.exists()
+        loaded = mdtraj.load(str(trajectory))
+
+    assert loaded.n_frames == 5
+    assert loaded.n_atoms == 1
+
+
+def test_production_can_write_no_trajectory_at_all(
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    modeller, forcefield = one_particle_system
+
+    nqe.run_openmm_prod(
+        modeller,
+        nqe.PreparedSystem(forcefield.createSystem(modeller.topology)),
+        barostat_freq=None,
+        steps=20,
+        n_report=10,
+        output_prefix="quiet",
+        platform_name="Reference",
+        seed=3,
+        trajectory="none",
+    )
+
+    assert not list(Path.cwd().glob("quiet_steps.*"))
+    assert Path("quiet.log").is_file()
+
+
+def test_production_velocity_archive_recovers_a_known_frequency(
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    # The fixture holds one argon in 0.5*k*r^2 with k = 100 kJ/mol/nm^2, so
+    # the spectrum has one peak, at sqrt(k/m)/2*pi. Recovering it end to end
+    # is what says the archive carries real velocities on real time axes.
+    modeller, forcefield = one_particle_system
+
+    nqe.run_openmm_prod(
+        modeller,
+        nqe.PreparedSystem(forcefield.createSystem(modeller.topology)),
+        barostat_freq=None,
+        steps=200_000,
+        n_report=100_000,
+        gamma=0.05 / unit.picosecond,
+        output_prefix="spectrum",
+        platform_name="Reference",
+        seed=11,
+        trajectory="none",
+        velocity_record_interval=10,
+    )
+
+    archive = Path("spectrum_velocities.npz")
+    assert archive.is_file()
+
+    speed_of_light_cm_per_ps = 1.0e2 * unit.SPEED_OF_LIGHT_C.value_in_unit(
+        unit.meter / unit.picosecond
+    )
+    expected = np.sqrt(100.0 / 39.9) / (2.0 * np.pi) / speed_of_light_cm_per_ps
+    frequencies, intensities = nqe.vibrational_spectrum(archive)
+
+    assert frequencies[np.argmax(intensities)] == pytest.approx(expected, rel=0.05)
+
+
+def test_production_flushes_its_velocity_archive_when_the_run_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    # The archive is only written on close, so a stage that never finalizes
+    # its reporters loses every frame it recorded.
+    modeller, forcefield = one_particle_system
+    real_step = app.Simulation.step
+
+    def fail_after_one_report(self: app.Simulation, steps: int) -> None:
+        real_step(self, 4)
+        raise RuntimeError("device lost")
+
+    monkeypatch.setattr(app.Simulation, "step", fail_after_one_report)
+
+    with pytest.raises(RuntimeError, match="device lost"):
+        nqe.run_openmm_prod(
+            modeller,
+            nqe.PreparedSystem(forcefield.createSystem(modeller.topology)),
+            barostat_freq=None,
+            steps=100,
+            n_report=4,
+            output_prefix="crashed",
+            platform_name="Reference",
+            seed=5,
+            trajectory="none",
+            velocity_record_interval=2,
+        )
+
+    with np.load("crashed_velocities.npz") as archive:
+        assert archive["times_ps"].size == 2

@@ -2223,7 +2223,7 @@ def test_velocity_autocorrelation_of_a_cosine_is_a_cosine(tmp_path: Path) -> Non
         archive, n_frames=n_frames, dt=dt, angular_frequency=omega, mass=mass,
     )
 
-    times, vacf = reporters.rpmd_velocity_autocorrelation(
+    times, vacf = reporters.velocity_autocorrelation(
         archive, max_time=0.2,
     )
 
@@ -2236,7 +2236,7 @@ def test_velocity_autocorrelation_of_a_cosine_is_a_cosine(tmp_path: Path) -> Non
         0.5 * mass * np.cos(omega * times), abs=0.02 * mass,
     )
 
-    _, unweighted = reporters.rpmd_velocity_autocorrelation(
+    _, unweighted = reporters.velocity_autocorrelation(
         archive, max_time=0.2, mass_weighted=False,
     )
     assert unweighted == pytest.approx(vacf / mass)
@@ -2249,7 +2249,7 @@ def test_vibrational_spectrum_peaks_at_the_cosine_frequency(tmp_path: Path) -> N
         archive, n_frames=n_frames, dt=dt, angular_frequency=omega, mass=1.0,
     )
 
-    frequencies, intensities = reporters.rpmd_vibrational_spectrum(archive)
+    frequencies, intensities = reporters.vibrational_spectrum(archive)
 
     speed_of_light_cm_per_ps = 1.0e2 * unit.SPEED_OF_LIGHT_C.value_in_unit(
         unit.meter / unit.picosecond
@@ -2260,7 +2260,7 @@ def test_vibrational_spectrum_peaks_at_the_cosine_frequency(tmp_path: Path) -> N
     assert abs(peak - expected) <= grid_spacing
 
     with pytest.raises(ValueError, match="window"):
-        reporters.rpmd_vibrational_spectrum(archive, window="hamming")
+        reporters.vibrational_spectrum(archive, window="hamming")
 
 
 def test_vibrational_spectrum_finds_a_real_harmonic_frequency(tmp_path: Path) -> None:
@@ -2277,7 +2277,7 @@ def test_vibrational_spectrum_finds_a_real_harmonic_frequency(tmp_path: Path) ->
     step_rpmd(simulation, 20_000)
     reporter.close()
 
-    frequencies, intensities = reporters.rpmd_vibrational_spectrum(output)
+    frequencies, intensities = reporters.vibrational_spectrum(output)
 
     speed_of_light_cm_per_ps = 1.0e2 * unit.SPEED_OF_LIGHT_C.value_in_unit(
         unit.meter / unit.picosecond
@@ -2294,12 +2294,12 @@ def test_velocity_archive_validation(tmp_path: Path) -> None:
         good, n_frames=10, dt=0.001, angular_frequency=1.0, mass=1.0,
     )
     with pytest.raises(ValueError, match="max_time"):
-        reporters.rpmd_velocity_autocorrelation(good, max_time=0.0)
+        reporters.velocity_autocorrelation(good, max_time=0.0)
 
     missing = tmp_path / "missing.npz"
     np.savez(missing, times_ps=np.arange(3.0))
     with pytest.raises(ValueError, match="lacks field"):
-        reporters.rpmd_velocity_autocorrelation(missing)
+        reporters.velocity_autocorrelation(missing)
 
     short = tmp_path / "short.npz"
     np.savez(
@@ -2310,7 +2310,7 @@ def test_velocity_archive_validation(tmp_path: Path) -> None:
         masses_dalton=np.array([1.0]),
     )
     with pytest.raises(ValueError, match="at least two frames"):
-        reporters.rpmd_velocity_autocorrelation(short)
+        reporters.velocity_autocorrelation(short)
 
     mismatched = tmp_path / "mismatched.npz"
     np.savez(
@@ -2321,7 +2321,7 @@ def test_velocity_archive_validation(tmp_path: Path) -> None:
         masses_dalton=np.array([1.0]),
     )
     with pytest.raises(ValueError, match="shapes disagree"):
-        reporters.rpmd_velocity_autocorrelation(mismatched)
+        reporters.velocity_autocorrelation(mismatched)
 
     uneven = tmp_path / "uneven.npz"
     np.savez(
@@ -2332,4 +2332,355 @@ def test_velocity_archive_validation(tmp_path: Path) -> None:
         masses_dalton=np.array([1.0]),
     )
     with pytest.raises(ValueError, match="uniformly spaced"):
-        reporters.rpmd_velocity_autocorrelation(uneven)
+        reporters.velocity_autocorrelation(uneven)
+
+
+# ---------------------------------------------------------------------------
+# Trajectory formats
+# ---------------------------------------------------------------------------
+
+
+def _periodic_two_atom_topology() -> app.Topology:
+    topology = _two_atom_topology()
+    topology.setPeriodicBoxVectors(
+        [Vec3(3.0, 0.0, 0.0), Vec3(0.0, 3.0, 0.0), Vec3(0.0, 0.0, 3.0)]
+        * unit.nanometer
+    )
+    return topology
+
+
+_TWO_ATOM_POSITIONS = [Vec3(0.1, 0.0, 0.0), Vec3(0.2, 0.0, 0.0)] * unit.nanometer
+
+
+@pytest.mark.parametrize("traj_format", ["pdb", "dcd", "xtc"])
+def test_trajectory_writer_round_trips_every_format(
+    tmp_path: Path, traj_format: str,
+) -> None:
+    pytest.importorskip("mdtraj")
+    import mdtraj as md
+
+    topology = _periodic_two_atom_topology()
+    path = tmp_path / f"traj.{traj_format}"
+    reference = tmp_path / "reference.pdb"
+    with open(reference, "w") as handle:
+        app.PDBFile.writeFile(topology, _TWO_ATOM_POSITIONS, handle)
+
+    with reporters._TrajectoryWriter(
+        path, topology, format=traj_format, reportInterval=5,
+    ) as writer:
+        assert writer.is_binary is (traj_format != "pdb")
+        for _ in range(3):
+            writer.write(
+                writer.select(_TWO_ATOM_POSITIONS),
+                step_size=0.002 * unit.picosecond,
+                periodic_box_vectors=topology.getPeriodicBoxVectors(),
+            )
+
+    trajectory = md.load(str(path), top=str(reference))
+    assert trajectory.n_frames == 3
+    assert trajectory.n_atoms == 2
+    # XTC quantizes to 1e-3 nm, so this is a tolerance rather than equality.
+    assert np.abs(trajectory.xyz[0] - md.load(str(reference)).xyz[0]).max() < 2e-3
+
+
+def test_trajectory_writer_pdb_writes_one_footer(tmp_path: Path) -> None:
+    path = tmp_path / "traj.pdb"
+    writer = reporters._TrajectoryWriter(path, _two_atom_topology())
+    for _ in range(2):
+        writer.write(_TWO_ATOM_POSITIONS, step_size=None)
+    writer.close()
+    writer.close()
+    writer.__del__()
+
+    contents = path.read_text().splitlines()
+    assert [line for line in contents if line.startswith("MODEL")] == [
+        "MODEL        1",
+        "MODEL        2",
+    ]
+    assert contents.count("END") == 1
+
+
+@pytest.mark.parametrize("traj_format", ["pdb", "dcd", "xtc"])
+def test_trajectory_writer_fails_on_an_unwritable_path(
+    tmp_path: Path, traj_format: str,
+) -> None:
+    with pytest.raises(OSError):
+        reporters._TrajectoryWriter(
+            tmp_path / "missing" / f"traj.{traj_format}",
+            _two_atom_topology(),
+            format=traj_format,
+        )
+
+
+def test_trajectory_writer_subset_keeps_residues_and_slices_positions(
+    tmp_path: Path,
+) -> None:
+    topology = _periodic_two_atom_topology()
+    writer = reporters._TrajectoryWriter(
+        tmp_path / "subset.pdb", topology, atom_indices=[1],
+    )
+
+    assert writer.topology.getNumAtoms() == 1
+    assert [residue.name for residue in writer.topology.residues()] == ["LIG"]
+    assert [atom.name for atom in writer.topology.atoms()] == ["O"]
+    assert writer.topology.getPeriodicBoxVectors() is not None
+
+    selected = writer.select(_TWO_ATOM_POSITIONS)
+    assert np.allclose(
+        selected.value_in_unit(unit.nanometer), [[0.2, 0.0, 0.0]],
+    )
+    writer.close()
+
+
+def test_trajectory_writer_select_is_a_no_op_without_a_subset(
+    tmp_path: Path,
+) -> None:
+    writer = reporters._TrajectoryWriter(tmp_path / "all.pdb", _two_atom_topology())
+    assert writer.select(_TWO_ATOM_POSITIONS) is _TWO_ATOM_POSITIONS
+    writer.close()
+
+
+def test_subset_topology_rejects_indices_outside_the_topology() -> None:
+    with pytest.raises(ValueError, match="lie outside the topology"):
+        reporters._subset_topology(_two_atom_topology(), [0, 5])
+
+
+def test_integrator_formats_reject_h5_by_name_and_others_generically() -> None:
+    with pytest.raises(ValueError, match="cannot be written from bead states"):
+        reporters._require_integrator_format("h5")
+    with pytest.raises(ValueError, match="unknown trajectory format"):
+        reporters._require_integrator_format("mp4")
+
+
+@pytest.mark.parametrize("traj_format", ["pdb", "dcd", "xtc"])
+def test_bead_and_centroid_reporters_write_every_format(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, traj_format: str,
+) -> None:
+    pytest.importorskip("mdtraj")
+    import mdtraj as md
+
+    topology = _periodic_two_atom_topology()
+    reference = tmp_path / "reference.pdb"
+    with open(reference, "w") as handle:
+        app.PDBFile.writeFile(topology, _TWO_ATOM_POSITIONS, handle)
+
+    # A real State hands back Vec3 box vectors, which is what XTCFile reads;
+    # the array-valued _State above is enough only for DCD.
+    box = topology.getPeriodicBoxVectors()
+    state = SimpleNamespace(
+        getPositions=lambda asNumpy=False: _TWO_ATOM_POSITIONS,
+        getPeriodicBoxVectors=lambda asNumpy=False: box,
+    )
+    integrator = SimpleNamespace(
+        getNumCopies=lambda: 2,
+        getState=lambda copy=None, **kwargs: state,
+        getStepSize=lambda: 0.002 * unit.picosecond,
+    )
+    context = SimpleNamespace(getState=lambda **kwargs: state)
+    simulation = SimpleNamespace(
+        currentStep=0, integrator=integrator, context=context,
+    )
+    monkeypatch.setattr(
+        reporters,
+        "centroid_positions",
+        lambda simulation, n_atoms, n_beads: _TWO_ATOM_POSITIONS,
+    )
+
+    with RPMDBeadReporter(
+        file_base_name=str(tmp_path / "beads"),
+        reportInterval=4,
+        num_beads=2,
+        topology=topology,
+        format=traj_format,
+    ) as beads, RPMDCentroidReporter(
+        file_name=str(tmp_path / f"centroid.{traj_format}"),
+        reportInterval=4,
+        num_beads=2,
+        topology=topology,
+        format=traj_format,
+    ) as centroid:
+        for _ in range(2):
+            beads.report(simulation, state=None)
+            centroid.report(simulation, state=None)
+
+    for path in (tmp_path / f"beads_bead_0.{traj_format}",
+                 tmp_path / f"beads_bead_1.{traj_format}",
+                 tmp_path / f"centroid.{traj_format}"):
+        assert md.load(str(path), top=str(reference)).n_frames == 2
+
+
+def test_centroid_reporter_asks_for_the_full_atom_count_under_a_subset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    calls: list[tuple[Any, int, int]] = []
+    monkeypatch.setattr(
+        reporters,
+        "centroid_positions",
+        lambda simulation, n_atoms, n_beads: (
+            calls.append((simulation, n_atoms, n_beads))
+            or _TWO_ATOM_POSITIONS
+        ),
+    )
+    simulation = SimpleNamespace(currentStep=0)
+
+    with RPMDCentroidReporter(
+        file_name=str(tmp_path / "centroid.pdb"),
+        reportInterval=4,
+        num_beads=3,
+        topology=_two_atom_topology(),
+        atom_indices=[0],
+    ) as reporter:
+        reporter.report(simulation, state=None)
+
+    # Two, the whole System -- not the one atom the subset topology holds.
+    assert calls == [(simulation, 2, 3)]
+
+
+def test_bead_reporter_rejects_a_format_it_cannot_write(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="cannot be written from bead states"):
+        RPMDBeadReporter(
+            file_base_name=str(tmp_path / "beads"),
+            reportInterval=1,
+            num_beads=2,
+            topology=_two_atom_topology(),
+            format="h5",
+        )
+
+
+# ---------------------------------------------------------------------------
+# The classical velocity archive
+# ---------------------------------------------------------------------------
+
+
+class _VelocityState:
+    def __init__(self, velocities: Sequence[Any], time_ps: float) -> None:
+        self._velocities = np.asarray(velocities, dtype=float) * (
+            unit.nanometer / unit.picosecond
+        )
+        self._time = time_ps * unit.picosecond
+
+    def getVelocities(self, asNumpy: bool=False) -> unit.Quantity:
+        return self._velocities
+
+    def getTime(self) -> unit.Quantity:
+        return self._time
+
+
+def _two_particle_system() -> openmm.System:
+    system = openmm.System()
+    system.addParticle(1.0 * unit.dalton)
+    system.addParticle(16.0 * unit.dalton)
+    return system
+
+
+def test_velocity_archive_reporter_records_context_velocities(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "velocities.npz"
+    simulation = SimpleNamespace(
+        currentStep=4,
+        integrator=SimpleNamespace(),
+        system=_two_particle_system(),
+    )
+
+    with reporters.VelocityArchiveReporter(output, 2) as reporter:
+        assert reporter.describeNextReport(simulation) == (
+            2,
+            False,
+            True,
+            False,
+            False,
+        )
+        reporter.report(
+            simulation, _VelocityState([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], 0.5),
+        )
+        reporter.report(
+            simulation, _VelocityState([[3.0, 0.0, 0.0], [0.0, 4.0, 0.0]], 1.0),
+        )
+
+    with np.load(output) as archive:
+        assert sorted(archive.files) == [
+            "atom_indices",
+            "masses_dalton",
+            "times_ps",
+            "velocities_nm_per_ps",
+        ]
+        assert np.allclose(archive["times_ps"], [0.5, 1.0])
+        assert archive["velocities_nm_per_ps"].shape == (2, 2, 3)
+        assert np.allclose(archive["masses_dalton"], [1.0, 16.0])
+        assert np.allclose(archive["atom_indices"], [0, 1])
+
+
+def test_velocity_archive_reporter_keeps_only_selected_atoms(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "selected.npz"
+    simulation = SimpleNamespace(
+        currentStep=0,
+        integrator=SimpleNamespace(),
+        system=_two_particle_system(),
+    )
+
+    with reporters.VelocityArchiveReporter(output, 1, atom_indices=[1]) as reporter:
+        reporter.report(
+            simulation, _VelocityState([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], 0.0),
+        )
+
+    with np.load(output) as archive:
+        assert np.allclose(archive["atom_indices"], [1])
+        assert np.allclose(archive["masses_dalton"], [16.0])
+        assert np.allclose(
+            archive["velocities_nm_per_ps"], [[[0.0, 2.0, 0.0]]],
+        )
+
+
+def test_velocity_archive_reporter_refuses_an_rpmd_integrator(
+    tmp_path: Path,
+) -> None:
+    simulation = SimpleNamespace(
+        currentStep=0,
+        integrator=SimpleNamespace(getNumCopies=lambda: 4),
+        system=_two_particle_system(),
+    )
+
+    reporter = reporters.VelocityArchiveReporter(tmp_path / "v.npz", 1)
+    with pytest.raises(TypeError, match="use RPMDVelocityReporter"):
+        reporter.report(simulation, _VelocityState([[1.0, 0.0, 0.0]] * 2, 0.0))
+
+
+def test_velocity_archive_reporter_writes_nothing_without_a_frame(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "silent.npz"
+    reporters.VelocityArchiveReporter(output, 2).close()
+    assert not output.exists()
+
+
+def test_velocity_archives_share_one_schema(tmp_path: Path) -> None:
+    """The classical and RPMD archives must be the same file, key for key."""
+    system = _two_particle_system()
+    classical = SimpleNamespace(
+        currentStep=0, integrator=SimpleNamespace(), system=system,
+    )
+    bead_states = [
+        _VelocityState([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]], 0.5),
+        _VelocityState([[3.0, 0.0, 0.0], [0.0, 4.0, 0.0]], 0.5),
+    ]
+    integrator = SimpleNamespace(
+        getNumCopies=lambda: 2,
+        getState=lambda copy, **kwargs: bead_states[copy],
+    )
+    ring = SimpleNamespace(currentStep=0, integrator=integrator, system=system)
+
+    with reporters.VelocityArchiveReporter(tmp_path / "a.npz", 1) as one:
+        one.report(
+            classical, _VelocityState([[2.0, 0.0, 0.0], [0.0, 3.0, 0.0]], 0.5),
+        )
+    with reporters.RPMDVelocityReporter(tmp_path / "b.npz", 1) as other:
+        other.report(ring, state=None)
+
+    with np.load(tmp_path / "a.npz") as a, np.load(tmp_path / "b.npz") as b:
+        assert sorted(a.files) == sorted(b.files)
+        for key in a.files:
+            assert a[key].shape == b[key].shape, key
+            assert a[key].dtype == b[key].dtype, key

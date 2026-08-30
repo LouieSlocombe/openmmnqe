@@ -105,10 +105,13 @@ The same thermostat-off dynamics supports time-correlation functions
 directly. `velocity_record_interval` on the production stage attaches an
 {class}`~openmmnqe.reporters.RPMDVelocityReporter`, which records
 bead-averaged (centroid) velocities;
-{func}`~openmmnqe.reporters.rpmd_velocity_autocorrelation` and
-{func}`~openmmnqe.reporters.rpmd_vibrational_spectrum` turn the archive
+{func}`~openmmnqe.reporters.velocity_autocorrelation` and
+{func}`~openmmnqe.reporters.vibrational_spectrum` turn the archive
 into the RPMD approximation to the Kubo-transformed velocity
-autocorrelation and a vibrational density of states:
+autocorrelation and a vibrational density of states. The same two functions
+read the archive a classical stage writes through
+{class}`~openmmnqe.reporters.VelocityArchiveReporter`, which is how the
+ring-polymer spectrum gets a like-for-like baseline to be read against:
 
 ```{literalinclude} ../../examples/rates.py
 :pyobject: run_rpmd_spectrum

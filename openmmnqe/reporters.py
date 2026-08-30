@@ -4,11 +4,13 @@ OpenMM's own reporters see only the context, which for an ``RPMDIntegrator``
 holds a single copy of the system rather than the ring polymer.  Anything that
 needs the beads themselves -- their spread, their individual trajectories,
 their centroid, their energies, or their centroid velocities -- has to ask
-the integrator, which is what these six reporters do.  They are attached by
-the ``run_openmm_rpmd_*`` drivers in :mod:`openmmnqe.openmm`.
+the integrator, which is what six of these seven reporters do.  They are
+attached by the ``run_openmm_rpmd_*`` drivers in :mod:`openmmnqe.openmm`.
 
-All six follow OpenMM's reporter protocol: ``describeNextReport`` says when
-the next report is due and what state it needs, and ``report`` writes it.
+All seven follow OpenMM's reporter protocol: ``describeNextReport`` says
+when the next report is due and what state it needs, and ``report`` writes
+it.  Each trajectory reporter takes a ``format``, so a long solvated run can
+write DCD or XTC instead of the PDB that is the default.
 Use :func:`track_rpmd_atom_expansion` to attach the quantum-spread reporter
 for one target atom without constructing it directly, and
 :func:`plot_rpmd_atom_expansion` to plot the result against a centroid
@@ -23,9 +25,12 @@ and :func:`rpmd_thermodynamic_averages` or :func:`plot_rpmd_thermodynamics`
 to read the log it writes back.  For a thermostat-off run,
 :func:`rpmd_energy_conservation` turns the same log's ring-polymer
 Hamiltonian column into a conservation verdict, and
-:class:`RPMDVelocityReporter` with :func:`rpmd_velocity_autocorrelation` and
-:func:`rpmd_vibrational_spectrum` turn recorded centroid velocities into
+:class:`RPMDVelocityReporter` with :func:`velocity_autocorrelation` and
+:func:`vibrational_spectrum` turn recorded centroid velocities into
 Kubo-style correlation functions and vibrational spectra.
+:class:`VelocityArchiveReporter` writes the identical archive from a
+classical run, which is the baseline those spectra are read against; it is
+the one reporter here that has nothing to do with beads.
 
 :class:`RPMDKineticDecompositionReporter` splits that same centroid-virial
 kinetic energy over individual atoms, which is the diagnostic that says how
@@ -1040,28 +1045,366 @@ def plot_rpmd_atom_expansion(file: str | os.PathLike[str], *,
     return figure, axes
 
 
+TrajectoryFormat = Literal["pdb", "dcd", "xtc", "h5", "none"]
+
+_TRAJECTORY_SUFFIX: dict[str, str] = {
+    "pdb": ".pdb",
+    "dcd": ".dcd",
+    "xtc": ".xtc",
+    "h5": ".h5",
+}
+
+#: Every trajectory format a stage can be asked for, ``'none'`` included.
+_TRAJECTORY_FORMATS = ("pdb", "dcd", "xtc", "h5", "none")
+
+#: Formats a reporter reading the RPMD integrator can write.  ``h5`` is
+#: absent because mdtraj's HDF5 reporter reads a Context, which for an
+#: ``RPMDIntegrator`` holds one copy rather than the ring polymer.
+_INTEGRATOR_TRAJECTORY_FORMATS = ("pdb", "dcd", "xtc")
+
+
+def _require_integrator_format(format: TrajectoryFormat) -> str:
+    """
+    Check a format a reporter reading the RPMD integrator can write.
+
+    Parameters
+    ----------
+    format : str
+        Requested trajectory format.
+
+    Returns
+    -------
+    str
+        The file suffix that format uses, ``'.pdb'`` and friends.
+
+    Raises
+    ------
+    ValueError
+        If *format* is not one this reporter can write. ``'h5'`` is named
+        separately, since it is a real format that simply cannot be produced
+        from bead states.
+    """
+    if format == "h5":
+        raise ValueError(
+            "trajectory format 'h5' cannot be written from bead states: "
+            "mdtraj's HDF5 reporter reads a Context, which for an "
+            "RPMDIntegrator holds one copy rather than the ring polymer; "
+            "use 'dcd' or 'xtc'"
+        )
+    if format not in _INTEGRATOR_TRAJECTORY_FORMATS:
+        raise ValueError(
+            f"unknown trajectory format {format!r}; use one of "
+            f"{', '.join(map(repr, _INTEGRATOR_TRAJECTORY_FORMATS))}"
+        )
+    return _TRAJECTORY_SUFFIX[format]
+
+
+def _subset_topology(topology: app.Topology,
+                     atom_indices: Sequence[int],
+                     ) -> app.Topology:
+    """
+    Build the topology of an atom subset, keeping chains and residues.
+
+    Deleting through a :class:`~openmm.app.Modeller` preserves the chain and
+    residue each surviving atom belonged to, so a ``resname`` selection still
+    works in whatever reads the trajectory back.  OpenMM's own ``atomSubset``
+    support instead flattens the selection into a single residue.
+
+    Parameters
+    ----------
+    topology : openmm.app.Topology
+        Topology of the full system.
+    atom_indices : sequence of int
+        0-based indices of the atoms to keep.
+
+    Returns
+    -------
+    openmm.app.Topology
+        Topology holding only the selected atoms, with the periodic box of
+        the original.
+
+    Raises
+    ------
+    ValueError
+        If an index lies outside *topology*.
+    """
+    n_atoms = topology.getNumAtoms()
+    out_of_range = [index for index in atom_indices if index >= n_atoms]
+    if out_of_range:
+        raise ValueError(
+            f"atom_indices {out_of_range} lie outside the topology with "
+            f"{n_atoms} atoms"
+        )
+    placeholder = [openmm.Vec3(0.0, 0.0, 0.0)] * n_atoms * unit.nanometer
+    modeller = app.Modeller(topology, placeholder)
+    keep = frozenset(atom_indices)
+    modeller.delete([
+        atom for atom in modeller.topology.atoms() if atom.index not in keep
+    ])
+    subset = modeller.topology
+    subset.setPeriodicBoxVectors(topology.getPeriodicBoxVectors())
+    return subset
+
+
+class _TrajectoryWriter:
+    """
+    Write frames to a PDB, DCD or XTC trajectory behind one interface.
+
+    The three formats disagree about almost everything: ``PDBFile`` writes
+    header, models and footer onto a text handle; ``DCDFile`` wraps a binary
+    handle and needs the time per frame up front; ``XTCFile`` takes a file
+    name and owns the file itself.  This hides that, so a reporter pulling
+    positions from an RPMD integrator can offer a format switch without
+    caring which of the three it got.
+
+    The file is opened eagerly, so a bad path fails where it was asked for
+    rather than at the first report, but the ``DCDFile``/``XTCFile`` object
+    is built on the first :meth:`write` -- that is the earliest the time step
+    is known, and it is what OpenMM's own ``DCDReporter`` does.
+
+    A binary trajectory also survives a crash better than a PDB one: both
+    ``DCDFile`` and ``XTCFile`` finalize each frame as they write it, whereas
+    a PDB's closing ``END`` is only written on close.
+
+    Parameters
+    ----------
+    file_name : str or os.PathLike
+        Path to write to. Nothing appends the format's suffix; pass the name
+        you want.
+    topology : openmm.app.Topology
+        Topology of the full system, before any subset is applied.
+    format : {"pdb", "dcd", "xtc"}, optional
+        Trajectory format. Default is ``"pdb"``.
+    reportInterval : int, optional
+        Interval between frames, in steps. DCD and XTC record it in their
+        headers so the frame times come out right. Default is 1.
+    atom_indices : sequence of int or None, optional
+        Atoms to write. Default is None, which writes every atom. For a
+        solvated system, selecting the solute is the difference between a
+        trajectory worth keeping and one worth deleting.
+
+    Raises
+    ------
+    TypeError
+        If *reportInterval* is not an integer.
+    ValueError
+        If *format* is not one of the three, *reportInterval* is not
+        positive, or an atom index lies outside *topology*.
+    """
+
+    def __init__(self, file_name: str | os.PathLike[str],
+                 topology: app.Topology, *,
+                 format: TrajectoryFormat = "pdb",
+                 reportInterval: int = 1,
+                 atom_indices: Sequence[int] | None = None) -> None:
+        _require_integrator_format(format)
+        self._format = format
+        self._reportInterval = require_integer(
+            reportInterval,
+            name="reportInterval",
+            minimum=1,
+        )
+        self._closed = False
+        self._file_name = os.fspath(file_name)
+        self._frame_index = 0
+        self._handle: Any = None
+        self._writer: Any = None
+
+        self._kept: npt.NDArray[np.intp] | None = None
+        if atom_indices is None:
+            self._topology = topology
+        else:
+            self._topology = _subset_topology(topology, atom_indices)
+            self._kept = np.asarray(atom_indices, dtype=np.intp)
+
+        if format == "pdb":
+            self._handle = open(self._file_name, "w")
+            app.PDBFile.writeHeader(self._topology, self._handle)
+        elif format == "dcd":
+            self._handle = open(self._file_name, "wb")
+        else:
+            # XTCFile refuses to overwrite a non-empty file unless appending,
+            # so truncate first -- what OpenMM's own XTCReporter does.
+            open(self._file_name, "wb").close()
+
+    @property
+    def is_binary(self) -> bool:
+        """
+        bool: Whether this is a binary format.
+
+        A binary trajectory needs periodic box vectors on every
+        :meth:`write` and the time step on the first one; a PDB needs
+        neither, since its box lives in the header it has already written.
+        """
+        return self._format in ("dcd", "xtc")
+
+    @property
+    def topology(self) -> app.Topology:
+        """openmm.app.Topology: The topology actually written, subset included."""
+        return self._topology
+
+    def select(self, positions: Any) -> Any:
+        """
+        Cut *positions* down to the atoms this writer keeps.
+
+        Parameters
+        ----------
+        positions : openmm.unit.Quantity
+            Positions for every atom in the full system.
+
+        Returns
+        -------
+        openmm.unit.Quantity
+            The selected positions, or *positions* unchanged when no subset
+            was asked for.
+        """
+        if self._kept is None:
+            return positions
+        values = np.asarray(positions.value_in_unit(unit.nanometer))
+        return values[self._kept] * unit.nanometer
+
+    def write(self, positions: Any, *,
+              step_size: Any,
+              periodic_box_vectors: Any = None) -> None:
+        """
+        Append one frame.
+
+        Parameters
+        ----------
+        positions : openmm.unit.Quantity
+            Positions of the atoms this writer keeps, already selected with
+            :meth:`select`.
+        step_size : openmm.unit.Quantity or None
+            Integration time step, used once to set the frame spacing in a
+            DCD or XTC header. Unused, and so safely None, for PDB.
+        periodic_box_vectors : openmm.unit.Quantity or None, optional
+            Box vectors for this frame. Ignored for PDB, whose box lives in
+            the header. Default is None.
+        """
+        if self._format == "pdb":
+            app.PDBFile.writeModel(
+                self._topology,
+                positions,
+                self._handle,
+                self._frame_index + 1,
+            )
+            # Flushing every frame would cost more than it buys.
+            if self._frame_index % 10 == 0:
+                self._handle.flush()
+        else:
+            if self._writer is None:
+                self._writer = self._open_binary_writer(step_size)
+            self._writer.writeModel(
+                positions,
+                periodicBoxVectors=periodic_box_vectors,
+            )
+        self._frame_index += 1
+
+    def _open_binary_writer(self, step_size: Any) -> Any:
+        """
+        Build the DCD or XTC writer once the time step is known.
+
+        Parameters
+        ----------
+        step_size : openmm.unit.Quantity
+            Integration time step.
+
+        Returns
+        -------
+        openmm.app.DCDFile or openmm.app.XTCFile
+            The writer, with a header describing the frame spacing.
+        """
+        interval = self._reportInterval
+        if self._format == "dcd":
+            return app.DCDFile(self._handle, self._topology, step_size,
+                               interval, interval, False)
+        return app.XTCFile(self._file_name, self._topology, step_size,
+                           interval, interval, False)
+
+    def close(self) -> None:
+        """Finalize and close the trajectory, once."""
+        if getattr(self, "_closed", True):
+            return
+        self._closed = True
+
+        handle = getattr(self, "_handle", None)
+        if self._format == "pdb":
+            if handle is not None and not handle.closed:
+                try:
+                    app.PDBFile.writeFooter(self._topology, handle)
+                finally:
+                    handle.close()
+            return
+        # DCDFile flushes every frame and XTCFile owns its own file, so
+        # there is nothing to finalize beyond releasing the handle.
+        if handle is not None and not handle.closed:
+            handle.close()
+
+    def __enter__(self) -> Self:
+        """Return this writer for use as a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Finalize the trajectory when leaving a context."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort fallback for callers that did not close the writer."""
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 class RPMDBeadReporter:
     """
-    Write the trajectory of every individual bead to its own PDB file.
+    Write the trajectory of every individual bead to its own file.
 
     Each bead of the ring polymer gets a separate file, so the beads can be
-    inspected one by one rather than only through their centroid.
+    inspected one by one rather than only through their centroid.  That also
+    makes this the most expensive output the package writes -- one whole
+    trajectory per bead -- so a solvated run wants a binary *format*, an
+    *atom_indices* selection, or both.
 
     Parameters
     ----------
     file_base_name : str
         Prefix for the output files: ``'output'`` gives
-        ``'output_bead_0.pdb'``, ``'output_bead_1.pdb'`` and so on.
+        ``'output_bead_0.pdb'``, ``'output_bead_1.pdb'`` and so on, with the
+        suffix following *format*.
     reportInterval : int
         Interval between reports, in steps.
     num_beads : int
         Number of beads in the RPMD integrator.
     topology : openmm.app.Topology
-        Topology written into the PDB headers and models.
+        Topology of the full system, written into the trajectory headers.
+    format : {"pdb", "dcd", "xtc"}, optional
+        Trajectory format. DCD and XTC are far smaller and faster than PDB
+        but carry no topology, so pair them with a structure file. Default
+        is ``"pdb"``. HDF5 is not available here: it is written by reading a
+        Context, which for an ``RPMDIntegrator`` holds one copy rather than
+        the ring polymer.
+    atom_indices : sequence of int or None, optional
+        Atoms to write. Default is None, which writes every atom.
+
+    Raises
+    ------
+    TypeError
+        If *reportInterval* or *num_beads* is not an integer.
+    ValueError
+        If *reportInterval* or *num_beads* is not positive, *format* is not
+        recognized, or an atom index lies outside *topology*.
     """
 
     def __init__(self, file_base_name: str, reportInterval: int,
-                 num_beads: int, topology: app.Topology) -> None:
+                 num_beads: int, topology: app.Topology,
+                 format: TrajectoryFormat = "pdb",
+                 atom_indices: Sequence[int] | None = None) -> None:
         self._reportInterval = require_integer(
             reportInterval,
             name="reportInterval",
@@ -1072,16 +1415,25 @@ class RPMDBeadReporter:
             name="num_beads",
             minimum=1,
         )
-        self._topology = topology
-        self._next_frame_index = 0
         self._closed = False
 
-        self._files = []
-        for i in range(self._num_beads):
-            filename = f"{file_base_name}_bead_{i}.pdb"
-            output = open(filename, "w")
-            self._files.append(output)
-            app.PDBFile.writeHeader(topology, output)
+        suffix = _require_integrator_format(format)
+        self._is_binary = format != "pdb"
+        self._writers: list[_TrajectoryWriter] = []
+        try:
+            for i in range(self._num_beads):
+                self._writers.append(_TrajectoryWriter(
+                    f"{file_base_name}_bead_{i}{suffix}",
+                    topology,
+                    format=format,
+                    reportInterval=self._reportInterval,
+                    atom_indices=atom_indices,
+                ))
+        except BaseException:
+            # A later bead failing must not strand the files already open.
+            for writer in self._writers:
+                writer.close()
+            raise
 
     def describeNextReport(self, simulation: app.Simulation,
                            ) -> tuple[int, bool, bool, bool, bool]:
@@ -1114,43 +1466,31 @@ class RPMDBeadReporter:
             Unused; the bead positions come from the RPMD integrator.
         """
         integrator = simulation.integrator
+        step_size = integrator.getStepSize() if self._is_binary else None
 
-        for i in range(self._num_beads):
+        for i, writer in enumerate(self._writers):
             # getState(bead_index, ...) is specific to RPMDIntegrator.
             bead_state = integrator.getState(i, getPositions=True, enforcePeriodicBox=True)
-            positions = bead_state.getPositions()
-
-            app.PDBFile.writeModel(
-                self._topology,
-                positions,
-                self._files[i],
-                self._next_frame_index + 1,
+            box = bead_state.getPeriodicBoxVectors() if self._is_binary else None
+            writer.write(
+                writer.select(bead_state.getPositions()),
+                step_size=step_size,
+                periodic_box_vectors=box,
             )
 
-            # Flushing every frame would cost more than it buys with one file
-            # per bead.
-            if self._next_frame_index % 10 == 0:
-                self._files[i].flush()
-
-        self._next_frame_index += 1
-
     def close(self) -> None:
-        """Write each PDB footer once and close every bead file."""
+        """Finalize and close every bead trajectory, once."""
         if getattr(self, "_closed", True):
             return
         self._closed = True
 
         first_error: Exception | None = None
-        for output in getattr(self, "_files", []):
-            if output.closed:
-                continue
+        for writer in getattr(self, "_writers", []):
             try:
-                app.PDBFile.writeFooter(self._topology, output)
+                writer.close()
             except Exception as exc:
                 if first_error is None:
                     first_error = exc
-            finally:
-                output.close()
         if first_error is not None:
             raise first_error
 
@@ -1186,17 +1526,35 @@ class RPMDCentroidReporter:
     Parameters
     ----------
     file_name : str
-        Path to write the centroid trajectory to.
+        Path to write the centroid trajectory to, suffix included.
     reportInterval : int
         Interval between reports, in steps.
     num_beads : int
         Number of beads in the RPMD integrator.
     topology : openmm.app.Topology
-        Topology written into the PDB header and models.
+        Topology of the full system, written into the trajectory header.
+    format : {"pdb", "dcd", "xtc"}, optional
+        Trajectory format. DCD and XTC are far smaller and faster than PDB
+        but carry no topology, so pair them with a structure file. Default
+        is ``"pdb"``. HDF5 is not available here: it is written by reading a
+        Context, which for an ``RPMDIntegrator`` holds one copy rather than
+        the ring polymer.
+    atom_indices : sequence of int or None, optional
+        Atoms to write. Default is None, which writes every atom.
+
+    Raises
+    ------
+    TypeError
+        If *reportInterval* or *num_beads* is not an integer.
+    ValueError
+        If *reportInterval* or *num_beads* is not positive, *format* is not
+        recognized, or an atom index lies outside *topology*.
     """
 
     def __init__(self, file_name: str, reportInterval: int,
-                 num_beads: int, topology: app.Topology) -> None:
+                 num_beads: int, topology: app.Topology,
+                 format: TrajectoryFormat = "pdb",
+                 atom_indices: Sequence[int] | None = None) -> None:
         self._reportInterval = require_integer(
             reportInterval,
             name="reportInterval",
@@ -1207,11 +1565,19 @@ class RPMDCentroidReporter:
             name="num_beads",
             minimum=1,
         )
-        self._topology = topology
-        self._next_frame_index = 0
+        _require_integrator_format(format)
+        self._is_binary = format != "pdb"
+        # The full atom count, which is what centroid_positions needs -- the
+        # writer's topology may hold only a subset.
+        self._num_atoms = topology.getNumAtoms()
         self._closed = False
-        self._out = open(file_name, "w")
-        app.PDBFile.writeHeader(topology, self._out)
+        self._writer = _TrajectoryWriter(
+            file_name,
+            topology,
+            format=format,
+            reportInterval=self._reportInterval,
+            atom_indices=atom_indices,
+        )
 
     def describeNextReport(self, simulation: app.Simulation,
                            ) -> tuple[int, bool, bool, bool, bool]:
@@ -1253,34 +1619,33 @@ class RPMDCentroidReporter:
         """
         centroid_pos = centroid_positions(
             simulation,
-            self._topology.getNumAtoms(),
+            self._num_atoms,
             self._num_beads,
         )
 
-        app.PDBFile.writeModel(
-            self._topology,
-            centroid_pos,
-            self._out,
-            self._next_frame_index + 1,
+        box = None
+        step_size = None
+        if self._is_binary:
+            # The centroid has no state of its own to carry a box, but the
+            # box is a Context property shared across the copies, and asking
+            # for it alone requests no positions or forces.
+            box = simulation.context.getState().getPeriodicBoxVectors()
+            step_size = simulation.integrator.getStepSize()
+        self._writer.write(
+            self._writer.select(centroid_pos),
+            step_size=step_size,
+            periodic_box_vectors=box,
         )
-        self._next_frame_index += 1
-
-        if self._next_frame_index % 10 == 0:
-            self._out.flush()
 
     def close(self) -> None:
-        """Write the PDB footer once and close the output file."""
+        """Finalize and close the centroid trajectory, once."""
         if getattr(self, "_closed", True):
             return
         self._closed = True
 
-        out = getattr(self, "_out", None)
-        if out is None or out.closed:
-            return
-        try:
-            app.PDBFile.writeFooter(self._topology, out)
-        finally:
-            out.close()
+        writer = getattr(self, "_writer", None)
+        if writer is not None:
+            writer.close()
 
     def __enter__(self) -> Self:
         """Return this reporter for use as a context manager."""
@@ -2857,22 +3222,21 @@ def rpmd_energy_conservation(file: str | os.PathLike[str], *,
     )
 
 
-class RPMDVelocityReporter:
+class _VelocityArchiveBase:
     """
-    Record centroid (bead-averaged) velocities for correlation functions.
+    Shared machinery for the reporters that record a velocity archive.
 
-    RPMD approximates a Kubo-transformed correlation function of operators
-    linear in position or momentum by the corresponding centroid correlation
-    function, so the centroid velocities are the raw material for velocity
-    autocorrelation functions and vibrational spectra.  Frames accumulate in
-    memory and are written as one ``.npz`` archive when the reporter is
-    closed, which the ``run_openmm_rpmd_*`` drivers do on exit; read it back
-    with :func:`rpmd_velocity_autocorrelation` or
-    :func:`rpmd_vibrational_spectrum`.
+    Subclasses differ only in where a frame's velocities come from -- a
+    Context for a classical run, the bead states for a ring polymer -- so
+    everything else lives here: index validation, the mass lookup, frame
+    accumulation and the single ``.npz`` written on close.  Sharing it is
+    what makes the two archives the same file format by construction rather
+    than by inspection, so :func:`velocity_autocorrelation` and
+    :func:`vibrational_spectrum` read either without knowing which wrote it.
 
-    Record from a thermostat-off run (``apply_thermostat=False``): the PILE
-    thermostat's friction and noise contaminate the very dynamics a
-    correlation function is meant to measure.
+    Frames accumulate in memory until close, so a selection in
+    *atom_indices* is the difference between an archive and an
+    out-of-memory error: every frame holds ``3 * n_atoms`` doubles.
 
     Parameters
     ----------
@@ -2883,9 +3247,8 @@ class RPMDVelocityReporter:
         Interval between recorded frames, in steps. Correlation functions
         resolve nothing faster than twice this interval times the time step.
     atom_indices : sequence of int or None, optional
-        Atoms whose centroid velocities are kept. Default is None, which
-        keeps every atom -- for a solvated system that is a lot of memory,
-        since every frame holds ``3 * n_atoms`` doubles until close.
+        Atoms whose velocities are kept. Default is None, which keeps every
+        atom.
 
     Raises
     ------
@@ -2925,24 +3288,36 @@ class RPMDVelocityReporter:
         self._kept: npt.NDArray[np.intp] | None = None
         self._closed = False
 
-    def describeNextReport(self, simulation: app.Simulation,
-                           ) -> tuple[int, bool, bool, bool, bool]:
+    def _check_integrator(self, simulation: app.Simulation) -> None:
         """
-        Report when the next report is due and what state it needs.
+        Reject a simulation this reporter would silently mis-sample.
 
         Parameters
         ----------
         simulation : openmm.app.Simulation
             The simulation this reporter is attached to.
+        """
+
+    def _sample(self, simulation: app.Simulation, state: openmm.State,
+                ) -> tuple[float, npt.NDArray[np.float64]]:
+        """
+        Take one frame of velocities for the kept atoms.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+        state : openmm.State
+            The state OpenMM built for this report.
 
         Returns
         -------
-        tuple
-            ``(steps, positions, velocities, forces, energies)``. No state is
-            requested: the bead velocities come from the integrator instead.
+        time_ps : float
+            Simulation time of the frame, in picoseconds.
+        velocities : numpy.ndarray
+            Velocities of the kept atoms, in nm/ps.
         """
-        steps = self._reportInterval - simulation.currentStep % self._reportInterval
-        return (steps, False, False, False, False)
+        raise NotImplementedError
 
     def _prepare(self, simulation: app.Simulation) -> None:
         """
@@ -2956,14 +3331,12 @@ class RPMDVelocityReporter:
         Raises
         ------
         TypeError
-            If the Simulation does not use an RPMD-style integrator.
+            If the Simulation's integrator is the wrong kind for this
+            reporter.
         ValueError
             If an atom index lies outside the System.
         """
-        if not hasattr(simulation.integrator, "getNumCopies"):
-            raise TypeError(
-                "RPMDVelocityReporter requires an RPMDIntegrator"
-            )
+        self._check_integrator(simulation)
         masses = _particle_masses_dalton(simulation.system)
         if self._atom_indices is None:
             kept = np.arange(len(masses), dtype=np.intp)
@@ -2983,36 +3356,22 @@ class RPMDVelocityReporter:
 
     def report(self, simulation: app.Simulation, state: openmm.State) -> None:
         """
-        Record the centroid velocities for the current step.
+        Record one frame of velocities.
 
         Parameters
         ----------
         simulation : openmm.app.Simulation
             The simulation this reporter is attached to.
         state : openmm.State
-            Unused; the bead velocities come from the RPMD integrator.
+            The state OpenMM built for this report.
         """
         if self._kept is None:
             self._prepare(simulation)
         assert self._kept is not None
 
-        integrator = simulation.integrator
-        n_beads = integrator.getNumCopies()
-        time_ps: float | None = None
-        mean_velocities: npt.NDArray[np.float64] | None = None
-        for bead in range(n_beads):
-            bead_state = integrator.getState(bead, getVelocities=True)
-            velocities = bead_state.getVelocities(asNumpy=True).value_in_unit(
-                unit.nanometer / unit.picosecond
-            )[self._kept]
-            if mean_velocities is None:
-                time_ps = bead_state.getTime().value_in_unit(unit.picosecond)
-                mean_velocities = np.array(velocities, dtype=np.float64)
-            else:
-                mean_velocities += velocities
-        assert mean_velocities is not None and time_ps is not None
-        self._times_ps.append(float(time_ps))
-        self._frames.append(mean_velocities / n_beads)
+        time_ps, velocities = self._sample(simulation, state)
+        self._times_ps.append(time_ps)
+        self._frames.append(velocities)
 
     def close(self) -> None:
         """Write the accumulated frames as one ``.npz`` archive, once."""
@@ -3051,6 +3410,237 @@ class RPMDVelocityReporter:
             pass
 
 
+class VelocityArchiveReporter(_VelocityArchiveBase):
+    """
+    Record velocities from a classical run for correlation functions.
+
+    This is the classical counterpart of :class:`RPMDVelocityReporter`, and
+    it writes the identical archive, so the same
+    :func:`velocity_autocorrelation` and :func:`vibrational_spectrum` read
+    it.  That is the point of it: a classical vibrational density of states
+    is the cheap baseline a ring-polymer spectrum is only interesting
+    against.
+
+    Record from a run whose thermostat is gentle or absent.  A strong
+    Langevin friction damps the very dynamics a correlation function
+    measures, which broadens every peak in the spectrum.
+
+    Frames accumulate in memory until close, so pass *atom_indices*: a
+    solvated system keeps ``3 * n_atoms`` doubles per frame otherwise, and a
+    spectrum wants frames close enough together to resolve the fastest mode.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Path the ``.npz`` archive is written to on close. Nothing is written
+        if no frame was ever recorded.
+    reportInterval : int
+        Interval between recorded frames, in steps. Correlation functions
+        resolve nothing faster than twice this interval times the time step.
+    atom_indices : sequence of int or None, optional
+        Atoms whose velocities are kept. Default is None, which keeps every
+        atom.
+
+    Raises
+    ------
+    TypeError
+        If *reportInterval* or an atom index is not an integer.
+    ValueError
+        If *reportInterval* is not positive, *atom_indices* is empty,
+        contains a duplicate, or a negative index.
+    """
+
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
+        """
+        Report when the next report is due and what state it needs.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Returns
+        -------
+        tuple
+            ``(steps, positions, velocities, forces, energies)``, asking for
+            velocities alone.
+        """
+        steps = self._reportInterval - simulation.currentStep % self._reportInterval
+        return (steps, False, True, False, False)
+
+    def _check_integrator(self, simulation: app.Simulation) -> None:
+        """
+        Refuse an RPMD integrator, whose Context is one copy.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Raises
+        ------
+        TypeError
+            If the integrator is an ``RPMDIntegrator``. Its Context holds a
+            single copy of the system, so these velocities would be one
+            bead's rather than the centroid's -- a spectrum that looks
+            perfectly reasonable and is wrong.
+        """
+        if hasattr(simulation.integrator, "getNumCopies"):
+            raise TypeError(
+                "VelocityArchiveReporter cannot record an RPMD run: the "
+                "Context holds one copy, not the centroid; use "
+                "RPMDVelocityReporter"
+            )
+
+    def _sample(self, simulation: app.Simulation, state: openmm.State,
+                ) -> tuple[float, npt.NDArray[np.float64]]:
+        """
+        Take the kept atoms' velocities from the reported state.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+        state : openmm.State
+            State carrying this report's velocities.
+
+        Returns
+        -------
+        time_ps : float
+            Simulation time of the frame, in picoseconds.
+        velocities : numpy.ndarray
+            Velocities of the kept atoms, in nm/ps.
+        """
+        assert self._kept is not None
+        velocities = state.getVelocities(asNumpy=True).value_in_unit(
+            unit.nanometer / unit.picosecond
+        )[self._kept]
+        time_ps = state.getTime().value_in_unit(unit.picosecond)
+        return float(time_ps), np.array(velocities, dtype=np.float64)
+
+
+class RPMDVelocityReporter(_VelocityArchiveBase):
+    """
+    Record centroid (bead-averaged) velocities for correlation functions.
+
+    RPMD approximates a Kubo-transformed correlation function of operators
+    linear in position or momentum by the corresponding centroid correlation
+    function, so the centroid velocities are the raw material for velocity
+    autocorrelation functions and vibrational spectra.  Frames accumulate in
+    memory and are written as one ``.npz`` archive when the reporter is
+    closed, which the ``run_openmm_rpmd_*`` drivers do on exit; read it back
+    with :func:`velocity_autocorrelation` or :func:`vibrational_spectrum`.
+    :class:`VelocityArchiveReporter` writes the identical archive from a
+    classical run, which is the baseline to compare against.
+
+    Record from a thermostat-off run (``apply_thermostat=False``): the PILE
+    thermostat's friction and noise contaminate the very dynamics a
+    correlation function is meant to measure.
+
+    A spectrum from these velocities carries known ring-polymer artifacts:
+    the free ring-polymer spring frequencies contaminate it near and above
+    ``n_beads k_B T / hbar``, and resonances between them and physical modes
+    can split or shift high-frequency peaks (Witt et al., J. Chem. Phys.
+    130, 194510 (2009)).  Read high-frequency features with that in mind.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Path the ``.npz`` archive is written to on close. Nothing is written
+        if no frame was ever recorded.
+    reportInterval : int
+        Interval between recorded frames, in steps. Correlation functions
+        resolve nothing faster than twice this interval times the time step.
+    atom_indices : sequence of int or None, optional
+        Atoms whose centroid velocities are kept. Default is None, which
+        keeps every atom -- for a solvated system that is a lot of memory,
+        since every frame holds ``3 * n_atoms`` doubles until close.
+
+    Raises
+    ------
+    TypeError
+        If *reportInterval* or an atom index is not an integer.
+    ValueError
+        If *reportInterval* is not positive, *atom_indices* is empty,
+        contains a duplicate, or a negative index.
+    """
+
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
+        """
+        Report when the next report is due and what state it needs.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Returns
+        -------
+        tuple
+            ``(steps, positions, velocities, forces, energies)``. No state is
+            requested: the bead velocities come from the integrator instead.
+        """
+        steps = self._reportInterval - simulation.currentStep % self._reportInterval
+        return (steps, False, False, False, False)
+
+    def _check_integrator(self, simulation: app.Simulation) -> None:
+        """
+        Require an RPMD integrator, the only source of bead velocities.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Raises
+        ------
+        TypeError
+            If the Simulation does not use an RPMD-style integrator.
+        """
+        if not hasattr(simulation.integrator, "getNumCopies"):
+            raise TypeError(
+                "RPMDVelocityReporter requires an RPMDIntegrator"
+            )
+
+    def _sample(self, simulation: app.Simulation, state: openmm.State,
+                ) -> tuple[float, npt.NDArray[np.float64]]:
+        """
+        Average the kept atoms' velocities over the beads.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+        state : openmm.State
+            Unused; the bead velocities come from the RPMD integrator.
+
+        Returns
+        -------
+        time_ps : float
+            Simulation time of the frame, in picoseconds.
+        velocities : numpy.ndarray
+            Centroid velocities of the kept atoms, in nm/ps.
+        """
+        assert self._kept is not None
+        integrator = simulation.integrator
+        n_beads = integrator.getNumCopies()
+        time_ps: float | None = None
+        mean_velocities: npt.NDArray[np.float64] | None = None
+        for bead in range(n_beads):
+            bead_state = integrator.getState(bead, getVelocities=True)
+            velocities = bead_state.getVelocities(asNumpy=True).value_in_unit(
+                unit.nanometer / unit.picosecond
+            )[self._kept]
+            if mean_velocities is None:
+                time_ps = bead_state.getTime().value_in_unit(unit.picosecond)
+                mean_velocities = np.array(velocities, dtype=np.float64)
+            else:
+                mean_velocities += velocities
+        assert mean_velocities is not None and time_ps is not None
+        return float(time_ps), mean_velocities / n_beads
+
 def _read_velocity_archive(file: str | os.PathLike[str],
                            ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -3059,7 +3649,8 @@ def _read_velocity_archive(file: str | os.PathLike[str],
     Parameters
     ----------
     file : str or os.PathLike
-        Archive written by :class:`RPMDVelocityReporter`.
+        Archive written by :class:`VelocityArchiveReporter` or
+        :class:`RPMDVelocityReporter`.
 
     Returns
     -------
@@ -3114,10 +3705,10 @@ def _read_velocity_archive(file: str | os.PathLike[str],
     return times, velocities, masses
 
 
-def rpmd_velocity_autocorrelation(file: str | os.PathLike[str], *,
-                                  max_time: unit.Quantity | float | None = None,
-                                  mass_weighted: bool = True,
-                                  ) -> tuple[np.ndarray, np.ndarray]:
+def velocity_autocorrelation(file: str | os.PathLike[str], *,
+                             max_time: unit.Quantity | float | None = None,
+                             mass_weighted: bool = True,
+                             ) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute the centroid velocity autocorrelation function from an archive.
 
@@ -3131,7 +3722,8 @@ def rpmd_velocity_autocorrelation(file: str | os.PathLike[str], *,
     Parameters
     ----------
     file : str or os.PathLike
-        Archive written by :class:`RPMDVelocityReporter`.
+        Archive written by :class:`VelocityArchiveReporter` or
+        :class:`RPMDVelocityReporter`.
     max_time : openmm.unit.Quantity or float or None, optional
         Longest lag to keep. A bare number is read as picoseconds. Long lags
         average few frame pairs and are mostly noise, so a fraction of the
@@ -3154,7 +3746,7 @@ def rpmd_velocity_autocorrelation(file: str | os.PathLike[str], *,
     ------
     ValueError
         If the archive is malformed (see
-        :class:`RPMDVelocityReporter`), or *max_time* is not positive and
+        :class:`VelocityArchiveReporter`), or *max_time* is not positive and
         finite.
     """
     times, velocities, masses = _read_velocity_archive(file)
@@ -3187,10 +3779,10 @@ def rpmd_velocity_autocorrelation(file: str | os.PathLike[str], *,
     return np.arange(n_lags) * dt, vacf
 
 
-def rpmd_vibrational_spectrum(file: str | os.PathLike[str], *,
-                              window: Literal["hann", "none"] = "hann",
-                              max_time: unit.Quantity | float | None = None,
-                              ) -> tuple[np.ndarray, np.ndarray]:
+def vibrational_spectrum(file: str | os.PathLike[str], *,
+                         window: Literal["hann", "none"] = "hann",
+                         max_time: unit.Quantity | float | None = None,
+                         ) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute a vibrational density of states from a velocity archive.
 
@@ -3200,16 +3792,11 @@ def rpmd_vibrational_spectrum(file: str | os.PathLike[str], *,
     the intensity is in dalton nm^2/ps, proportional to the vibrational
     density of states, and only relative heights are meaningful.
 
-    Thermostat-off ring-polymer spectra carry known artifacts: the free
-    ring-polymer spring frequencies contaminate the spectrum near and above
-    ``n_beads k_B T / hbar``, and resonances between them and physical modes
-    can split or shift high-frequency peaks (Witt et al., J. Chem. Phys.
-    130, 194510 (2009)).  Read high-frequency features with that in mind.
-
     Parameters
     ----------
     file : str or os.PathLike
-        Archive written by :class:`RPMDVelocityReporter`.
+        Archive written by :class:`VelocityArchiveReporter` or
+        :class:`RPMDVelocityReporter`.
     window : {"hann", "none"}, optional
         Taper applied to the autocorrelation before transforming. The Hann
         window suppresses the ringing a truncated correlation function
@@ -3231,10 +3818,16 @@ def rpmd_vibrational_spectrum(file: str | os.PathLike[str], *,
     ValueError
         If the archive is malformed, *max_time* is not positive and finite,
         or *window* is not a recognized name.
+
+    Notes
+    -----
+    A ring-polymer archive carries high-frequency artifacts a classical one
+    does not; see :class:`RPMDVelocityReporter` for what they are and where
+    they sit.
     """
     if window not in ("hann", "none"):
         raise ValueError(f"unknown window {window!r}; use 'hann' or 'none'")
-    times, vacf = rpmd_velocity_autocorrelation(
+    times, vacf = velocity_autocorrelation(
         file,
         max_time=max_time,
         mass_weighted=True,

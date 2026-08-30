@@ -212,7 +212,7 @@ def run_rpmd_spectrum() -> None:
                              output_prefix="rpmd_nve",
                              platform_name=device)
 
-    frequencies, intensities = nqe.rpmd_vibrational_spectrum(
+    frequencies, intensities = nqe.vibrational_spectrum(
         "rpmd_nve_velocities.npz", max_time=2.0,
     )
     np.savetxt("spectrum.dat", np.column_stack([frequencies, intensities]),
@@ -223,6 +223,43 @@ def run_rpmd_spectrum() -> None:
 
     nqe.remove_file_pattern("rpmd_ready*")
     nqe.remove_file_pattern("rpmd_nve*")
+
+
+def run_classical_spectrum() -> None:
+    """Take the classical vibrational spectrum a ring-polymer one is read against."""
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField("amber14-all.xml", "amber14/tip3pfb.xml")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+
+    # Weak friction for the same reason RPMD spectra want the thermostat off:
+    # a strong Langevin damps the dynamics the correlation function measures,
+    # broadening every peak. Recording every 4 steps of 0.5 fs resolves up to
+    # ~8300 cm^-1, and the trajectory itself is not wanted at all.
+    nqe.run_openmm_prod(modeller, forcefield,
+                        barostat_freq=None,
+                        gamma=0.05 / unit.picosecond,
+                        time_step=0.5 * unit.femtosecond,
+                        steps=100_000,
+                        n_report=10_000,
+                        trajectory="none",
+                        velocity_record_interval=4,
+                        output_prefix="classical",
+                        platform_name=device)
+
+    # The same two functions read this archive and the ring-polymer one, which
+    # is what makes the comparison like for like.
+    frequencies, intensities = nqe.vibrational_spectrum(
+        "classical_velocities.npz", max_time=2.0,
+    )
+    np.savetxt("classical_spectrum.dat",
+               np.column_stack([frequencies, intensities]),
+               header="frequency(cm^-1)\tintensity(Da nm^2/ps)")
+    strongest = frequencies[np.argsort(intensities)[-5:]]
+    print("five strongest classical bands (cm^-1):",
+          " ".join(f"{value:.0f}" for value in sorted(strongest)))
 
 
 EXAMPLES = {

@@ -64,6 +64,18 @@ These behave the same across every stage:
 `output_prefix`
 : Names every file the stage writes.
 
+`trajectory`
+: Picks the trajectory format — `'pdb'` by default, `'dcd'` or `'xtc'` for
+  anything long, `'none'` for nothing at all. Pass a
+  {class}`~openmmnqe.openmm.TrajectoryOptions` instead of a bare name to set the
+  interval or write only a subset of the atoms. See
+  [](reporters.md#trajectory-formats).
+
+`velocity_record_interval` (with `velocity_atom_indices`)
+: Writes `<prefix>_velocities.npz`, which
+  {func}`~openmmnqe.reporters.vibrational_spectrum` turns into a vibrational
+  density of states. See [](reporters.md#velocities-and-spectra).
+
 `seed`
 : Fixes every random stream the stage draws. See [](#reproducibility).
 

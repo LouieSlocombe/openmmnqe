@@ -36,6 +36,13 @@ trajectory that comes out is the raw material for a reference path:
 :language: python
 ```
 
+The path is returned, so it does not matter which format wrote it — but a
+pulling run is short and frequently reported, which is exactly the case PDB
+handles well, and it is the only format
+{func}`reactiontools.path_from_steered_md` reads unaided. Pass
+`trajectory='dcd'` only if the run is long enough to need it, and then hand
+`<prefix>_topology.pdb` to that function as `top=`.
+
 A `PATHMSD` collective variable aligns each frame against a reference structure
 containing only the atoms that define the path.
 {func}`~openmmnqe.io.save_only_index_atoms` writes exactly that file — the

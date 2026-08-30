@@ -765,6 +765,39 @@ def run_adqtb_verification() -> None:
     nqe.plot_adqtb_fdt_residual(log, filename='adqtb_residual.png')
 
 
+def run_rpmd_binary_trajectory() -> None:
+    """Write the bead and centroid trajectories as XTC rather than PDB."""
+    print(flush=True)
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+
+    # One trajectory per bead is the most expensive output the package has, so
+    # this is where a binary format pays most: 16 beads of PDB text is an
+    # order of magnitude more than 16 of XTC. The atom subset keeps the
+    # solute and drops the water, which is the larger saving of the two.
+    solute = [atom.index for atom in modeller.topology.atoms()
+              if atom.residue.name not in ("HOH", "WAT")]
+    trajectory = nqe.TrajectoryOptions("xtc", atom_indices=solute)
+
+    nqe.run_openmm_rpmd_equilibration(modeller, forcefield, n_beads=16,
+                                      output_prefix="rpmd_ready",
+                                      trajectory=trajectory,
+                                      platform_name=device)
+    nqe.run_openmm_rpmd_prod(modeller, forcefield, n_beads=16,
+                             steps=50_000,
+                             n_report=1_000,
+                             output_prefix="rpmd_prod",
+                             trajectory=trajectory,
+                             platform_name=device)
+
+    # XTC carries no topology, so every stage that writes one also writes
+    # <prefix>_topology.pdb -- matching the subset, and written before the run
+    # rather than after it, so a crashed run still leaves a readable pair.
+    print("centroid:  rpmd_prod_centroid.xtc + rpmd_prod_topology.pdb")
+    print("bead 0:    rpmd_prod_bead_0.xtc")
+
+
 EXAMPLES = {
     name.removeprefix("run_"): function
     for name, function in list(globals().items())
