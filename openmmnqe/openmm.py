@@ -60,6 +60,7 @@ from .adqtb import QTBFrictionReporter
 from .reporters import (
     RPMDBeadReporter,
     RPMDCentroidReporter,
+    RPMDKineticDecompositionReporter,
     RPMDQuantumSpreadReporter,
     RPMDThermodynamicReporter,
     RPMDVelocityReporter,
@@ -915,6 +916,7 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
                         distance_pairs: Iterable[tuple[int, int]] | None = None,
                         velocity_record_interval: int | None = None,
                         velocity_atom_indices: Sequence[int] | None = None,
+                        kinetic_decomposition: bool = False,
                         ) -> None:
     """
     Append the RPMD reporter trio: optional spread, then centroid and beads.
@@ -949,13 +951,20 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
         Atoms whose centroid velocities are recorded. Requires
         *velocity_record_interval*. Default is None, which records every
         atom.
+    kinetic_decomposition : bool, optional
+        If True, also attach an
+        :class:`~openmmnqe.reporters.RPMDKineticDecompositionReporter`
+        writing per-atom centroid-virial kinetic energies for
+        *atoms_to_watch* to ``<prefix>_kinetic.log``. Requires
+        *atoms_to_watch*. Default is False.
 
     Raises
     ------
     ValueError
         If *distance_pairs* is given without *atoms_to_watch*, or an index
         lies outside *topology*, or *velocity_atom_indices* is given without
-        *velocity_record_interval*.
+        *velocity_record_interval*, or *kinetic_decomposition* is set without
+        *atoms_to_watch*.
 
     Notes
     -----
@@ -968,9 +977,16 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
     Under ring-polymer contraction its estimators use the full, uncontracted
     forces evaluated at each bead, so they describe the full potential rather
     than the contracted one that drives the dynamics.
+
+    The kinetic decomposition is opt-in rather than automatic on
+    *atoms_to_watch*, because it reads the beads a second time: turning it on
+    for every caller of that argument would quietly double the per-report
+    cost of a run that only wanted the spread log.
     """
     if distance_pairs is not None and atoms_to_watch is None:
         raise ValueError("distance_pairs require atoms_to_watch")
+    if kinetic_decomposition and atoms_to_watch is None:
+        raise ValueError("kinetic_decomposition requires atoms_to_watch")
     if atoms_to_watch is not None:
         atoms_to_watch, distance_pairs = _validate_observable_indices(
             atoms_to_watch,
@@ -984,6 +1000,12 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
             metric=expansion_metric,
             distance_pairs=distance_pairs,
         ))
+        if kinetic_decomposition:
+            simulation.reporters.append(RPMDKineticDecompositionReporter(
+                file=f'{output_prefix}_kinetic.log',
+                reportInterval=n_report,
+                atom_indices=atoms_to_watch,
+            ))
 
     simulation.reporters.append(RPMDCentroidReporter(
         topology=topology,
@@ -2561,6 +2583,7 @@ def run_openmm_rpmd_equilibration(
         seed: int | None = None,
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+        kinetic_decomposition: bool = False,
 ) -> None:
     """
     Equilibrate a ring-polymer molecular dynamics (RPMD) simulation.
@@ -2621,6 +2644,13 @@ def run_openmm_rpmd_equilibration(
     distance_pairs_to_watch : iterable of pair of int or None, optional
         Atom pairs whose centroid distances are written alongside the spread
         values. Requires *atoms_to_watch*. Default is None.
+    kinetic_decomposition : bool, optional
+        If True, also log the per-atom centroid-virial kinetic energy of
+        *atoms_to_watch* to ``<output_prefix>_kinetic.log``, which
+        :func:`~openmmnqe.isotopes.rpmd_isotope_free_energy` integrates over
+        mass into an equilibrium isotope effect. Reads the beads a second
+        time per report, so it is opt-in. Requires *atoms_to_watch*. Default
+        is False.
     """
     initialization_seed, thermostat_seed = _derive_seeds(
         seed, "initialization", "thermostat"
@@ -2644,6 +2674,7 @@ def run_openmm_rpmd_equilibration(
             atoms_to_watch,
             expansion_metric=expansion_metric,
             distance_pairs=distance_pairs_to_watch,
+            kinetic_decomposition=kinetic_decomposition,
         )
         _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
@@ -2706,6 +2737,7 @@ def run_openmm_rpmd_contracted(
         calculator: Any = None,
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+        kinetic_decomposition: bool = False,
         seed: int | None = None,
         apply_thermostat: bool = True,
 ) -> None:
@@ -2775,6 +2807,13 @@ def run_openmm_rpmd_contracted(
     distance_pairs_to_watch : iterable of pair of int or None, optional
         Atom pairs whose centroid distances are written alongside the spread
         values. Requires *atoms_to_watch*. Default is None.
+    kinetic_decomposition : bool, optional
+        If True, also log the per-atom centroid-virial kinetic energy of
+        *atoms_to_watch* to ``<output_prefix>_kinetic.log``, which
+        :func:`~openmmnqe.isotopes.rpmd_isotope_free_energy` integrates over
+        mass into an equilibrium isotope effect. Reads the beads a second
+        time per report, so it is opt-in. Requires *atoms_to_watch*. Default
+        is False.
     seed : int or None, optional
         Master random seed. A value derives independent deterministic streams
         for the PILE thermostat and the barostat's volume moves, making the
@@ -2875,6 +2914,7 @@ def run_openmm_rpmd_contracted(
             atoms_to_watch,
             expansion_metric=expansion_metric,
             distance_pairs=distance_pairs_to_watch,
+            kinetic_decomposition=kinetic_decomposition,
         )
 
         _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
@@ -2920,6 +2960,7 @@ def run_openmm_rpmd_prod(
         calculator: Any = None,
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
+        kinetic_decomposition: bool = False,
         seed: int | None = None,
         apply_thermostat: bool = True,
         snapshot_interval: int | None = None,
@@ -2990,6 +3031,13 @@ def run_openmm_rpmd_prod(
     distance_pairs_to_watch : iterable of pair of int or None, optional
         Atom pairs whose centroid distances are written alongside the spread
         values. Requires *atoms_to_watch*. Default is None.
+    kinetic_decomposition : bool, optional
+        If True, also log the per-atom centroid-virial kinetic energy of
+        *atoms_to_watch* to ``<output_prefix>_kinetic.log``, which
+        :func:`~openmmnqe.isotopes.rpmd_isotope_free_energy` integrates over
+        mass into an equilibrium isotope effect. Reads the beads a second
+        time per report, so it is opt-in. Requires *atoms_to_watch*. Default
+        is False.
     seed : int or None, optional
         Master random seed. A value derives independent deterministic streams
         for the PILE thermostat and the barostat's volume moves, making the
@@ -3099,6 +3147,7 @@ def run_openmm_rpmd_prod(
             distance_pairs=distance_pairs_to_watch,
             velocity_record_interval=velocity_record_interval,
             velocity_atom_indices=velocity_atom_indices,
+            kinetic_decomposition=kinetic_decomposition,
         )
 
         _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
