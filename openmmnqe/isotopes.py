@@ -133,7 +133,7 @@ def _as_kilojoule_array(values: Any, *, name: str, length: int,
 
     Parameters
     ----------
-    values : array_like or openmm.unit.Quantity or float
+    values : array-like or openmm.unit.Quantity or float
         Energies, either as bare numbers in kJ/mol or carrying units. A
         scalar is broadcast to *length*.
     name : str
@@ -292,12 +292,12 @@ def rpmd_isotope_free_energy(nodes: MassIntegrationNodes,
     ----------
     nodes : MassIntegrationNodes
         The quadrature the trajectories were run at.
-    kinetic_energies : array_like or openmm.unit.Quantity
+    kinetic_energies : array-like or openmm.unit.Quantity
         Mean centroid-virial kinetic energy at each node, summed over every
         substituted atom, in kJ/mol. One entry per node.
     temperature : openmm.unit.Quantity or float
         Simulation temperature. A bare number is read as kelvin.
-    kinetic_stderr : array_like or openmm.unit.Quantity or float, optional
+    kinetic_stderr : array-like or openmm.unit.Quantity or float, optional
         Standard error of each entry of *kinetic_energies*, in kJ/mol. A
         single number applies to every node. Default is 0.0.
     n_substituted : int, optional

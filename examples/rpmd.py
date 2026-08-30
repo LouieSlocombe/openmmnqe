@@ -416,6 +416,148 @@ def run_rpmd_thermodynamic_reporter() -> None:
     nqe.remove_file('rpmd-thermodynamics.png')
 
 
+def _flexible_peptide_rpmd(n_beads: int = 32,
+                           substituted_mass: unit.Quantity | None = None,
+                           ) -> tuple[app.Simulation, list[int]]:
+    """
+    Build a flexible peptide RPMD simulation and pick out two hydrogens.
+
+    With *substituted_mass* those two carry that mass instead of hydrogen's,
+    set before the Context exists so the beads are seeded at the right mass.
+    """
+    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
+    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
+
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    has_box = modeller.topology.getUnitCellDimensions() is not None
+    system = forcefield.createSystem(
+        modeller.topology,
+        nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
+        nonbondedCutoff=1.0 * unit.nanometer,
+        # The centroid-virial estimator needs unconstrained forces, so the
+        # beads run fully flexible rather than with rigid bonds or water.
+        constraints=None,
+        rigidWater=False,
+        removeCMMotion=True,
+        hydrogenMass=None,
+    )
+
+    atoms = [
+        atom.index
+        for atom in modeller.topology.atoms()
+        if atom.element is app.element.hydrogen
+    ][:2]
+    if substituted_mass is not None:
+        for atom in atoms:
+            system.setParticleMass(atom, substituted_mass)
+
+    integrator = openmm.RPMDIntegrator(n_beads,
+                                       300.0 * unit.kelvin,
+                                       1.0 / unit.picosecond,
+                                       0.5 * unit.femtosecond)
+    platform = openmm.Platform.getPlatformByName(device)
+    simulation = app.Simulation(modeller.topology, system, integrator, platform)
+    nqe.init_beads(modeller, simulation, n_beads)
+    return simulation, atoms
+
+
+def run_rpmd_kinetic_decomposition() -> None:
+    """Log per-atom quantum kinetic energies, then average and plot them."""
+    print(flush=True)
+    simulation, atoms = _flexible_peptide_rpmd()
+
+    simulation.reporters.append(nqe.RPMDKineticDecompositionReporter(
+        file="kinetic.log",
+        reportInterval=10,
+        atom_indices=atoms,
+        names=["H1", "H2"],
+    ))
+
+    nqe.step_rpmd(simulation, 500)
+
+    # One reading taken directly, without going through the log. A classical
+    # atom would sit at 3kT/2, which is 3.74 kJ/mol at 300 K.
+    now = nqe.rpmd_kinetic_decomposition(simulation, atoms)
+    for index, kinetic in now.items():
+        print(f"atom {index}: {kinetic}", flush=True)
+
+    averages = nqe.rpmd_kinetic_decomposition_averages(
+        "kinetic.log", discard=0.2,
+    )
+    for name in ("H1", "H2"):
+        mean, error = averages[f"Kcv_{name}(kJ/mol)"]
+        print(f"{name:>4s}  {mean:8.3f} +/- {error:.3f} kJ/mol", flush=True)
+
+    nqe.plot_rpmd_kinetic_decomposition(
+        "kinetic.log",
+        temperature=300.0 * unit.kelvin,
+        filename="rpmd-kinetic.png",
+    )
+
+    nqe.remove_file('kinetic.log')
+    nqe.remove_file('rpmd-kinetic.png')
+
+
+def run_rpmd_isotope_free_energy() -> None:
+    """Integrate over mass for an H-to-D substitution free energy."""
+    print(flush=True)
+    temperature = 300.0 * unit.kelvin
+
+    # Which masses to run at. Not the physical isotope masses: these are the
+    # Gauss-Legendre nodes of the integral over ln(m) between them.
+    plan = nqe.rpmd_mass_integration_nodes(
+        app.element.hydrogen.mass,
+        app.element.deuterium.mass,
+    )
+    print(f"run at: {plan.masses.round(3)} Da", flush=True)
+
+    means, errors = [], []
+    for node, mass in enumerate(plan.masses):
+        # The substituted atoms carry the node mass, on the same potential
+        # energy surface: an isotope substitution changes nothing else.
+        simulation, atoms = _flexible_peptide_rpmd(
+            substituted_mass=mass * unit.dalton,
+        )
+
+        log = f"node_{node}_kinetic.log"
+        simulation.reporters.append(nqe.RPMDKineticDecompositionReporter(
+            file=log,
+            reportInterval=10,
+            atom_indices=atoms,
+            names=["H1", "H2"],
+        ))
+        nqe.step_rpmd(simulation, 500)
+
+        # Both substituted atoms go into one integrand, so n_substituted is 2.
+        averages = nqe.rpmd_kinetic_decomposition_averages(log, discard=0.2)
+        node_means = [averages[f"Kcv_{name}(kJ/mol)"] for name in ("H1", "H2")]
+        means.append(sum(mean for mean, _ in node_means))
+        errors.append(sum(error ** 2 for _, error in node_means) ** 0.5)
+        nqe.remove_file(log)
+
+    result = nqe.rpmd_isotope_free_energy(
+        plan,
+        means,
+        kinetic_stderr=errors,
+        temperature=temperature,
+        n_substituted=2,
+    )
+    print(
+        f"dF(H->D) = {result.free_energy:.3f} "
+        f"+/- {result.free_energy_stderr:.3f} kJ/mol",
+        flush=True,
+    )
+    print(f"excess over classical: {result.free_energy_excess:.3f} kJ/mol",
+          flush=True)
+
+    # Two sites' substitution free energies give their fractionation ratio.
+    ln_alpha, error = nqe.rpmd_fractionation_factor(
+        result, result, temperature=temperature,
+    )
+    print(f"ln(alpha) against itself: {ln_alpha:.3f} +/- {error:.3f}",
+          flush=True)
+
+
 def run_openmm_adqtb() -> None:
     """Run adQTB on a peptide, assigning particle types by element by hand."""
     print(flush=True)
