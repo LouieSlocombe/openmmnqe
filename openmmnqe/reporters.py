@@ -4,10 +4,10 @@ OpenMM's own reporters see only the context, which for an ``RPMDIntegrator``
 holds a single copy of the system rather than the ring polymer.  Anything that
 needs the beads themselves -- their spread, their individual trajectories,
 their centroid, their energies, or their centroid velocities -- has to ask
-the integrator, which is what these five reporters do.  They are attached by
+the integrator, which is what these six reporters do.  They are attached by
 the ``run_openmm_rpmd_*`` drivers in :mod:`openmmnqe.openmm`.
 
-All five follow OpenMM's reporter protocol: ``describeNextReport`` says when
+All six follow OpenMM's reporter protocol: ``describeNextReport`` says when
 the next report is due and what state it needs, and ``report`` writes it.
 Use :func:`track_rpmd_atom_expansion` to attach the quantum-spread reporter
 for one target atom without constructing it directly, and
@@ -26,6 +26,15 @@ Hamiltonian column into a conservation verdict, and
 :class:`RPMDVelocityReporter` with :func:`rpmd_velocity_autocorrelation` and
 :func:`rpmd_vibrational_spectrum` turn recorded centroid velocities into
 Kubo-style correlation functions and vibrational spectra.
+
+:class:`RPMDKineticDecompositionReporter` splits that same centroid-virial
+kinetic energy over individual atoms, which is the diagnostic that says how
+quantum one particular proton is, and -- through
+:func:`~openmmnqe.isotopes.rpmd_isotope_free_energy` -- the integrand of the
+mass thermodynamic integration that gives equilibrium isotope effects.
+:func:`rpmd_kinetic_decomposition` computes it once off any simulation, and
+:func:`rpmd_kinetic_decomposition_averages` and
+:func:`plot_rpmd_kinetic_decomposition` read the log back.
 
 Two obvious quantities are deliberately absent.  A heat capacity would need
 the exact centroid-virial estimator's second-derivative term, which OpenMM
@@ -49,7 +58,12 @@ import numpy.typing as npt
 import openmm.unit as unit
 from openmm import app, openmm
 
-from ._logs import _column_label, _read_reporter_log, _select_log_columns
+from ._logs import (
+    _block_averaged_columns,
+    _column_label,
+    _read_reporter_log,
+    _select_log_columns,
+)
 from ._validation import require_integer, require_positive_finite_scalar_in_unit
 from .tools import _particle_masses_dalton, centroid_positions
 
@@ -1503,6 +1517,11 @@ def rpmd_thermodynamics(simulation: app.Simulation, *,
     centroid-virial estimator is biased for a system with rigid bonds or
     rigid water. Run the beads flexible.
 
+    Only particles with mass contribute to the virial. OpenMM reports the
+    force on a virtual site as well as the shares that force redistributes
+    onto the site's parents, and for an average site the two are identically
+    equal, so counting every row would count the site twice.
+
     Under ring-polymer contraction the forces read back are the full,
     uncontracted ones evaluated at each bead. That is the wanted behaviour --
     the exact estimator applied to the approximate distribution the
@@ -1544,6 +1563,8 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
                                temperature_k: float,
                                dof: int,
                                masses: np.ndarray,
+                               *,
+                               states: _BeadThermodynamicStates | None = None,
                                ) -> dict[str, float]:
     """
     Evaluate the estimators from already-resolved constants.
@@ -1563,6 +1584,11 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
         Degrees of freedom of one copy.
     masses : numpy.ndarray
         Particle masses in daltons, shaped ``(n_particles,)``.
+    states : _BeadThermodynamicStates or None, optional
+        Bead states already read from *integrator*. If None they are read
+        here. Passing them lets a caller that needs the beads for something
+        else share the one pass rather than paying for a second set of force
+        evaluations. Default is None.
 
     Returns
     -------
@@ -1571,11 +1597,20 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
         ``_THERMO_UNITS``.
     """
     n_beads = integrator.getNumCopies()
-    states = _bead_thermodynamic_states(integrator)
+    if states is None:
+        states = _bead_thermodynamic_states(integrator)
     kt = _BOLTZMANN_KJ_PER_MOL_K * temperature_k
 
+    # Only massive particles carry the virial. OpenMM reports a virtual
+    # site's own force as well as the shares it redistributes onto its
+    # parents, so summing every row counts the site twice; for an average
+    # site the two are identically equal. A frozen particle contributes
+    # nothing either way, because its beads never separate.
+    massive = masses > 0.0
     centroid = states.positions.mean(axis=0)
-    virial = float(np.sum((states.positions - centroid) * states.forces))
+    virial = float(np.sum(
+        ((states.positions - centroid) * states.forces)[:, massive, :]
+    ))
     kinetic_centroid_virial = 0.5 * dof * kt - 0.5 * virial / n_beads
 
     potential_mean = float(states.potential.mean())
@@ -1865,34 +1900,48 @@ def rpmd_thermodynamic_averages(file: str | os.PathLike[str], *,
         averages = rpmd_thermodynamic_averages("rpmd_prod_thermo.log", discard=0.1)
         mean, error = averages["E_quantum(kJ/mol)"]
     """
-    blocks = require_integer(blocks, name="blocks", minimum=2)
-    if isinstance(discard, bool) or not isinstance(discard, Real):
-        raise ValueError("discard must be a number in [0, 1)")
-    discard = float(discard)
-    if not np.isfinite(discard) or not 0.0 <= discard < 1.0:
-        raise ValueError("discard must be a number in [0, 1)")
+    return _block_averaged_columns(
+        file,
+        "thermodynamic log",
+        discard=discard,
+        blocks=blocks,
+    )
 
-    header, values = _read_thermodynamic_log(file)
-    retained = values[int(discard * len(values)):]
-    if len(retained) < blocks:
-        raise ValueError(
-            f"thermodynamic log has {len(retained)} rows after discarding, "
-            f"too few for {blocks} blocks"
-        )
 
-    # Drop the leading remainder rather than the trailing one: the tail is the
-    # better-equilibrated end of a trajectory.
-    block_size = len(retained) // blocks
-    retained = retained[len(retained) - block_size * blocks:]
-    block_means = retained.reshape(blocks, block_size, -1).mean(axis=1)
+def _energy_unit_scale(energy_unit: str) -> tuple[float, str]:
+    """
+    Resolve an energy-unit name to its scale factor and axis label.
 
-    means = retained.mean(axis=0)
-    errors = block_means.std(axis=0, ddof=1) / np.sqrt(blocks)
-    return {
-        name: (float(means[index]), float(errors[index]))
-        for index, name in enumerate(header)
-        if name != "Step"
+    Parameters
+    ----------
+    energy_unit : str
+        ``"kilojoule_per_mole"`` or ``"kilocalorie_per_mole"``.
+
+    Returns
+    -------
+    scale : float
+        Factor converting a logged kJ/mol value into *energy_unit*.
+    label : str
+        Compact unit name for an axis label, e.g. ``"kJ/mol"``.
+
+    Raises
+    ------
+    ValueError
+        If *energy_unit* is not one this module plots.
+    """
+    energy_units = {
+        "kilojoule_per_mole": (1.0, "kJ/mol"),
+        "kilocalorie_per_mole": (
+            (1.0 * unit.kilojoule_per_mole).value_in_unit(
+                unit.kilocalorie_per_mole
+            ),
+            "kcal/mol",
+        ),
     }
+    if energy_unit not in energy_units:
+        choices = ", ".join(energy_units)
+        raise ValueError(f"energy_unit must be one of: {choices}")
+    return energy_units[energy_unit]
 
 
 def plot_rpmd_thermodynamics(file: str | os.PathLike[str], *,
@@ -1956,21 +2005,9 @@ def plot_rpmd_thermodynamics(file: str | os.PathLike[str], *,
             "'plot' optional dependency"
         ) from exc
 
-    energy_units = {
-        "kilojoule_per_mole": (1.0, "kJ/mol"),
-        "kilocalorie_per_mole": (
-            (1.0 * unit.kilojoule_per_mole).value_in_unit(
-                unit.kilocalorie_per_mole
-            ),
-            "kcal/mol",
-        ),
-    }
-    if energy_unit not in energy_units:
-        choices = ", ".join(energy_units)
-        raise ValueError(f"energy_unit must be one of: {choices}")
+    scale, unit_label = _energy_unit_scale(energy_unit)
     if x_axis not in {"time", "step"}:
         raise ValueError('x_axis must be one of: step, time')
-    scale, unit_label = energy_units[energy_unit]
 
     header, values = _read_thermodynamic_log(file)
     column_index = {name: index for index, name in enumerate(header)}
@@ -2044,6 +2081,615 @@ def plot_rpmd_thermodynamics(file: str | os.PathLike[str], *,
     if show:
         plt.show()
     return figure, axes
+
+
+def _per_atom_centroid_virial_kinetic(states: _BeadThermodynamicStates,
+                                      temperature_k: float,
+                                      masses: npt.NDArray[np.float64],
+                                      ) -> npt.NDArray[np.float64]:
+    """
+    Decompose the centroid-virial kinetic energy over particles.
+
+    The system estimator in :func:`_rpmd_thermodynamic_values` collapses the
+    virial to a scalar. Keeping the particle axis instead costs nothing --
+    the same bead states, one fewer axis summed -- and gives each particle's
+    own quantum kinetic energy.
+
+    Parameters
+    ----------
+    states : _BeadThermodynamicStates
+        Bead positions and forces, as read by
+        :func:`_bead_thermodynamic_states`.
+    temperature_k : float
+        Sampling temperature in kelvin.
+    masses : numpy.ndarray
+        Particle masses in daltons, shaped ``(n_particles,)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Per-particle kinetic energy in kJ/mol, shaped ``(n_particles,)``,
+        with NaN wherever the mass is zero.
+
+    Notes
+    -----
+    The free-particle term is ``3 kT / 2`` per particle, not the system
+    ``d kT / 2`` divided up: three degrees of freedom belong to each
+    particle, and there is no non-arbitrary way to share out the constraint
+    and centre-of-mass reductions that ``d`` carries.  Massless rows are NaN
+    rather than zero so that summing them is loud rather than quietly wrong.
+    """
+    n_beads = states.positions.shape[0]
+    kt = _BOLTZMANN_KJ_PER_MOL_K * temperature_k
+
+    centroid = states.positions.mean(axis=0)
+    virial = np.sum((states.positions - centroid) * states.forces, axis=(0, 2))
+    kinetic = 1.5 * kt - 0.5 * virial / n_beads
+    kinetic[masses <= 0.0] = np.nan
+    return kinetic
+
+
+def _resolve_decomposition_atoms(atom_indices: Iterable[int] | None,
+                                 masses: npt.NDArray[np.float64],
+                                 ) -> list[int]:
+    """
+    Normalise an atom selection for the kinetic decomposition.
+
+    Parameters
+    ----------
+    atom_indices : iterable of int or None
+        Atoms wanted. None selects every particle that has mass.
+    masses : numpy.ndarray
+        Particle masses in daltons, shaped ``(n_particles,)``.
+
+    Returns
+    -------
+    list of int
+        The selected indices, as plain ints.
+
+    Raises
+    ------
+    ValueError
+        If a requested index is outside the System, a requested particle is
+        massless, or the System has no massive particles at all.
+    TypeError
+        If any index is not an integer.
+    """
+    n_particles = len(masses)
+    if atom_indices is None:
+        selected = [
+            index for index in range(n_particles) if masses[index] > 0.0
+        ]
+        if not selected:
+            raise ValueError(
+                "System has no particles with mass to decompose"
+            )
+        return selected
+
+    selected = _validate_atom_indices(atom_indices)
+    outside = [index for index in selected if index >= n_particles]
+    if outside:
+        raise ValueError(
+            f"atom index {outside[0]} is outside System with "
+            f"{n_particles} particles"
+        )
+    massless = [index for index in selected if masses[index] <= 0.0]
+    if massless:
+        raise ValueError(
+            f"atom {massless[0]} has zero mass; a virtual site has no "
+            "kinetic energy to decompose"
+        )
+    return selected
+
+
+def rpmd_kinetic_decomposition(simulation: app.Simulation,
+                               atom_indices: Iterable[int] | None = None,
+                               *,
+                               temperature: unit.Quantity | float | None = None,
+                               ) -> dict[int, unit.Quantity]:
+    r"""
+    Split the centroid-virial kinetic energy over individual atoms.
+
+    :func:`rpmd_thermodynamics` reports one number for the whole system. The
+    same bead pass answers the question a ring-polymer run is usually kept
+    for -- *how quantum is this particular proton* -- one atom at a time:
+
+    .. math::
+
+        K_i = \frac{3}{2\beta} - \frac{1}{2P}\sum_{j=1}^{P}
+              \left(\mathbf{r}_i^{(j)}-\bar{\mathbf{r}}_i\right)
+              \cdot\mathbf{F}_i^{(j)}
+
+    with ``P`` the bead count, ``r_i^(j)`` atom ``i`` in bead ``j`` and
+    ``r_bar_i`` its ring-polymer centroid.  A classical atom sits at
+    ``3 kT / 2``; a quantum one sits above it, and a light atom in a stiff
+    bond sits far above it.
+
+    Parameters
+    ----------
+    simulation : openmm.app.Simulation
+        A simulation driven by an ``openmm.RPMDIntegrator``.
+    atom_indices : iterable of int or None, optional
+        Atoms to report. Default is None, which reports every particle that
+        has mass.
+    temperature : openmm.unit.Quantity or float or None, optional
+        Sampling temperature. A bare number is read as kelvin. Default is
+        None, which reads the integrator's setpoint.
+
+    Returns
+    -------
+    dict of int to openmm.unit.Quantity
+        ``{atom index: kinetic energy}``, in kJ/mol.
+
+    Raises
+    ------
+    ValueError
+        If *temperature* is not finite and positive, an index is outside the
+        System, or a selected particle is massless.
+    TypeError
+        If any index is not an integer.
+
+    See Also
+    --------
+    rpmd_thermodynamics : The system totals this decomposes.
+    RPMDKineticDecompositionReporter : Log this along a trajectory.
+
+    Notes
+    -----
+    The per-atom free-particle term is ``3 kT / 2``, so summing over every
+    massive particle does not in general reproduce the ``KE_cv`` column,
+    which uses the system degree-of-freedom count:
+
+    .. math::
+
+        \sum_i K_i = K_{cv}
+                   + \left(N_{c} + 3 n_{\mathrm{CMM}}\right)\frac{kT}{2}
+
+    with ``N_c`` the number of constraints and ``n_CMM`` one if the System
+    carries a ``CMMotionRemover``.  The two agree exactly for a flexible
+    System with no centre-of-mass removal, which is the only case where the
+    estimator is unbiased anyway: ``getForces`` omits constraint forces.
+
+    Examples
+    --------
+    Compare a proton against the heavy atom it is bonded to::
+
+        from openmmnqe import rpmd_kinetic_decomposition
+
+        kinetic = rpmd_kinetic_decomposition(simulation, [proton, donor])
+        print(kinetic[proton], kinetic[donor])
+    """
+    integrator = simulation.integrator
+    if temperature is None:
+        temperature = integrator.getTemperature()
+    temperature_k = require_positive_finite_scalar_in_unit(
+        temperature,
+        unit.kelvin,
+        name="temperature",
+    )
+    masses = _particle_masses_dalton(simulation.system)
+    selected = _resolve_decomposition_atoms(atom_indices, masses)
+
+    states = _bead_thermodynamic_states(integrator)
+    kinetic = _per_atom_centroid_virial_kinetic(states, temperature_k, masses)
+    return {
+        index: float(kinetic[index]) * unit.kilojoule_per_mole
+        for index in selected
+    }
+
+
+class RPMDKineticDecompositionReporter:
+    """
+    Log per-atom centroid-virial kinetic energies during an RPMD simulation.
+
+    One ``Kcv_<name>(kJ/mol)`` column is written per selected atom, after the
+    step and simulation time.  The quantity is the one described by
+    :func:`rpmd_kinetic_decomposition`: a classical atom sits at ``3 kT / 2``
+    and a quantum one above it, so the column read against that reference is
+    a direct measure of how much nuclear quantum character an atom carries.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Path to write the log to.
+    reportInterval : int
+        Interval between reports, in steps.
+    atom_indices : iterable of int
+        Atoms to report, e.g. the transferring proton and its donor. A
+        selection is required: one column per atom of a solvated System is
+        not a usable file.
+    names : list of str or None, optional
+        Column names, one per atom, e.g. ``["H1", "Donor_N"]``. If None, the
+        atom indices are used. Default is None.
+    temperature : openmm.unit.Quantity or float or None, optional
+        Sampling temperature. A bare number is read as kelvin. Default is
+        None, which re-reads the integrator's setpoint at every report and so
+        follows a temperature ramp.
+
+    Raises
+    ------
+    ValueError
+        If *reportInterval* is below 1, the selection is empty or negative,
+        *names* does not match the selection, the column names collide, or
+        *temperature* is not finite and positive.
+    TypeError
+        If *reportInterval* or any index is not an integer.
+
+    See Also
+    --------
+    RPMDThermodynamicReporter : The system totals this decomposes.
+
+    Notes
+    -----
+    Every report reads each bead once, with forces, which costs roughly one
+    RPMD step.  Attached alongside :class:`RPMDThermodynamicReporter` a due
+    step therefore costs two bead passes rather than one.  At the drivers'
+    default reporting interval of 1000 steps that is a fraction of a percent
+    either way; at the interval of ten or so that per-atom statistics want,
+    it is the difference between a tenth and a fifth of the run.  Give the
+    thermodynamic reporter the coarser interval of the two -- drift and
+    thermostat health need far fewer samples than a per-atom estimator does.
+
+    Like every centroid-virial estimator here, this one is biased by
+    constraints, because ``getForces`` omits constraint forces.  A selected
+    particle must have mass; a virtual site has no kinetic energy to
+    decompose and is rejected at the first report, once the System is known.
+    """
+
+    def __init__(self, file: str | os.PathLike[str], reportInterval: int,
+                 atom_indices: Iterable[int],
+                 names: Sequence[str] | None = None,
+                 temperature: unit.Quantity | float | None = None) -> None:
+        report_interval = require_integer(
+            reportInterval,
+            name="reportInterval",
+            minimum=1,
+        )
+        atom_indices = _validate_atom_indices(atom_indices)
+        if names is not None and len(names) != len(atom_indices):
+            raise ValueError("names must contain one entry per atom index")
+        if temperature is not None:
+            require_positive_finite_scalar_in_unit(
+                temperature, unit.kelvin, name="temperature",
+            )
+        self._reportInterval = report_interval
+        self._atom_indices = atom_indices
+        self._temperature = temperature
+        self._masses: np.ndarray | None = None
+
+        if names:
+            columns = [f"Kcv_{name}(kJ/mol)" for name in names]
+        else:
+            columns = [
+                f"Kcv_Atom{index}(kJ/mol)" for index in atom_indices
+            ]
+        if len(set(columns)) != len(columns):
+            raise ValueError("reporter column names must be unique")
+        header = "Step\tTime(ps)\t" + "\t".join(columns)
+        self._out = open(file, "w")
+        self._out.write(header + "\n")
+
+    def _prepare(self, simulation: app.Simulation) -> None:
+        """
+        Read and check the particle masses once, at the first report.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Raises
+        ------
+        ValueError
+            If a selected index is outside the System or names a massless
+            particle.
+
+        Warns
+        -----
+        UserWarning
+            If the System is constrained, because the estimator is then
+            biased.
+        """
+        if self._masses is not None:
+            return
+
+        system = simulation.system
+        masses = _particle_masses_dalton(system)
+        _resolve_decomposition_atoms(self._atom_indices, masses)
+
+        if system.getNumConstraints() > 0:
+            warnings.warn(
+                "centroid-virial kinetic energy is biased by constraints: "
+                "OpenMM's forces omit constraint forces, so run the ring "
+                "polymer flexible if the reported energies are to be trusted",
+                UserWarning,
+                stacklevel=2,
+            )
+        self._masses = masses
+
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
+        """
+        Report when the next report is due and what state it needs.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Returns
+        -------
+        tuple
+            ``(steps, positions, velocities, forces, energies)``. No state is
+            requested: the beads come from the integrator instead.
+        """
+        steps = self._reportInterval - simulation.currentStep % self._reportInterval
+        return (steps, False, False, False, False)
+
+    def report(self, simulation: app.Simulation, state: openmm.State) -> None:
+        """
+        Write one row of per-atom kinetic energies.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+        state : openmm.State
+            Unused; the beads come from the RPMD integrator.
+        """
+        self._prepare(simulation)
+        assert self._masses is not None
+
+        temperature = self._temperature
+        if temperature is None:
+            temperature = simulation.integrator.getTemperature()
+        temperature_k = require_positive_finite_scalar_in_unit(
+            temperature,
+            unit.kelvin,
+            name="temperature",
+        )
+        states = _bead_thermodynamic_states(simulation.integrator)
+        kinetic = _per_atom_centroid_virial_kinetic(
+            states, temperature_k, self._masses,
+        )
+
+        line = f"{simulation.currentStep}\t{states.time:.6f}"
+        for index in self._atom_indices:
+            line += f"\t{kinetic[index]:.6f}"
+        self._out.write(line + "\n")
+        self._out.flush()
+
+    def close(self) -> None:
+        """Close the output file, safely allowing repeated calls."""
+        out = getattr(self, "_out", None)
+        if out is not None and not out.closed:
+            out.close()
+
+    def __enter__(self) -> Self:
+        """Return this reporter for use as a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the output file when leaving a context."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort fallback for callers that did not close the reporter."""
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def _read_kinetic_decomposition_log(file: str | os.PathLike[str],
+                                    ) -> tuple[list[str], np.ndarray]:
+    """
+    Read a tab-separated per-atom kinetic-energy log.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log written by :class:`RPMDKineticDecompositionReporter`.
+
+    Returns
+    -------
+    header : list of str
+        Column names, the first of which is ``"Step"``.
+    values : numpy.ndarray
+        Row values, shaped ``(n_rows, len(header))``.
+
+    Raises
+    ------
+    ValueError
+        If the header is malformed or duplicated, the file holds no data
+        rows, or a row does not match the header.
+    """
+    return _read_reporter_log(file, "kinetic decomposition log")
+
+
+def rpmd_kinetic_decomposition_averages(file: str | os.PathLike[str], *,
+                                        discard: float = 0.0,
+                                        blocks: int = 5,
+                                        ) -> dict[str, tuple[float, float]]:
+    """
+    Average a per-atom kinetic-energy log, with block standard errors.
+
+    The errors are block-averaged for the reason set out in
+    :func:`rpmd_thermodynamic_averages`: consecutive samples are correlated,
+    so ``std / sqrt(n)`` understates the uncertainty.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log written by :class:`RPMDKineticDecompositionReporter`.
+    discard : float, optional
+        Leading fraction of the rows to drop as equilibration, in ``[0, 1)``.
+        Default is 0.0.
+    blocks : int, optional
+        Number of blocks the retained rows are split into. Default is 5.
+
+    Returns
+    -------
+    dict of str to tuple of float
+        ``{column: (mean, standard_error)}`` for every column but ``"Step"``,
+        in the units the column name carries.
+
+    Raises
+    ------
+    ValueError
+        If *discard* is outside ``[0, 1)``, *blocks* is below 2, or too few
+        rows survive to fill the blocks.
+    TypeError
+        If *blocks* is not an integer.
+
+    Examples
+    --------
+    Feed a mass-integration node straight from its log::
+
+        from openmmnqe import rpmd_kinetic_decomposition_averages
+
+        averages = rpmd_kinetic_decomposition_averages(
+            "node_0_kinetic.log", discard=0.2,
+        )
+        mean, error = averages["Kcv_H1(kJ/mol)"]
+    """
+    return _block_averaged_columns(
+        file,
+        "kinetic decomposition log",
+        discard=discard,
+        blocks=blocks,
+    )
+
+
+def plot_rpmd_kinetic_decomposition(file: str | os.PathLike[str], *,
+                                    columns: str | Iterable[str] | None = None,
+                                    x_axis: Literal["time", "step"] = "time",
+                                    energy_unit: Literal["kilojoule_per_mole", "kilocalorie_per_mole"] = "kilojoule_per_mole",
+                                    temperature: unit.Quantity | float | None = None,
+                                    filename: str | os.PathLike[str] | None = None,
+                                    show: bool = False) -> tuple[Any, tuple[Any, ...]]:
+    """
+    Plot per-atom kinetic energies against a classical reference.
+
+    One trace per atom, drawn against time or step.  Given *temperature* a
+    dashed line is added at ``3 kT / 2``, the classical equipartition value:
+    the gap between an atom's trace and that line is the quantity the log
+    exists to show.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Tab-separated output from
+        :class:`RPMDKineticDecompositionReporter`.
+    columns : str or iterable of str or None, optional
+        Columns to draw. By default every ``Kcv_`` column is used.
+    x_axis : {"time", "step"}, optional
+        Whether to plot against simulation time or step number. Default is
+        ``"time"``.
+    energy_unit : {"kilojoule_per_mole", "kilocalorie_per_mole"}, optional
+        Unit used for the plotted energies. Logs are stored in kJ/mol.
+        Default is ``"kilojoule_per_mole"``.
+    temperature : openmm.unit.Quantity or float or None, optional
+        If given, draw the classical ``3 kT / 2`` reference at this
+        temperature. A bare number is read as kelvin. Default is None.
+    filename : str or os.PathLike or None, optional
+        If given, save the figure at this path.
+    show : bool, optional
+        Display the figure with Matplotlib. Default is False.
+
+    Returns
+    -------
+    tuple
+        ``(figure, axes)`` where *axes* holds the single kinetic-energy axis.
+
+    Raises
+    ------
+    ImportError
+        If Matplotlib is not installed.
+    ValueError
+        If *x_axis* or *energy_unit* is unknown, a requested column is
+        absent, no column is selected, *temperature* is not finite and
+        positive, or a plotted value is not finite.
+
+    Examples
+    --------
+    Draw a proton against its classical reference::
+
+        from openmmnqe import plot_rpmd_kinetic_decomposition
+
+        plot_rpmd_kinetic_decomposition(
+            "rpmd_prod_kinetic.log",
+            temperature=300.0,
+            filename="kinetic.png",
+        )
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise ImportError(
+            "plot_rpmd_kinetic_decomposition requires matplotlib; install "
+            "the 'plot' optional dependency"
+        ) from exc
+
+    scale, unit_label = _energy_unit_scale(energy_unit)
+    if x_axis not in {"time", "step"}:
+        raise ValueError('x_axis must be one of: step, time')
+    if temperature is not None:
+        temperature_k = require_positive_finite_scalar_in_unit(
+            temperature,
+            unit.kelvin,
+            name="temperature",
+        )
+
+    header, values = _read_kinetic_decomposition_log(file)
+    column_index = {name: index for index, name in enumerate(header)}
+    columns = _select_log_columns(header, columns, ("Kcv_",), "kinetic")
+    if not columns:
+        raise ValueError("kinetic decomposition log contains no Kcv_ columns")
+
+    if x_axis == "time" and "Time(ps)" in column_index:
+        x_values = values[:, column_index["Time(ps)"]]
+        x_label = "Time (ps)"
+    else:
+        x_values = values[:, column_index["Step"]]
+        x_label = "Step"
+
+    selected = [column_index[name] for name in columns]
+    if not np.isfinite(values[:, selected]).all():
+        raise ValueError(
+            "selected kinetic-decomposition values must be finite"
+        )
+
+    figure, axis = plt.subplots(figsize=(6.4, 4.2))
+    for column in columns:
+        axis.plot(
+            x_values,
+            values[:, column_index[column]] * scale,
+            label=_column_label(column),
+        )
+    if temperature is not None:
+        classical = 1.5 * _BOLTZMANN_KJ_PER_MOL_K * temperature_k * scale
+        axis.axhline(
+            classical,
+            linestyle="--",
+            color="0.4",
+            linewidth=1.0,
+            label=f"classical, 3kT/2 at {temperature_k:g} K",
+        )
+    axis.set_ylabel(f"Kinetic energy ({unit_label})")
+    axis.set_xlabel(x_label)
+    axis.legend(frameon=False)
+
+    if filename is not None:
+        figure.savefig(filename, dpi=300, bbox_inches="tight")
+    if show:
+        plt.show()
+    return figure, (axis,)
 
 
 class RPMDEnergyConservation(NamedTuple):

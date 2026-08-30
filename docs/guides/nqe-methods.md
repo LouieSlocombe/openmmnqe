@@ -78,3 +78,53 @@ Because a kinetic isotope effect is a *ratio*, the H and D runs have to be
 identical in every other respect — same seed handling, same bead count, same
 bias. Running them from one script rather than two is the cheap way to
 guarantee that.
+
+### Equilibrium isotope effects without differencing two runs
+
+For an *equilibrium* isotope effect there is a better route than running both
+isotopes and subtracting. The centroid-virial kinetic energy of an atom is the
+exact derivative of the free energy with respect to that atom's log mass,
+
+```{math}
+\frac{\partial F}{\partial \ln m_i} = -\left\langle K_i \right\rangle
+```
+
+so the substitution free energy is an integral of a quantity
+{class}`~openmmnqe.reporters.RPMDKineticDecompositionReporter` already logs:
+
+```{math}
+\Delta F = -\int_{\ln m_\mathrm{light}}^{\ln m_\mathrm{heavy}}
+           \left\langle K \right\rangle_m \, \mathrm{d}\ln m
+```
+
+{func}`~openmmnqe.isotopes.rpmd_mass_integration_nodes` says which masses to run
+at, {func}`~openmmnqe.isotopes.rpmd_isotope_free_energy` combines the averaged
+kinetic energies, and {func}`~openmmnqe.isotopes.rpmd_fractionation_factor`
+turns two sites into their H/D fractionation ratio:
+
+```{literalinclude} ../../examples/rpmd.py
+:pyobject: run_rpmd_isotope_free_energy
+:language: python
+```
+
+What this costs is one short run per quadrature node, at a *fictitious* mass
+between the two isotopes — not one trajectory. For a 3600 cm⁻¹ O–H stretch at
+300 K, where the exact H→D free energy is −18.898 kJ/mol:
+
+| scheme | trajectories | masses (Da) | error (kJ/mol) |
+|---|---|---|---|
+| integrand at the H mass | 1 | 1.008 | **3.46 (18%)** |
+| `nodes=1` | 1 | 1.425 | 0.09 |
+| trapezoid on the endpoints | 2 | 1.008, 2.014 | 0.19 |
+| **`nodes=2`** (the default) | 2 | 1.167, 1.740 | **0.00006** |
+
+Two nodes cost the same as evaluating both endpoints and are some three
+thousand times more accurate, which is why the endpoints are not offered. The
+tempting one-trajectory shortcut — evaluating the integrand only at the
+physical hydrogen mass — is not a free energy at all.
+
+Mass *perturbation*, reweighting a single trajectory from one mass to another,
+is deliberately absent. Mass enters the ring-polymer weight through the
+free-particle normalisation and the spring term rather than as a
+potential-energy difference, and the overlap between the light and heavy
+distributions degrades as the bead count grows.

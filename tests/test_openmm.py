@@ -420,6 +420,93 @@ def test_add_rpmd_reporters_omits_spread_without_atom_selection(monkeypatch: pyt
     ]
 
 
+def test_add_rpmd_reporters_attaches_the_kinetic_decomposition_on_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "RPMDQuantumSpreadReporter",
+        "RPMDCentroidReporter",
+        "RPMDBeadReporter",
+        "RPMDThermodynamicReporter",
+    ):
+        monkeypatch.setattr(
+            nqe_openmm, name, lambda _n=name, **kwargs: (_n, kwargs),
+        )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "RPMDKineticDecompositionReporter",
+        lambda **kwargs: ("kinetic", kwargs),
+    )
+    simulation = SimpleNamespace(reporters=[])
+    topology = SimpleNamespace(getNumAtoms=lambda: 4)
+
+    nqe_openmm._add_rpmd_reporters(
+        simulation,
+        topology,
+        output_prefix="rpmd",
+        n_report=10,
+        n_beads=4,
+        atoms_to_watch=[1, 2],
+        kinetic_decomposition=True,
+    )
+
+    assert [reporter[0] for reporter in simulation.reporters] == [
+        "RPMDQuantumSpreadReporter",
+        "kinetic",
+        "RPMDCentroidReporter",
+        "RPMDBeadReporter",
+        "RPMDThermodynamicReporter",
+    ]
+    assert simulation.reporters[1][1] == {
+        "file": "rpmd_kinetic.log",
+        "reportInterval": 10,
+        "atom_indices": [1, 2],
+    }
+
+
+def test_add_rpmd_reporters_leaves_the_kinetic_decomposition_off_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "RPMDQuantumSpreadReporter",
+        "RPMDCentroidReporter",
+        "RPMDBeadReporter",
+        "RPMDThermodynamicReporter",
+    ):
+        monkeypatch.setattr(
+            nqe_openmm, name, lambda _n=name, **kwargs: (_n, kwargs),
+        )
+    simulation = SimpleNamespace(reporters=[])
+    topology = SimpleNamespace(getNumAtoms=lambda: 4)
+
+    # atoms_to_watch alone must not turn it on: that would double the
+    # per-report bead cost for every caller of the spread log.
+    nqe_openmm._add_rpmd_reporters(
+        simulation, topology, "rpmd", 10, 4, [1, 2],
+    )
+
+    assert "kinetic" not in [reporter[0] for reporter in simulation.reporters]
+
+
+def test_add_rpmd_reporters_requires_atoms_for_the_kinetic_decomposition() -> None:
+    simulation = SimpleNamespace(reporters=[])
+
+    with pytest.raises(
+        ValueError, match="kinetic_decomposition requires atoms_to_watch",
+    ):
+        nqe_openmm._add_rpmd_reporters(
+            simulation,
+            object(),
+            "rpmd",
+            10,
+            4,
+            None,
+            kinetic_decomposition=True,
+        )
+
+    assert simulation.reporters == []
+
+
 def test_add_rpmd_reporters_requires_spread_atoms_for_distances() -> None:
     simulation = SimpleNamespace(reporters=[])
 

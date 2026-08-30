@@ -19,6 +19,7 @@ import openmmnqe.reporters as reporters
 from openmmnqe.reporters import (
     RPMDBeadReporter,
     RPMDCentroidReporter,
+    RPMDKineticDecompositionReporter,
     RPMDQuantumSpreadReporter,
     RPMDThermodynamicReporter,
     _calculate_bead_expansion,
@@ -26,8 +27,11 @@ from openmmnqe.reporters import (
     _read_expansion_log,
     _thermodynamic_degrees_of_freedom,
     plot_rpmd_atom_expansion,
+    plot_rpmd_kinetic_decomposition,
     plot_rpmd_thermodynamics,
     rpmd_energy_conservation,
+    rpmd_kinetic_decomposition,
+    rpmd_kinetic_decomposition_averages,
     rpmd_thermodynamic_averages,
     rpmd_thermodynamics,
     track_rpmd_atom_expansion,
@@ -886,6 +890,67 @@ def test_rpmd_thermodynamics_reads_every_bead_once_without_wrapping() -> None:
     )
 
 
+def _virtual_site_simulation() -> SimpleNamespace:
+    """
+    Two massive particles plus the average site they carry, over two beads.
+
+    Particle 2 is a ``TwoParticleAverageSite(0, 1, 0.25, 0.75)``, so its bead
+    displacement is the same weighted average of its parents'. With the site's
+    own force redistributed onto those parents in the 0.25/0.75 ratio, the
+    site row's virial contribution is identically equal to the parents' --
+    which is exactly why summing every row would double-count it.
+
+    Displacements about the centroid are (-0.1, -0.3, -0.25) nm for bead 0 and
+    the negatives of those for bead 1, so the virial over the massive rows is
+    (0.1 + 0.9) + (0.2 + 1.8) = 3.0 kJ/mol, and over every row 6.0 kJ/mol.
+    """
+    states = [
+        _ThermoState(
+            positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.75, 0.0, 0.0]],
+            velocities=np.zeros((3, 3)),
+            forces=[[-1.0, 0.0, 0.0], [-3.0, 0.0, 0.0], [-4.0, 0.0, 0.0]],
+            potential=1.0,
+            kinetic=5.0,
+        ),
+        _ThermoState(
+            positions=[[0.2, 0.0, 0.0], [1.6, 0.0, 0.0], [1.25, 0.0, 0.0]],
+            velocities=np.zeros((3, 3)),
+            forces=[[2.0, 0.0, 0.0], [6.0, 0.0, 0.0], [8.0, 0.0, 0.0]],
+            potential=3.0,
+            kinetic=7.0,
+        ),
+    ]
+    system = openmm.System()
+    system.addParticle(1.0 * unit.dalton)
+    system.addParticle(1.0 * unit.dalton)
+    system.addParticle(0.0 * unit.dalton)
+    system.setVirtualSite(2, openmm.TwoParticleAverageSite(0, 1, 0.25, 0.75))
+    return SimpleNamespace(
+        integrator=_ThermoIntegrator(states, total_energy=100.0),
+        system=system,
+        currentStep=40,
+    )
+
+
+def test_virtual_site_forces_are_not_double_counted_in_the_virial() -> None:
+    simulation = _virtual_site_simulation()
+
+    values = rpmd_thermodynamics(simulation)
+    kinetic = values["kinetic_centroid_virial"].value_in_unit(
+        unit.kilojoule_per_mole
+    )
+
+    # dof counts the two massive particles only, and the virial over those
+    # rows is 3.0 kJ/mol shared between two beads.
+    kt = _BOLTZMANN * 300.0
+    assert _thermodynamic_degrees_of_freedom(simulation.system) == 6
+    assert kinetic == pytest.approx(0.5 * 6 * kt - 0.75)
+
+    # Summing every row instead would land 0.75 kJ/mol lower, because the
+    # site's contribution exactly repeats its parents'.
+    assert kinetic != pytest.approx(0.5 * 6 * kt - 1.5)
+
+
 def test_rpmd_thermodynamics_honours_temperature_and_dof_overrides() -> None:
     simulation = _hand_built_simulation()
 
@@ -1378,6 +1443,567 @@ def test_thermodynamic_reporter_uses_its_overrides_when_reporting(
             unit.kilojoule_per_mole
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-atom kinetic decomposition
+
+
+def _three_particle_reduced_dof_simulation() -> SimpleNamespace:
+    """
+    Three particles whose dof count is reduced by a constraint and a CMM.
+
+    All three have mass, so ``3 * n_massive`` is 9 while
+    ``_thermodynamic_degrees_of_freedom`` returns ``9 - 1 - 3 = 5``. The
+    per-atom virials are -0.2, -0.8 and -2.1 kJ/mol, summing to -3.1.
+    """
+    states = [
+        _ThermoState(
+            positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            velocities=np.zeros((3, 3)),
+            forces=[[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]],
+            potential=1.0,
+            kinetic=2.0,
+        ),
+        _ThermoState(
+            positions=[[0.2, 0.0, 0.0], [1.4, 0.0, 0.0], [2.6, 0.0, 0.0]],
+            velocities=np.zeros((3, 3)),
+            forces=[[-1.0, 0.0, 0.0], [-2.0, 0.0, 0.0], [-4.0, 0.0, 0.0]],
+            potential=1.0,
+            kinetic=2.0,
+        ),
+    ]
+    system = openmm.System()
+    for _ in range(3):
+        system.addParticle(1.0 * unit.dalton)
+    system.addConstraint(0, 1, 0.1 * unit.nanometer)
+    system.addForce(openmm.CMMotionRemover())
+    return SimpleNamespace(
+        integrator=_ThermoIntegrator(states, total_energy=10.0),
+        system=system,
+        currentStep=0,
+    )
+
+
+def test_kinetic_decomposition_matches_the_hand_computed_virial() -> None:
+    simulation = _hand_built_simulation()
+
+    kinetic = rpmd_kinetic_decomposition(simulation)
+    kt = _BOLTZMANN * 300.0
+
+    # One particle, virial -0.4 shared between two beads.
+    assert set(kinetic) == {0}
+    assert kinetic[0].value_in_unit(unit.kilojoule_per_mole) == pytest.approx(
+        1.5 * kt + 0.1
+    )
+    # dof is 3 here, so the decomposition reproduces the system estimator.
+    system_total = rpmd_thermodynamics(simulation)["kinetic_centroid_virial"]
+    assert kinetic[0].value_in_unit(unit.kilojoule_per_mole) == pytest.approx(
+        system_total.value_in_unit(unit.kilojoule_per_mole)
+    )
+
+
+def test_kinetic_decomposition_sums_to_the_system_estimator_with_a_dof_offset() -> None:
+    simulation = _three_particle_reduced_dof_simulation()
+    kt = _BOLTZMANN * 300.0
+
+    kinetic = rpmd_kinetic_decomposition(simulation)
+    assert set(kinetic) == {0, 1, 2}
+    for index, virial in zip((0, 1, 2), (-0.2, -0.8, -2.1), strict=True):
+        assert kinetic[index].value_in_unit(
+            unit.kilojoule_per_mole
+        ) == pytest.approx(1.5 * kt - 0.25 * virial)
+
+    total = sum(
+        value.value_in_unit(unit.kilojoule_per_mole)
+        for value in kinetic.values()
+    )
+    system_total = rpmd_thermodynamics(simulation)[
+        "kinetic_centroid_virial"
+    ].value_in_unit(unit.kilojoule_per_mole)
+
+    # Three degrees of freedom per atom against the System's five: one
+    # constraint and a CMMotionRemover account for the whole difference.
+    assert _thermodynamic_degrees_of_freedom(simulation.system) == 5
+    assert total - system_total == pytest.approx(
+        (9 - 5) * kt / 2
+    )
+
+
+def test_kinetic_decomposition_reads_every_bead_once_without_wrapping() -> None:
+    simulation = _hand_built_simulation()
+
+    rpmd_kinetic_decomposition(simulation)
+
+    assert len(simulation.integrator.calls) == 2
+    assert all(
+        call == {
+            "getPositions": True,
+            "getVelocities": True,
+            "getForces": True,
+            "getEnergy": True,
+            "enforcePeriodicBox": False,
+        }
+        for call in simulation.integrator.calls
+    )
+
+
+def test_kinetic_decomposition_omits_a_virtual_site() -> None:
+    simulation = _virtual_site_simulation()
+
+    kinetic = rpmd_kinetic_decomposition(simulation)
+
+    assert set(kinetic) == {0, 1}
+    kt = _BOLTZMANN * 300.0
+    # Per-atom virials are (0.1 + 0.2) and (0.9 + 1.8) kJ/mol.
+    assert kinetic[0].value_in_unit(unit.kilojoule_per_mole) == pytest.approx(
+        1.5 * kt - 0.25 * 0.3
+    )
+    assert kinetic[1].value_in_unit(unit.kilojoule_per_mole) == pytest.approx(
+        1.5 * kt - 0.25 * 2.7
+    )
+    # Those two are the whole of KE_cv, because dof is 3 * 2 here.
+    total = sum(
+        value.value_in_unit(unit.kilojoule_per_mole)
+        for value in kinetic.values()
+    )
+    assert total == pytest.approx(
+        rpmd_thermodynamics(simulation)[
+            "kinetic_centroid_virial"
+        ].value_in_unit(unit.kilojoule_per_mole)
+    )
+
+
+def test_kinetic_decomposition_rejects_a_massless_atom() -> None:
+    simulation = _virtual_site_simulation()
+
+    with pytest.raises(ValueError, match="atom 2 has zero mass"):
+        rpmd_kinetic_decomposition(simulation, [0, 2])
+
+
+def test_kinetic_decomposition_rejects_an_out_of_range_atom() -> None:
+    simulation = _hand_built_simulation()
+
+    with pytest.raises(ValueError, match="outside System with 1 particles"):
+        rpmd_kinetic_decomposition(simulation, [0, 5])
+
+
+def test_kinetic_decomposition_rejects_a_massless_system() -> None:
+    simulation = _hand_built_simulation()
+    simulation.system = openmm.System()
+    simulation.system.addParticle(0.0 * unit.dalton)
+
+    with pytest.raises(ValueError, match="no particles with mass"):
+        rpmd_kinetic_decomposition(simulation)
+
+
+@pytest.mark.parametrize("temperature", [0.0, -5.0, float("nan")])
+def test_kinetic_decomposition_rejects_unphysical_temperatures(
+    temperature: float,
+) -> None:
+    simulation = _hand_built_simulation()
+
+    with pytest.raises(ValueError, match="temperature"):
+        rpmd_kinetic_decomposition(simulation, temperature=temperature)
+
+
+def _two_mass_rpmd_simulation(*, n_beads: int, masses: Sequence[float],
+                              force_constant: float,
+                              temperature: float = 300.0,
+                              friction: float = 30.0) -> app.Simulation:
+    """Two non-interacting particles of different mass in one harmonic well."""
+    system = openmm.System()
+    force = openmm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
+    force.addGlobalParameter("k", force_constant)
+    for index, mass in enumerate(masses):
+        system.addParticle(mass * unit.dalton)
+        force.addParticle(index, [])
+    system.addForce(force)
+
+    integrator = openmm.RPMDIntegrator(
+        n_beads,
+        temperature * unit.kelvin,
+        friction / unit.picosecond,
+        0.0005 * unit.picoseconds,
+    )
+    integrator.setRandomNumberSeed(1234)
+    simulation = app.Simulation(
+        _two_atom_topology(),
+        system,
+        integrator,
+        openmm.Platform.getPlatform("Reference"),
+    )
+    generator = np.random.default_rng(5)
+    for bead in range(n_beads):
+        integrator.setPositions(
+            bead,
+            generator.normal(0.0, 0.01, (len(masses), 3)) * unit.nanometer,
+        )
+    return simulation
+
+
+def _exact_harmonic_kinetic(mass: float, force_constant: float, *,
+                            n_beads: int, temperature: float) -> float:
+    """Exact ring-polymer kinetic energy of one 3D harmonic oscillator."""
+    omega = np.sqrt(force_constant / mass)
+    omega_p = n_beads * _BOLTZMANN * temperature / _HBAR
+    omega_k = 2.0 * omega_p * np.sin(np.pi * np.arange(n_beads) / n_beads)
+    beta = 1.0 / (_BOLTZMANN * temperature)
+    return float(
+        3.0 * (omega ** 2 / (2.0 * beta))
+        * np.sum(1.0 / (omega_k ** 2 + omega ** 2))
+    )
+
+
+def test_per_atom_estimator_separates_two_masses_in_one_harmonic_well() -> None:
+    # hbar*omega/kT is about 4 for the light particle, so both are clearly
+    # quantum and the two are clearly apart.
+    n_beads, force_constant, temperature = 8, 25_000.0, 300.0
+    masses = (1.008, 2.014)
+    simulation = _two_mass_rpmd_simulation(
+        n_beads=n_beads,
+        masses=masses,
+        force_constant=force_constant,
+        temperature=temperature,
+    )
+    simulation.integrator.step(4_000)
+
+    light: list[float] = []
+    heavy: list[float] = []
+    for _ in range(300):
+        simulation.integrator.step(20)
+        kinetic = rpmd_kinetic_decomposition(simulation)
+        values = [
+            kinetic[index].value_in_unit(unit.kilojoule_per_mole)
+            for index in (0, 1)
+        ]
+        # The decomposition is an exact identity against the system estimator
+        # here: no constraints, no CMMotionRemover, so dof is 3 * 2.
+        assert sum(values) == pytest.approx(
+            rpmd_thermodynamics(simulation)[
+                "kinetic_centroid_virial"
+            ].value_in_unit(unit.kilojoule_per_mole),
+            rel=1e-9,
+        )
+        light.append(values[0])
+        heavy.append(values[1])
+
+    exact = [
+        _exact_harmonic_kinetic(
+            mass, force_constant, n_beads=n_beads, temperature=temperature,
+        )
+        for mass in masses
+    ]
+    assert np.mean(light) == pytest.approx(exact[0], rel=0.05)
+    assert np.mean(heavy) == pytest.approx(exact[1], rel=0.05)
+    # Each atom is nearer its own exact value than the other's, which the two
+    # exact values being 28% apart makes a real discrimination.
+    assert abs(np.mean(light) - exact[0]) < abs(np.mean(light) - exact[1])
+    assert abs(np.mean(heavy) - exact[1]) < abs(np.mean(heavy) - exact[0])
+
+    # The whole point: the lighter atom is the more quantum one, and both sit
+    # well above the classical equipartition value -- here the proton carries
+    # nearly twice its classical kinetic energy.
+    kt = _BOLTZMANN * temperature
+    assert np.mean(light) > np.mean(heavy) > 1.5 * kt
+    assert np.mean(light) > 1.5 * (1.5 * kt)
+
+
+def test_kinetic_reporter_writes_header_and_values(tmp_path: Path) -> None:
+    simulation = _three_particle_reduced_dof_simulation()
+    simulation.currentStep = 40
+    output = tmp_path / "kinetic.log"
+
+    with RPMDKineticDecompositionReporter(
+        output, 10, [0, 2], names=["H1", "Donor"],
+    ) as reporter:
+        assert reporter.describeNextReport(simulation) == (
+            10,
+            False,
+            False,
+            False,
+            False,
+        )
+        # This fixture is constrained, so the estimator warns before writing.
+        with pytest.warns(UserWarning, match="biased by constraints"):
+            reporter.report(simulation, None)
+
+    lines = output.read_text().splitlines()
+    assert lines[0].split("\t") == [
+        "Step",
+        "Time(ps)",
+        "Kcv_H1(kJ/mol)",
+        "Kcv_Donor(kJ/mol)",
+    ]
+    row = lines[1].split("\t")
+    assert row[0] == "40"
+    assert float(row[1]) == pytest.approx(1.5)
+
+    expected = rpmd_kinetic_decomposition(simulation)
+    for written, index in zip(row[2:], (0, 2), strict=True):
+        assert float(written) == pytest.approx(
+            expected[index].value_in_unit(unit.kilojoule_per_mole),
+            abs=1e-6,
+        )
+
+
+def test_kinetic_reporter_defaults_column_names_to_atom_indices(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "kinetic.log"
+
+    with RPMDKineticDecompositionReporter(output, 10, [0, 2]):
+        pass
+
+    assert output.read_text().splitlines()[0].split("\t")[2:] == [
+        "Kcv_Atom0(kJ/mol)",
+        "Kcv_Atom2(kJ/mol)",
+    ]
+
+
+def test_kinetic_reporter_validates_its_inputs(tmp_path: Path) -> None:
+    output = tmp_path / "kinetic.log"
+
+    with pytest.raises(ValueError, match="atom_indices must not be empty"):
+        RPMDKineticDecompositionReporter(output, 10, [])
+    with pytest.raises(TypeError, match="atom_indices must be integers"):
+        RPMDKineticDecompositionReporter(output, 10, [0.5])
+    with pytest.raises(ValueError, match="names must contain one entry"):
+        RPMDKineticDecompositionReporter(output, 10, [0, 1], names=["only"])
+    with pytest.raises(ValueError, match="column names must be unique"):
+        RPMDKineticDecompositionReporter(
+            output, 10, [0, 1], names=["same", "same"],
+        )
+    with pytest.raises(ValueError, match="temperature"):
+        RPMDKineticDecompositionReporter(output, 10, [0], temperature=-1.0)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("interval", [2.0, True, np.bool_(False)])
+def test_kinetic_reporter_rejects_non_integer_intervals(
+    tmp_path: Path, interval: Any,
+) -> None:
+    with pytest.raises(TypeError, match="must be an integer"):
+        RPMDKineticDecompositionReporter(tmp_path / "kinetic.log", interval, [0])
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("interval", [0, -1])
+def test_kinetic_reporter_rejects_non_positive_intervals(
+    tmp_path: Path, interval: int,
+) -> None:
+    with pytest.raises(ValueError, match="must be a positive"):
+        RPMDKineticDecompositionReporter(tmp_path / "kinetic.log", interval, [0])
+    assert not list(tmp_path.iterdir())
+
+
+def test_kinetic_reporter_warns_once_about_constraints(tmp_path: Path) -> None:
+    simulation = _constrained_simulation()
+
+    with RPMDKineticDecompositionReporter(
+        tmp_path / "kinetic.log", 10, [0],
+    ) as reporter:
+        with pytest.warns(UserWarning, match="biased by constraints"):
+            reporter.report(simulation, None)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            reporter.report(simulation, None)
+
+
+def test_kinetic_reporter_rejects_a_massless_selection_at_first_report(
+    tmp_path: Path,
+) -> None:
+    simulation = _virtual_site_simulation()
+
+    with RPMDKineticDecompositionReporter(
+        tmp_path / "kinetic.log", 10, [2],
+    ) as reporter:
+        with pytest.raises(ValueError, match="atom 2 has zero mass"):
+            reporter.report(simulation, None)
+
+
+def test_kinetic_reporter_follows_the_integrator_temperature(
+    tmp_path: Path,
+) -> None:
+    simulation = _hand_built_simulation()
+    output = tmp_path / "kinetic.log"
+
+    with RPMDKineticDecompositionReporter(output, 10, [0]) as reporter:
+        reporter.report(simulation, None)
+        simulation.integrator._temperature = 600.0 * unit.kelvin
+        reporter.report(simulation, None)
+
+    rows = [
+        line.split("\t") for line in output.read_text().splitlines()[1:]
+    ]
+    # Only the free-particle term moves; the virial contribution is fixed.
+    assert float(rows[1][2]) - float(rows[0][2]) == pytest.approx(
+        1.5 * _BOLTZMANN * 300.0, abs=1e-5
+    )
+
+
+def test_kinetic_reporter_uses_a_fixed_temperature_when_given(
+    tmp_path: Path,
+) -> None:
+    simulation = _hand_built_simulation()
+    output = tmp_path / "kinetic.log"
+
+    with RPMDKineticDecompositionReporter(
+        output, 10, [0], temperature=600 * unit.kelvin,
+    ) as reporter:
+        reporter.report(simulation, None)
+
+    written = float(output.read_text().splitlines()[1].split("\t")[2])
+    assert written == pytest.approx(1.5 * _BOLTZMANN * 600.0 + 0.1, abs=1e-6)
+
+
+def test_kinetic_reporter_close_is_repeatable(tmp_path: Path) -> None:
+    reporter = RPMDKineticDecompositionReporter(
+        tmp_path / "kinetic.log", 10, [0],
+    )
+
+    reporter.close()
+    reporter.close()
+
+
+def _write_kinetic_log(path: Path, rows: int,
+                       names: Sequence[str] = ("H1", "Donor")) -> Path:
+    """Write a kinetic log whose every column ramps with the row index."""
+    columns = ["Time(ps)", *(f"Kcv_{name}(kJ/mol)" for name in names)]
+    lines = ["Step\t" + "\t".join(columns)]
+    for index in range(rows):
+        values = "\t".join(f"{float(index):.6f}" for _ in columns)
+        lines.append(f"{index}\t{values}")
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_kinetic_averages_use_block_standard_errors(tmp_path: Path) -> None:
+    log = _write_kinetic_log(tmp_path / "kinetic.log", rows=20)
+
+    averages = rpmd_kinetic_decomposition_averages(log, blocks=5)
+
+    assert set(averages) == {"Time(ps)", "Kcv_H1(kJ/mol)", "Kcv_Donor(kJ/mol)"}
+    mean, error = averages["Kcv_H1(kJ/mol)"]
+    assert mean == pytest.approx(9.5)
+    block_means = np.array([1.5, 5.5, 9.5, 13.5, 17.5])
+    assert error == pytest.approx(block_means.std(ddof=1) / np.sqrt(5))
+
+
+def test_kinetic_averages_name_their_own_log_in_errors(tmp_path: Path) -> None:
+    log = _write_kinetic_log(tmp_path / "kinetic.log", rows=3)
+
+    with pytest.raises(
+        ValueError, match="kinetic decomposition log has 3 rows",
+    ):
+        rpmd_kinetic_decomposition_averages(log, blocks=5)
+
+
+def test_kinetic_columns_do_not_pollute_thermodynamic_column_selection(
+    tmp_path: Path,
+) -> None:
+    log = _write_kinetic_log(tmp_path / "kinetic.log", rows=8)
+    header = log.read_text().splitlines()[0].split("\t")
+
+    # The Kcv_ prefix is chosen so a kinetic column can never be mistaken for
+    # a thermodynamic energy trace.
+    assert reporters._select_log_columns(
+        header, None, ("KE_", "PE_", "E_"), "energy",
+    ) == []
+    assert reporters._select_log_columns(
+        header, None, ("Kcv_",), "kinetic",
+    ) == ["Kcv_H1(kJ/mol)", "Kcv_Donor(kJ/mol)"]
+
+    thermo = _write_thermodynamic_log(tmp_path / "thermo.log", rows=8)
+    assert set(rpmd_thermodynamic_averages(thermo)) == {
+        column for _, column in reporters._THERMO_COLUMNS
+    }
+
+
+def test_plot_kinetic_decomposition_draws_a_classical_reference(
+    tmp_path: Path,
+) -> None:
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    log = _write_kinetic_log(tmp_path / "kinetic.log", rows=8)
+    output = tmp_path / "kinetic.png"
+
+    figure, axes = plot_rpmd_kinetic_decomposition(
+        log, temperature=300.0, filename=output,
+    )
+
+    assert len(axes) == 1
+    axis = axes[0]
+    assert axis.get_ylabel() == "Kinetic energy (kJ/mol)"
+    assert axis.get_xlabel() == "Time (ps)"
+    labels = [line.get_label() for line in axis.get_lines()]
+    assert labels[:2] == ["H1", "Donor"]
+    assert "classical, 3kT/2" in labels[2]
+    reference = axis.get_lines()[2].get_ydata()
+    assert reference[0] == pytest.approx(1.5 * _BOLTZMANN * 300.0)
+    assert output.exists()
+    matplotlib.pyplot.close(figure)
+
+
+def test_plot_kinetic_decomposition_selects_columns_and_units(
+    tmp_path: Path,
+) -> None:
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    log = _write_kinetic_log(tmp_path / "kinetic.log", rows=8)
+
+    figure, axes = plot_rpmd_kinetic_decomposition(
+        log,
+        columns="Kcv_H1(kJ/mol)",
+        x_axis="step",
+        energy_unit="kilocalorie_per_mole",
+    )
+
+    assert axes[0].get_xlabel() == "Step"
+    assert axes[0].get_ylabel() == "Kinetic energy (kcal/mol)"
+    assert len(axes[0].get_lines()) == 1
+    plotted = axes[0].get_lines()[0].get_ydata()
+    expected = np.arange(8) * (1.0 * unit.kilojoule_per_mole).value_in_unit(
+        unit.kilocalorie_per_mole
+    )
+    assert np.allclose(plotted, expected)
+    matplotlib.pyplot.close(figure)
+
+
+def test_plot_kinetic_decomposition_rejects_bad_options(tmp_path: Path) -> None:
+    pytest.importorskip("matplotlib")
+    log = _write_kinetic_log(tmp_path / "kinetic.log", rows=8)
+
+    with pytest.raises(ValueError, match="energy_unit must be one of"):
+        plot_rpmd_kinetic_decomposition(log, energy_unit="furlongs")
+    with pytest.raises(ValueError, match="x_axis must be one of"):
+        plot_rpmd_kinetic_decomposition(log, x_axis="wallclock")
+    with pytest.raises(ValueError, match="unknown kinetic column"):
+        plot_rpmd_kinetic_decomposition(log, columns="Kcv_missing(kJ/mol)")
+    with pytest.raises(ValueError, match="temperature"):
+        plot_rpmd_kinetic_decomposition(log, temperature=-1.0)
+
+
+def test_plot_kinetic_decomposition_needs_a_kinetic_column(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("matplotlib")
+    log = tmp_path / "kinetic.log"
+    log.write_text("Step\tTime(ps)\n0\t0.0\n1\t0.1\n")
+
+    with pytest.raises(ValueError, match="no Kcv_ columns"):
+        plot_rpmd_kinetic_decomposition(log)
+
+
+def test_plot_kinetic_decomposition_rejects_non_finite_values(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("matplotlib")
+    log = tmp_path / "kinetic.log"
+    log.write_text("Step\tTime(ps)\tKcv_H1(kJ/mol)\n0\t0.0\t1.0\n1\t0.1\tnan\n")
+
+    with pytest.raises(ValueError, match="must be finite"):
+        plot_rpmd_kinetic_decomposition(log)
 
 
 # ---------------------------------------------------------------------------

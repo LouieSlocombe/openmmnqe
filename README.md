@@ -206,6 +206,22 @@ forces omit constraint forces -- the reporter warns, and the fix is to run the
 beads flexible -- and under ring-polymer contraction the estimators describe the
 full potential rather than the contracted one that drives the dynamics.
 
+`nqe.RPMDKineticDecompositionReporter` splits that same `KE_cv` over individual
+atoms, which is the diagnostic that says how quantum one particular proton is: a
+classical atom sits at `3kT/2`, 3.74 kJ/mol at 300 K, and a proton in a stiff
+bond several times above it. Because that per-atom energy is the exact
+derivative of the free energy with respect to log mass, integrating it over mass
+gives an equilibrium isotope effect from a couple of short runs at fictitious
+intermediate masses, rather than from differencing separate H and D
+trajectories -- `nqe.rpmd_mass_integration_nodes` plans the quadrature,
+`nqe.rpmd_isotope_free_energy` combines it, and `nqe.rpmd_fractionation_factor`
+compares two sites.
+
+A third caveat, fixed rather than documented: `getForces` reports a virtual
+site's own force as well as the shares it redistributes onto that site's
+parents, so only particles with mass enter the virial. Summing every row would
+count a TIP4P or Drude site twice.
+
 Heat capacity and pressure are deliberately absent. The centroid-virial heat
 capacity needs second derivatives OpenMM will not supply, and the
 `k_B beta^2 Var(E)` fluctuation formula that looks like a substitute is wrong

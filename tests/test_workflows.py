@@ -716,7 +716,11 @@ def test_rpmd_equilibration_expands_beads_then_restores_full_timestep(
     assert runtime.calls.rpmd_reporters == [
         (
             (simulation, runtime.modeller.topology, "rpmd_ready", 9, 8, [1]),
-            {"expansion_metric": "mean", "distance_pairs": [(0, 1)]},
+            {
+                "expansion_metric": "mean",
+                "distance_pairs": [(0, 1)],
+                "kinetic_decomposition": False,
+            },
         )
     ]
     assert runtime.calls.rpmd_progress_reporters == [
@@ -924,6 +928,30 @@ def test_steered_md_hands_its_seed_to_the_production_stage(
     assert delegated[0]["seed"] == 17
 
 
+def test_rpmd_stages_thread_the_kinetic_decomposition_flag_through(
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    runtime = workflow_runtime
+
+    for stage in (
+        nqe_openmm.run_openmm_rpmd_equilibration,
+        nqe_openmm.run_openmm_rpmd_contracted,
+        nqe_openmm.run_openmm_rpmd_prod,
+    ):
+        stage(
+            runtime.modeller,
+            forcefield=object(),
+            atoms_to_watch=[1],
+            kinetic_decomposition=True,
+        )
+
+    flags = [
+        kwargs["kinetic_decomposition"]
+        for _, kwargs in runtime.calls.rpmd_reporters
+    ]
+    assert flags == [True, True, True]
+
+
 def test_rpmd_production_loads_checkpoint_and_saves_centroid(
     workflow_runtime: SimpleNamespace,
 ) -> None:
@@ -957,6 +985,7 @@ def test_rpmd_production_loads_checkpoint_and_saves_centroid(
                 "distance_pairs": None,
                 "velocity_record_interval": None,
                 "velocity_atom_indices": None,
+                "kinetic_decomposition": False,
             },
         )
     ]
@@ -1043,7 +1072,11 @@ def test_contracted_rpmd_assigns_force_groups_and_default_contractions(
     assert runtime.calls.rpmd_reporters == [
         (
             (simulation, runtime.modeller.topology, "contracted", 1_000, 32, [1]),
-            {"expansion_metric": "mean", "distance_pairs": [(0, 1)]},
+            {
+                "expansion_metric": "mean",
+                "distance_pairs": [(0, 1)],
+                "kinetic_decomposition": False,
+            },
         )
     ]
     assert runtime.calls.rpmd_progress_reporters == [
