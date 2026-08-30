@@ -4,7 +4,9 @@ OpenMM's own reporters see only the `Context`, which for an `RPMDIntegrator`
 holds a single copy of the system rather than the ring polymer. Anything that
 needs the beads themselves — their spread, their individual trajectories, their
 centroid, or their energies — has to ask the integrator. That is what these six
-reporters do, and the `run_openmm_rpmd_*` drivers attach them for you.
+reporters do. The `run_openmm_rpmd_*` drivers attach the first four for you;
+the per-atom kinetic decomposition and the velocity recorder are opt-in,
+because each reads the beads a second time per report.
 
 All six follow OpenMM's reporter protocol: `describeNextReport` says when the
 next report is due and what state it needs, and `report` writes it.
