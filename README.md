@@ -9,7 +9,11 @@ approaches.
 ## Scope
 
 `openmmnqe` covers the simulation itself: the structure edits that get a system ready, the OpenMM stages (minimise,
-heat, NPT, production, RPMD, adQTB), and the reporters that read them back.
+heat, NPT, production, RPMD, adQTB), and the reporters that read them back. The RPMD production stages also run
+thermostat-off (microcanonical) ring-polymer dynamics, and `openmmnqe.rates` builds on that to turn dividing-surface
+snapshots into transmission coefficients and Bennett–Chandler rate constants — the dynamical half of a kinetic
+isotope effect that a free-energy surface alone cannot give (see the
+[rate-dynamics guide](https://openmmnqe.readthedocs.io/en/latest/guides/rate-dynamics.html)).
 
 What sits either side of that lives in two dependencies.
 

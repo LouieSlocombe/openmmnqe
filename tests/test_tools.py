@@ -848,6 +848,21 @@ def test_atom_indices_from_vmd_picks_handles_chains_modes_and_insertions() -> No
     assert nqe.atom_indices_from_vmd_picks(modeller, ["CH41:C1"]) == [3]
 
 
+def test_atom_indices_from_vmd_picks_treats_a_blank_insertion_code_as_none() -> None:
+    # PDB marks "no insertion code" with a blank column, and OpenMM's PDB
+    # reader hands that over as ' ' rather than '' -- truthy, so a naive
+    # `or` keeps the space and no plain pick ever matches a file-read
+    # topology.
+    topology = app.Topology()
+    residue = topology.addResidue(
+        "LIG", topology.addChain("A"), id="1", insertionCode=" "
+    )
+    topology.addAtom("O2", app.Element.getBySymbol("O"), residue)
+    modeller = app.Modeller(topology, [Vec3(0.0, 0.0, 0.0)] * unit.nanometer)
+
+    assert nqe.atom_indices_from_vmd_picks(modeller, ["LIG1:O2"]) == [0]
+
+
 @pytest.mark.parametrize(
     ("pick", "kwargs", "message"),
     [

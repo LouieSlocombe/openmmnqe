@@ -108,6 +108,56 @@ def test_rpmd_stages_run_on_a_prepared_system(one_particle_system: tuple[app.Mod
         assert archive["step_count"].item() == 8
 
 
+def test_thermostat_off_production_conserves_the_ring_polymer_energy(
+    one_particle_system: tuple[app.Modeller, Any],
+) -> None:
+    # apply_thermostat=False must actually change the dynamics -- the run
+    # differs from a thermostatted control -- and must conserve the
+    # ring-polymer Hamiltonian, which the control's Langevin kicks do not.
+    modeller, forcefield = one_particle_system
+    prepared = nqe.PreparedSystem(forcefield.createSystem(modeller.topology))
+
+    nqe.run_openmm_rpmd_equilibration(
+        modeller,
+        prepared,
+        n_beads=2,
+        n_1=2,
+        n_2=3,
+        n_report=50,
+        platform_name="Reference",
+        seed=7,
+    )
+
+    def production(output_prefix: str, apply_thermostat: bool) -> None:
+        nqe.run_openmm_rpmd_prod(
+            modeller,
+            prepared,
+            checkpoint_file="rpmd_ready.chk",
+            output_prefix=output_prefix,
+            n_beads=2,
+            steps=40,
+            n_report=1,
+            time_step=0.5 * unit.femtoseconds,
+            barostat_freq=None,
+            apply_thermostat=apply_thermostat,
+            platform_name="Reference",
+            seed=7,
+        )
+
+    production("nve", apply_thermostat=False)
+    production("nvt", apply_thermostat=True)
+
+    verdict = nqe.rpmd_energy_conservation("nve_thermo.log", temperature=300.0)
+    control = nqe.rpmd_energy_conservation("nvt_thermo.log", temperature=300.0)
+
+    assert verdict.conserved
+    assert control.fluctuation > 10.0 * verdict.fluctuation
+    assert (
+        Path("nve_thermo.log").read_bytes()
+        != Path("nvt_thermo.log").read_bytes()
+    )
+
+
 def test_seeded_production_reproduces_its_trajectory_bit_for_bit(
     one_particle_system: tuple[app.Modeller, Any],
 ) -> None:

@@ -134,6 +134,73 @@ def _sample_maxwell_boltzmann_velocities(system: openmm.System,
     return velocities * (unit.nanometer / unit.picosecond)
 
 
+def sample_rpmd_velocities(system: openmm.System,
+                           temperature: unit.Quantity | float,
+                           n_beads: int,
+                           seed: int | None = None) -> unit.Quantity:
+    """
+    Draw fresh thermal bead velocities for an RPMD ring polymer.
+
+    OpenMM's RPMD Hamiltonian thermalizes each bead at ``n_beads * k_B * T``,
+    so every bead's velocities are drawn with ``sigma = sqrt(n_beads*k_B*T/m)``
+    rather than the classical ``sqrt(k_B*T/m)``.  This is the draw
+    :func:`init_beads` performs internally; it is exposed so momenta can be
+    resampled on an existing ring polymer -- for example to launch independent
+    microcanonical trajectories from one saved configuration.  Apply the
+    result with ``integrator.setVelocities(bead, velocities[bead])`` for each
+    bead.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System whose particle masses set the widths.
+    temperature : openmm.unit.Quantity or float
+        Target temperature. A bare number is read as kelvin.
+    n_beads : int
+        Number of ring-polymer beads.
+    seed : int or None, optional
+        NumPy random seed for the draw. Pass an integer for a reproducible
+        sample. Default is None for entropy-based seeding.
+
+    Returns
+    -------
+    openmm.unit.Quantity
+        Velocities in nm/ps, shaped ``(n_beads, n_particles, 3)``. Massless
+        particles, typically virtual sites, are left at zero.
+
+    Raises
+    ------
+    ValueError
+        If *n_beads* is not a positive integer, *seed* is negative or not an
+        integer, the temperature is not finite and positive, or a particle
+        mass is not finite and non-negative.
+    """
+    if (
+        isinstance(n_beads, (bool, np.bool_))
+        or not isinstance(n_beads, (int, np.integer))
+        or n_beads <= 0
+    ):
+        raise ValueError("n_beads must be a positive integer")
+    n_beads = int(n_beads)
+    if (
+        seed is not None
+        and (
+            isinstance(seed, (bool, np.bool_))
+            or not isinstance(seed, (int, np.integer))
+            or seed < 0
+        )
+    ):
+        raise ValueError("seed must be a non-negative integer or None")
+
+    rng = np.random.default_rng(None if seed is None else int(seed))
+    return _sample_maxwell_boltzmann_velocities(
+        system,
+        temperature,
+        n_beads,
+        rng,
+    )
+
+
 def _sample_free_ring_polymer_displacements(
     masses_amu: npt.ArrayLike,
     temperature: unit.Quantity | float,
@@ -276,6 +343,55 @@ def _particle_masses_dalton(system: openmm.System) -> np.ndarray:
     return masses
 
 
+def _centroid_of_beads(bead_positions_nm: npt.NDArray[np.float64],
+                       box_vectors_nm: npt.NDArray[np.float64] | None,
+                       ) -> npt.NDArray[np.float64]:
+    """
+    Average bead position arrays into a centroid, unwrapping if periodic.
+
+    Parameters
+    ----------
+    bead_positions_nm : numpy.ndarray
+        Bead positions in nanometres, shaped ``(n_beads, n_atoms, 3)``.
+    box_vectors_nm : numpy.ndarray or None
+        Periodic box vectors in nanometres, shaped ``(3, 3)`` in OpenMM's
+        reduced form, or None for a nonperiodic system.
+
+    Returns
+    -------
+    numpy.ndarray
+        Centroid position of each atom in nanometres, shaped
+        ``(n_atoms, 3)``.
+
+    Notes
+    -----
+    With a box, each bead is unwrapped relative to bead 0 via the minimum
+    image of its displacement before averaging -- valid because bead spreads
+    are far smaller than half a box length.
+    """
+    positions = np.asarray(bead_positions_nm, dtype=float)
+    ref = positions[0]
+    sum_pos = ref.copy()
+
+    if box_vectors_nm is not None:
+        box = np.asarray(box_vectors_nm, dtype=float)
+
+    for bead in range(1, positions.shape[0]):
+        pos = positions[bead]
+        if box_vectors_nm is not None:
+            disp = pos - ref
+            # OpenMM box vectors are in reduced form. Remove whole c, b, then
+            # a vectors to obtain the minimum image of each displacement.
+            for axis in (2, 1, 0):
+                disp -= box[axis] * np.round(
+                    disp[:, axis:axis + 1] / box[axis][axis]
+                )
+            pos = ref + disp
+        sum_pos += pos
+
+    return sum_pos / positions.shape[0]
+
+
 def centroid_positions(simulation: app.Simulation, n_atoms: int,
                        n_beads: int) -> unit.Quantity:
     """
@@ -308,30 +424,23 @@ def centroid_positions(simulation: app.Simulation, n_atoms: int,
     ref_state = integrator.getState(
         0, getPositions=True, enforcePeriodicBox=periodic
     )
-    ref = ref_state.getPositions(asNumpy=True).value_in_unit(unit.nanometer)
-    sum_pos = ref.copy()
 
+    box = None
     if periodic:
         box = ref_state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(
             unit.nanometer
         )
 
+    positions = np.empty((n_beads, n_atoms, 3), dtype=float)
+    positions[0] = ref_state.getPositions(asNumpy=True).value_in_unit(
+        unit.nanometer
+    )
     for bead in range(1, n_beads):
-        pos = integrator.getState(
+        positions[bead] = integrator.getState(
             bead, getPositions=True, enforcePeriodicBox=periodic
         ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
-        if periodic:
-            disp = pos - ref
-            # OpenMM box vectors are in reduced form. Remove whole c, b, then
-            # a vectors to obtain the minimum image of each displacement.
-            for axis in (2, 1, 0):
-                disp -= box[axis] * np.round(
-                    disp[:, axis:axis + 1] / box[axis][axis]
-                )
-            pos = ref + disp
-        sum_pos += pos
 
-    centroid = sum_pos / n_beads
+    centroid = _centroid_of_beads(positions, box)
     return [openmm.Vec3(*centroid[i]) for i in range(n_atoms)] * unit.nanometer
 
 
@@ -1004,7 +1113,10 @@ def atom_indices_from_vmd_picks(
     lookup: dict[tuple[str, str, str], list[int]] = {}
     for atom in topo.atoms():
         res = atom.residue
-        residue_pick = f"{res.name}{res.id}{res.insertionCode or ''}"
+        # PDB marks "no insertion code" with a blank column, which OpenMM
+        # hands over as ' ' -- truthy, so it must be stripped, not or'd.
+        insertion = (res.insertionCode or "").strip()
+        residue_pick = f"{res.name}{res.id}{insertion}"
         key = (res.chain.id, residue_pick, atom.name)
         lookup.setdefault(key, []).append(atom.index)
 

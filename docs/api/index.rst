@@ -14,5 +14,6 @@ authoritative list of what is public.
    adqtb
    io
    openmm
+   rates
    reporters
    tools

@@ -27,6 +27,7 @@ from openmmnqe.reporters import (
     _thermodynamic_degrees_of_freedom,
     plot_rpmd_atom_expansion,
     plot_rpmd_thermodynamics,
+    rpmd_energy_conservation,
     rpmd_thermodynamic_averages,
     rpmd_thermodynamics,
     track_rpmd_atom_expansion,
@@ -1377,3 +1378,332 @@ def test_thermodynamic_reporter_uses_its_overrides_when_reporting(
             unit.kilojoule_per_mole
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Energy conservation
+
+
+def _write_energy_log(path: Path, steps: Sequence[int], times: Sequence[float],
+                      energies: Sequence[float]) -> Path:
+    """Write a thermodynamic log whose only meaningful column is E_ring."""
+    header = "Step\t" + "\t".join(
+        column for _, column in reporters._THERMO_COLUMNS
+    )
+    ring_position = [
+        column for _, column in reporters._THERMO_COLUMNS
+    ].index("E_ring(kJ/mol)")
+    lines = [header]
+    for step, time, energy in zip(steps, times, energies, strict=True):
+        values = [0.0] * len(reporters._THERMO_COLUMNS)
+        values[0] = time
+        values[ring_position] = energy
+        lines.append(
+            f"{step}\t" + "\t".join(f"{value:.10g}" for value in values)
+        )
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def test_energy_conservation_flags_a_linear_ramp(tmp_path: Path) -> None:
+    steps = [index * 10 for index in range(10)]
+    times = [step * 1.0e-4 for step in steps]
+    energies = [5.0 + 2000.0 * time for time in times]
+    log = _write_energy_log(tmp_path / "thermo.log", steps, times, energies)
+
+    verdict = rpmd_energy_conservation(log, temperature=300.0)
+
+    assert verdict.drift_rate == pytest.approx(2000.0)
+    assert verdict.drift_per_step == pytest.approx(0.2)
+    assert verdict.total_drift == pytest.approx(2000.0 * 0.009)
+    # A perfect ramp leaves only rounding-noise residuals, so the ratio is
+    # astronomically large and the verdict an unambiguous failure.
+    assert verdict.fluctuation == pytest.approx(0.0, abs=1.0e-9)
+    assert verdict.drift_ratio > 1.0e6
+    assert not verdict.conserved
+    kbt = reporters._BOLTZMANN_KJ_PER_MOL_K * 300.0
+    assert verdict.drift_per_ps_over_kbt == pytest.approx(2000.0 / kbt)
+
+
+def test_energy_conservation_accepts_driftless_oscillation(tmp_path: Path) -> None:
+    # The +0.5, -0.5, -0.5, +0.5 pattern is orthogonal to a linear trend, so
+    # the fitted slope is exactly zero and the RMS residual is exactly 0.5.
+    steps = list(range(12))
+    times = [step * 1.0e-3 for step in steps]
+    pattern = [0.5, -0.5, -0.5, 0.5] * 3
+    energies = [10.0 + offset for offset in pattern]
+    log = _write_energy_log(tmp_path / "thermo.log", steps, times, energies)
+
+    verdict = rpmd_energy_conservation(log, temperature=300.0)
+
+    assert verdict.drift_rate == pytest.approx(0.0, abs=1.0e-9)
+    assert verdict.fluctuation == pytest.approx(0.5)
+    assert verdict.drift_ratio == pytest.approx(0.0, abs=1.0e-9)
+    assert verdict.conserved
+
+
+def test_energy_conservation_discard_drops_the_settling_period(tmp_path: Path) -> None:
+    steps = list(range(20))
+    times = [step * 1.0e-3 for step in steps]
+    # First half a steep ramp, second half the driftless pattern.
+    energies = [50.0 - 4.0 * index for index in range(10)]
+    energies += [10.0 + offset for offset in ([0.5, -0.5, -0.5, 0.5] * 3)[:10]]
+    log = _write_energy_log(tmp_path / "thermo.log", steps, times, energies)
+
+    assert not rpmd_energy_conservation(log, temperature=300.0).conserved
+    assert rpmd_energy_conservation(
+        log, temperature=300.0, discard=0.5,
+    ).conserved
+
+
+def test_energy_conservation_input_validation(tmp_path: Path) -> None:
+    steps = [0, 1, 2, 3]
+    times = [0.0, 0.001, 0.002, 0.003]
+    log = _write_energy_log(
+        tmp_path / "thermo.log", steps, times, [1.0, 1.0, 1.0, 1.0],
+    )
+
+    with pytest.raises(ValueError, match="temperature"):
+        rpmd_energy_conservation(log, temperature=0.0)
+    with pytest.raises(ValueError, match="discard"):
+        rpmd_energy_conservation(log, temperature=300.0, discard=1.5)
+    with pytest.raises(ValueError, match="tolerance"):
+        rpmd_energy_conservation(log, temperature=300.0, tolerance=0.0)
+    with pytest.raises(ValueError, match="at least 3"):
+        rpmd_energy_conservation(log, temperature=300.0, discard=0.6)
+
+    stalled = _write_energy_log(
+        tmp_path / "stalled.log", [0, 0, 0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0],
+    )
+    with pytest.raises(ValueError, match="advance in time"):
+        rpmd_energy_conservation(stalled, temperature=300.0)
+
+    headerless = tmp_path / "short.log"
+    headerless.write_text("Step\tTime(ps)\n0\t0.0\n1\t0.1\n2\t0.2\n")
+    with pytest.raises(ValueError, match="lacks column"):
+        rpmd_energy_conservation(headerless, temperature=300.0)
+
+
+# ---------------------------------------------------------------------------
+# Velocity recording and correlation functions
+
+
+def _one_particle_nve_simulation(n_beads: int) -> app.Simulation:
+    """One argon in a harmonic well under thermostat-off RPMD."""
+    topology = app.Topology()
+    residue = topology.addResidue("AR", topology.addChain())
+    topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
+    system = openmm.System()
+    system.addParticle(39.9 * unit.dalton)
+    force = openmm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
+    force.addGlobalParameter(
+        "k", 100.0 * unit.kilojoule_per_mole / unit.nanometer**2,
+    )
+    force.addParticle(0, [])
+    system.addForce(force)
+    integrator = openmm.RPMDIntegrator(
+        n_beads,
+        300.0 * unit.kelvin,
+        1.0 / unit.picosecond,
+        2.0 * unit.femtoseconds,
+    )
+    integrator.setApplyThermostat(False)
+    simulation = app.Simulation(
+        topology,
+        system,
+        integrator,
+        openmm.Platform.getPlatformByName("Reference"),
+    )
+    for bead in range(n_beads):
+        integrator.setPositions(
+            bead, np.array([[0.1, 0.0, 0.0]]) * unit.nanometer,
+        )
+        integrator.setVelocities(
+            bead, np.zeros((1, 3)) * unit.nanometer / unit.picosecond,
+        )
+    return simulation
+
+
+def test_velocity_reporter_writes_centroid_frames_on_close(tmp_path: Path) -> None:
+    from openmmnqe import step_rpmd
+
+    simulation = _one_particle_nve_simulation(2)
+    output = tmp_path / "velocities.npz"
+
+    with reporters.RPMDVelocityReporter(output, 2) as reporter:
+        simulation.reporters.append(reporter)
+        step_rpmd(simulation, 6)
+
+    with np.load(output) as archive:
+        times = archive["times_ps"]
+        velocities = archive["velocities_nm_per_ps"]
+        assert np.array_equal(archive["atom_indices"], [0])
+        assert archive["masses_dalton"] == pytest.approx([39.9])
+    assert velocities.shape == (3, 1, 3)
+    assert np.isfinite(velocities).all()
+    assert np.diff(times) == pytest.approx([0.004, 0.004])
+
+
+def test_velocity_reporter_validates_its_inputs(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="reportInterval"):
+        reporters.RPMDVelocityReporter(tmp_path / "v.npz", 0)
+    with pytest.raises(ValueError, match="must not be empty"):
+        reporters.RPMDVelocityReporter(tmp_path / "v.npz", 2, atom_indices=[])
+    with pytest.raises(ValueError, match="duplicate"):
+        reporters.RPMDVelocityReporter(
+            tmp_path / "v.npz", 2, atom_indices=[0, 0],
+        )
+
+    simulation = _one_particle_nve_simulation(2)
+    out_of_range = reporters.RPMDVelocityReporter(
+        tmp_path / "v.npz", 2, atom_indices=[5],
+    )
+    with pytest.raises(ValueError, match="outside the System"):
+        out_of_range.report(simulation, None)
+
+    not_rpmd = SimpleNamespace(
+        integrator=SimpleNamespace(), system=simulation.system,
+    )
+    fresh = reporters.RPMDVelocityReporter(tmp_path / "v2.npz", 2)
+    with pytest.raises(TypeError, match="RPMDIntegrator"):
+        fresh.report(not_rpmd, None)
+
+    # A reporter that never recorded a frame writes nothing on close.
+    silent = reporters.RPMDVelocityReporter(tmp_path / "silent.npz", 2)
+    silent.close()
+    silent.close()
+    assert not (tmp_path / "silent.npz").exists()
+
+
+def _write_cosine_archive(path: Path, *, n_frames: int, dt: float,
+                          angular_frequency: float, mass: float) -> None:
+    """Archive holding one atom whose x velocity is a pure cosine."""
+    times = np.arange(n_frames) * dt
+    velocities = np.zeros((n_frames, 1, 3))
+    velocities[:, 0, 0] = np.cos(angular_frequency * times)
+    np.savez(
+        path,
+        times_ps=times,
+        velocities_nm_per_ps=velocities,
+        atom_indices=np.array([0]),
+        masses_dalton=np.array([mass]),
+    )
+
+
+def test_velocity_autocorrelation_of_a_cosine_is_a_cosine(tmp_path: Path) -> None:
+    omega, dt, n_frames, mass = 314.159, 0.001, 2000, 12.0
+    archive = tmp_path / "cosine.npz"
+    _write_cosine_archive(
+        archive, n_frames=n_frames, dt=dt, angular_frequency=omega, mass=mass,
+    )
+
+    times, vacf = reporters.rpmd_velocity_autocorrelation(
+        archive, max_time=0.2,
+    )
+
+    assert len(times) == 201
+    signal = np.cos(omega * np.arange(n_frames) * dt)
+    assert vacf[0] == pytest.approx(mass * np.mean(signal**2))
+    # The unbiased estimator of a pure cosine is (mass/2) cos(omega t) up to
+    # the truncation cross-term, which shrinks with the record length.
+    assert vacf == pytest.approx(
+        0.5 * mass * np.cos(omega * times), abs=0.02 * mass,
+    )
+
+    _, unweighted = reporters.rpmd_velocity_autocorrelation(
+        archive, max_time=0.2, mass_weighted=False,
+    )
+    assert unweighted == pytest.approx(vacf / mass)
+
+
+def test_vibrational_spectrum_peaks_at_the_cosine_frequency(tmp_path: Path) -> None:
+    omega, dt, n_frames = 314.159, 0.001, 2000
+    archive = tmp_path / "cosine.npz"
+    _write_cosine_archive(
+        archive, n_frames=n_frames, dt=dt, angular_frequency=omega, mass=1.0,
+    )
+
+    frequencies, intensities = reporters.rpmd_vibrational_spectrum(archive)
+
+    speed_of_light_cm_per_ps = 1.0e2 * unit.SPEED_OF_LIGHT_C.value_in_unit(
+        unit.meter / unit.picosecond
+    )
+    expected = omega / (2.0 * np.pi) / speed_of_light_cm_per_ps
+    peak = frequencies[np.argmax(intensities)]
+    grid_spacing = frequencies[1] - frequencies[0]
+    assert abs(peak - expected) <= grid_spacing
+
+    with pytest.raises(ValueError, match="window"):
+        reporters.rpmd_vibrational_spectrum(archive, window="hamming")
+
+
+def test_vibrational_spectrum_finds_a_real_harmonic_frequency(tmp_path: Path) -> None:
+    # A classical (one-bead) thermostat-off particle released off-centre in
+    # the harmonic well oscillates at exactly omega = sqrt(k/m), so the
+    # whole chain -- reporter, archive, correlation, transform -- must put
+    # the spectral peak there.
+    from openmmnqe import step_rpmd
+
+    simulation = _one_particle_nve_simulation(1)
+    output = tmp_path / "well.npz"
+    reporter = reporters.RPMDVelocityReporter(output, 10)
+    simulation.reporters.append(reporter)
+    step_rpmd(simulation, 20_000)
+    reporter.close()
+
+    frequencies, intensities = reporters.rpmd_vibrational_spectrum(output)
+
+    speed_of_light_cm_per_ps = 1.0e2 * unit.SPEED_OF_LIGHT_C.value_in_unit(
+        unit.meter / unit.picosecond
+    )
+    omega = np.sqrt(100.0 / 39.9)  # rad/ps, since 1 kJ/mol = 1 Da nm^2/ps^2
+    expected = omega / (2.0 * np.pi) / speed_of_light_cm_per_ps
+    peak = frequencies[np.argmax(intensities)]
+    assert peak == pytest.approx(expected, abs=1.0)
+
+
+def test_velocity_archive_validation(tmp_path: Path) -> None:
+    good = tmp_path / "good.npz"
+    _write_cosine_archive(
+        good, n_frames=10, dt=0.001, angular_frequency=1.0, mass=1.0,
+    )
+    with pytest.raises(ValueError, match="max_time"):
+        reporters.rpmd_velocity_autocorrelation(good, max_time=0.0)
+
+    missing = tmp_path / "missing.npz"
+    np.savez(missing, times_ps=np.arange(3.0))
+    with pytest.raises(ValueError, match="lacks field"):
+        reporters.rpmd_velocity_autocorrelation(missing)
+
+    short = tmp_path / "short.npz"
+    np.savez(
+        short,
+        times_ps=np.array([0.0]),
+        velocities_nm_per_ps=np.zeros((1, 1, 3)),
+        atom_indices=np.array([0]),
+        masses_dalton=np.array([1.0]),
+    )
+    with pytest.raises(ValueError, match="at least two frames"):
+        reporters.rpmd_velocity_autocorrelation(short)
+
+    mismatched = tmp_path / "mismatched.npz"
+    np.savez(
+        mismatched,
+        times_ps=np.arange(3.0) * 0.001,
+        velocities_nm_per_ps=np.zeros((3, 2, 3)),
+        atom_indices=np.array([0]),
+        masses_dalton=np.array([1.0]),
+    )
+    with pytest.raises(ValueError, match="shapes disagree"):
+        reporters.rpmd_velocity_autocorrelation(mismatched)
+
+    uneven = tmp_path / "uneven.npz"
+    np.savez(
+        uneven,
+        times_ps=np.array([0.0, 0.001, 0.005]),
+        velocities_nm_per_ps=np.zeros((3, 1, 3)),
+        atom_indices=np.array([0]),
+        masses_dalton=np.array([1.0]),
+    )
+    with pytest.raises(ValueError, match="uniformly spaced"):
+        reporters.rpmd_velocity_autocorrelation(uneven)

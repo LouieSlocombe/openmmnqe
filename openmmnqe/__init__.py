@@ -4,7 +4,8 @@ openmmnqe: OpenMM workflows for nuclear quantum effects and enhanced sampling.
 Bundles structure edits (:mod:`openmmnqe.io`), OpenMM simulation stages
 including RPMD and adQTB nuclear-quantum-effect integrators and ML/MM
 potentials (:mod:`openmmnqe.openmm`), RPMD reporters
-(:mod:`openmmnqe.reporters`) and assorted simulation-setup utilities
+(:mod:`openmmnqe.reporters`), ring-polymer rate dynamics
+(:mod:`openmmnqe.rates`) and assorted simulation-setup utilities
 (:mod:`openmmnqe.tools`).
 
 This package is the simulation itself, and it has two dependencies that are
@@ -108,15 +109,28 @@ from .openmm import (
     run_openmm_rpmd_prod,
     run_openmm_steered,
 )
+from .rates import (
+    RPMDRate,
+    TransmissionResult,
+    plot_transmission_coefficient,
+    rpmd_rate,
+    run_openmm_rpmd_recrossing,
+    transmission_coefficient,
+)
 from .reporters import (
     RPMDBeadReporter,
     RPMDCentroidReporter,
+    RPMDEnergyConservation,
     RPMDQuantumSpreadReporter,
     RPMDThermodynamicReporter,
+    RPMDVelocityReporter,
     plot_rpmd_atom_expansion,
     plot_rpmd_thermodynamics,
+    rpmd_energy_conservation,
     rpmd_thermodynamic_averages,
     rpmd_thermodynamics,
+    rpmd_velocity_autocorrelation,
+    rpmd_vibrational_spectrum,
     track_rpmd_atom_expansion,
 )
 from .tools import (
@@ -130,6 +144,7 @@ from .tools import (
     get_atoms_in_residue,
     get_thermal_de_broglie_wavelength,
     init_beads,
+    sample_rpmd_velocities,
     set_adqtb_particle_types_by_element,
     step_rpmd,
     write_multimodel_pdb,
@@ -142,8 +157,12 @@ __all__ = [
     "QTBFrictionReporter",
     "RPMDBeadReporter",
     "RPMDCentroidReporter",
+    "RPMDEnergyConservation",
     "RPMDQuantumSpreadReporter",
+    "RPMDRate",
     "RPMDThermodynamicReporter",
+    "RPMDVelocityReporter",
+    "TransmissionResult",
     "__version__",
     "adqtb_convergence",
     "adqtb_fdt_residual",
@@ -173,13 +192,18 @@ __all__ = [
     "plot_adqtb_friction_spectra",
     "plot_rpmd_atom_expansion",
     "plot_rpmd_thermodynamics",
+    "plot_transmission_coefficient",
     "relabel_residues_in_pdb",
     "remove_directory",
     "remove_file",
     "remove_file_pattern",
     "remove_residues_in_pdb",
+    "rpmd_energy_conservation",
+    "rpmd_rate",
     "rpmd_thermodynamic_averages",
     "rpmd_thermodynamics",
+    "rpmd_velocity_autocorrelation",
+    "rpmd_vibrational_spectrum",
     "run_openmm_adqtb_eq",
     "run_openmm_adqtb_prod",
     "run_openmm_heating",
@@ -190,13 +214,16 @@ __all__ = [
     "run_openmm_rpmd_contracted",
     "run_openmm_rpmd_equilibration",
     "run_openmm_rpmd_prod",
+    "run_openmm_rpmd_recrossing",
     "run_openmm_steered",
+    "sample_rpmd_velocities",
     "save_only_index_atoms",
     "save_pdb_selection",
     "set_adqtb_particle_types_by_element",
     "step_rpmd",
     "track_adqtb_friction",
     "track_rpmd_atom_expansion",
+    "transmission_coefficient",
     "write_multimodel_pdb",
     "xyz_to_sdf",
     "zero_velocities",

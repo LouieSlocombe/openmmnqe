@@ -247,6 +247,85 @@
 }
 
 % =====================================================================
+% RPMD rate theory and correlation functions (openmmnqe/rates.py,
+% run_openmm_rpmd_recrossing, transmission_coefficient, rpmd_rate,
+% rpmd_velocity_autocorrelation)
+% =====================================================================
+
+@incollection{bennett1977molecular,
+  author    = {Bennett, Charles H.},
+  title     = {Molecular Dynamics and Transition State Theory: The Simulation of Infrequent Events},
+  booktitle = {Algorithms for Chemical Computations},
+  series    = {ACS Symposium Series},
+  volume    = {46},
+  pages     = {63--97},
+  publisher = {American Chemical Society},
+  year      = {1977},
+  doi       = {10.1021/bk-1977-0046.ch004},
+  note      = {Rates from trajectories launched at the dividing surface}
+}
+
+@article{chandler1978statistical,
+  author  = {Chandler, David},
+  title   = {Statistical mechanics of isomerization dynamics in liquids and the transition state approximation},
+  journal = {The Journal of Chemical Physics},
+  volume  = {68},
+  number  = {6},
+  pages   = {2959--2970},
+  year    = {1978},
+  doi     = {10.1063/1.436049},
+  note    = {The k = kappa k\_TST factorization; \texttt{rpmd\_rate}}
+}
+
+@article{craig2005chemical,
+  author  = {Craig, Ian R. and Manolopoulos, David E.},
+  title   = {Chemical reaction rates from ring polymer molecular dynamics},
+  journal = {The Journal of Chemical Physics},
+  volume  = {122},
+  number  = {8},
+  pages   = {084106},
+  year    = {2005},
+  doi     = {10.1063/1.1850093},
+  note    = {RPMD rate theory; \texttt{run\_openmm\_rpmd\_recrossing}}
+}
+
+@article{craig2005refined,
+  author  = {Craig, Ian R. and Manolopoulos, David E.},
+  title   = {A refined ring polymer molecular dynamics theory of chemical reaction rates},
+  journal = {The Journal of Chemical Physics},
+  volume  = {123},
+  number  = {3},
+  pages   = {034102},
+  year    = {2005},
+  doi     = {10.1063/1.1954769},
+  note    = {Dividing-surface independence of the long-time RPMD rate}
+}
+
+@article{collepardo2008proton,
+  author  = {Collepardo-Guevara, Rosana and Craig, Ian R. and Manolopoulos, David E.},
+  title   = {Proton transfer in a polar solvent from ring polymer reaction rate theory},
+  journal = {The Journal of Chemical Physics},
+  volume  = {128},
+  number  = {14},
+  pages   = {144502},
+  year    = {2008},
+  doi     = {10.1063/1.2883593},
+  note    = {RPMD transmission coefficients for proton transfer, the target application}
+}
+
+@article{witt2009applicability,
+  author  = {Witt, Alexander and Ivanov, Sergei D. and Shiga, Motoyuki and Forbert, Harald and Marx, Dominik},
+  title   = {On the applicability of centroid and ring polymer path integral molecular dynamics for vibrational spectroscopy},
+  journal = {The Journal of Chemical Physics},
+  volume  = {130},
+  number  = {19},
+  pages   = {194510},
+  year    = {2009},
+  doi     = {10.1063/1.3125009},
+  note    = {Spurious ring-polymer resonances; caveat in \texttt{rpmd\_vibrational\_spectrum}}
+}
+
+% =====================================================================
 % Nuclear quantum effects: quantum thermal bath
 % (run_openmm_adqtb_eq / run_openmm_adqtb_prod, tools.set_adqtb_particle_types_by_element)
 % =====================================================================

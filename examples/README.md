@@ -9,6 +9,7 @@ The grouped scripts expose their available workflows through `--help`:
 ```bash
 python examples/compare.py --help
 python examples/potentials.py --help
+python examples/rates.py --help
 python examples/rpmd.py --help
 python examples/workflows.py --help
 ```

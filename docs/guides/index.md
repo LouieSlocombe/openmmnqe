@@ -11,6 +11,7 @@ workflow
 nqe-methods
 reporters
 adqtb-verification
+rate-dynamics
 enhanced-sampling
 potentials
 ```

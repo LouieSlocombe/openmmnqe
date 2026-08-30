@@ -3,11 +3,11 @@
 OpenMM's own reporters see only the context, which for an ``RPMDIntegrator``
 holds a single copy of the system rather than the ring polymer.  Anything that
 needs the beads themselves -- their spread, their individual trajectories,
-their centroid, or their energies -- has to ask the integrator, which is what
-these four reporters do.  They are attached by the ``run_openmm_rpmd_*``
-drivers in :mod:`openmmnqe.openmm`.
+their centroid, their energies, or their centroid velocities -- has to ask
+the integrator, which is what these five reporters do.  They are attached by
+the ``run_openmm_rpmd_*`` drivers in :mod:`openmmnqe.openmm`.
 
-All four follow OpenMM's reporter protocol: ``describeNextReport`` says when
+All five follow OpenMM's reporter protocol: ``describeNextReport`` says when
 the next report is due and what state it needs, and ``report`` writes it.
 Use :func:`track_rpmd_atom_expansion` to attach the quantum-spread reporter
 for one target atom without constructing it directly, and
@@ -20,7 +20,12 @@ and the total quantum energy, alongside ring-polymer diagnostics that say
 whether the trajectory is worth analysing at all.  Call
 :func:`rpmd_thermodynamics` to compute the same set once, off any simulation,
 and :func:`rpmd_thermodynamic_averages` or :func:`plot_rpmd_thermodynamics`
-to read the log it writes back.
+to read the log it writes back.  For a thermostat-off run,
+:func:`rpmd_energy_conservation` turns the same log's ring-polymer
+Hamiltonian column into a conservation verdict, and
+:class:`RPMDVelocityReporter` with :func:`rpmd_velocity_autocorrelation` and
+:func:`rpmd_vibrational_spectrum` turn recorded centroid velocities into
+Kubo-style correlation functions and vibrational spectra.
 
 Two obvious quantities are deliberately absent.  A heat capacity would need
 the exact centroid-virial estimator's second-derivative term, which OpenMM
@@ -2039,3 +2044,572 @@ def plot_rpmd_thermodynamics(file: str | os.PathLike[str], *,
     if show:
         plt.show()
     return figure, axes
+
+
+class RPMDEnergyConservation(NamedTuple):
+    """
+    Verdict on whether a run conserved the ring-polymer Hamiltonian.
+
+    Produced by :func:`rpmd_energy_conservation` from the ``E_ring(kJ/mol)``
+    column of a thermodynamic log.  A microcanonical (thermostat-off) RPMD
+    run should show a drift small against its own short-time fluctuation; a
+    thermostatted run's ``E_ring`` wanders by design and carries no verdict
+    worth reading.
+
+    Attributes
+    ----------
+    drift_rate : float
+        Least-squares slope of ``E_ring`` against time, in kJ/mol/ps.
+    drift_per_step : float
+        Least-squares slope of ``E_ring`` against the step count, in
+        kJ/mol per step.
+    total_drift : float
+        ``drift_rate`` times the analysed time span, in kJ/mol.
+    fluctuation : float
+        Root-mean-square residual of ``E_ring`` about the fitted line, in
+        kJ/mol.  For a symplectic integrator this is the bounded shadow-
+        Hamiltonian oscillation, which shrinks with the time step.
+    drift_per_ps_over_kbt : float
+        ``drift_rate`` divided by ``k_B T``, so the drift reads in thermal
+        energies per picosecond.
+    drift_ratio : float
+        ``abs(total_drift) / fluctuation``.  Infinite when the residuals
+        vanish but the drift does not, as for a perfectly linear ramp.
+    conserved : bool
+        Whether ``drift_ratio`` is at or below the tolerance.
+    """
+
+    drift_rate: float
+    drift_per_step: float
+    total_drift: float
+    fluctuation: float
+    drift_per_ps_over_kbt: float
+    drift_ratio: float
+    conserved: bool
+
+
+def rpmd_energy_conservation(file: str | os.PathLike[str], *,
+                             temperature: unit.Quantity | float,
+                             discard: float = 0.0,
+                             tolerance: float = 2.0,
+                             ) -> RPMDEnergyConservation:
+    """
+    Check a thermodynamic log for ring-polymer energy conservation.
+
+    ``E_ring(kJ/mol)`` is ``RPMDIntegrator.getTotalEnergy()``, the full
+    ring-polymer Hamiltonian; with the thermostat off it is the conserved
+    quantity of the dynamics, so its net drift is the integration-quality
+    signal for a microcanonical run.  The verdict compares the drift across
+    the retained rows with the size of the fluctuation about it: a good
+    thermostat-off run drifts by less than it oscillates.
+
+    This is a practical check that the dynamics is not losing energy, not a
+    statistical test with a calibrated false-positive rate.  It also cannot
+    tell a thermostat-off run from a thermostatted one whose wander happens
+    to be driftless -- read ``T_ring(K)`` for that.  The hard-wired
+    ``CMMotionRemover`` in the stage-built System introduces tiny
+    non-Hamiltonian corrections; for the strictest checks build the System
+    yourself with ``removeCMMotion=False`` and hand it in through
+    :class:`openmmnqe.openmm.PreparedSystem`.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Log written by :class:`RPMDThermodynamicReporter`.
+    temperature : openmm.unit.Quantity or float
+        Simulation temperature, used only to express the drift in thermal
+        energies. A bare number is read as kelvin.
+    discard : float, optional
+        Leading fraction of the rows to drop as equilibration, in ``[0, 1)``.
+        Default is 0.0.
+    tolerance : float, optional
+        Largest ``drift_ratio`` still reported as conserved. Default is 2.0.
+
+    Returns
+    -------
+    RPMDEnergyConservation
+        The verdict and the numbers behind it.
+
+    Raises
+    ------
+    ValueError
+        If *discard* is outside ``[0, 1)``, *tolerance* or *temperature* is
+        not positive and finite, fewer than three rows survive the discard,
+        or the retained rows do not advance in time and step.
+
+    Examples
+    --------
+    Check a thermostat-off production run::
+
+        from openmmnqe import rpmd_energy_conservation
+
+        verdict = rpmd_energy_conservation("rpmd_nve_thermo.log",
+                                           temperature=300.0)
+        assert verdict.conserved, verdict
+    """
+    temperature_k = require_positive_finite_scalar_in_unit(
+        temperature,
+        unit.kelvin,
+        name="temperature",
+    )
+    if isinstance(discard, bool) or not isinstance(discard, Real):
+        raise ValueError("discard must be a number in [0, 1)")
+    discard = float(discard)
+    if not np.isfinite(discard) or not 0.0 <= discard < 1.0:
+        raise ValueError("discard must be a number in [0, 1)")
+    if isinstance(tolerance, bool) or not isinstance(tolerance, Real):
+        raise ValueError("tolerance must be a positive, finite number")
+    tolerance = float(tolerance)
+    if not np.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("tolerance must be a positive, finite number")
+
+    header, values = _read_thermodynamic_log(file)
+    required = ("Step", "Time(ps)", "E_ring(kJ/mol)")
+    missing = [name for name in required if name not in header]
+    if missing:
+        raise ValueError(
+            f"thermodynamic log lacks column(s): {', '.join(missing)}"
+        )
+    retained = values[int(discard * len(values)):]
+    if len(retained) < 3:
+        raise ValueError(
+            f"thermodynamic log has {len(retained)} rows after discarding; "
+            "an energy-conservation check needs at least 3"
+        )
+
+    steps = retained[:, header.index("Step")]
+    times = retained[:, header.index("Time(ps)")]
+    energies = retained[:, header.index("E_ring(kJ/mol)")]
+    if not np.isfinite(energies).all():
+        raise ValueError("E_ring column contains non-finite values")
+    time_span = float(times[-1] - times[0])
+    step_span = float(steps[-1] - steps[0])
+    if time_span <= 0.0 or step_span <= 0.0:
+        raise ValueError(
+            "thermodynamic log rows must advance in time and step"
+        )
+
+    drift_rate, intercept = np.polyfit(times, energies, 1)
+    drift_per_step = float(np.polyfit(steps, energies, 1)[0])
+    residuals = energies - (drift_rate * times + intercept)
+    fluctuation = float(np.sqrt(np.mean(np.square(residuals))))
+    total_drift = float(drift_rate * time_span)
+    if fluctuation > 0.0:
+        drift_ratio = abs(total_drift) / fluctuation
+    else:
+        drift_ratio = 0.0 if total_drift == 0.0 else float("inf")
+
+    kbt = _BOLTZMANN_KJ_PER_MOL_K * temperature_k
+    return RPMDEnergyConservation(
+        drift_rate=float(drift_rate),
+        drift_per_step=drift_per_step,
+        total_drift=total_drift,
+        fluctuation=fluctuation,
+        drift_per_ps_over_kbt=float(drift_rate) / kbt,
+        drift_ratio=float(drift_ratio),
+        conserved=bool(drift_ratio <= tolerance),
+    )
+
+
+class RPMDVelocityReporter:
+    """
+    Record centroid (bead-averaged) velocities for correlation functions.
+
+    RPMD approximates a Kubo-transformed correlation function of operators
+    linear in position or momentum by the corresponding centroid correlation
+    function, so the centroid velocities are the raw material for velocity
+    autocorrelation functions and vibrational spectra.  Frames accumulate in
+    memory and are written as one ``.npz`` archive when the reporter is
+    closed, which the ``run_openmm_rpmd_*`` drivers do on exit; read it back
+    with :func:`rpmd_velocity_autocorrelation` or
+    :func:`rpmd_vibrational_spectrum`.
+
+    Record from a thermostat-off run (``apply_thermostat=False``): the PILE
+    thermostat's friction and noise contaminate the very dynamics a
+    correlation function is meant to measure.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Path the ``.npz`` archive is written to on close. Nothing is written
+        if no frame was ever recorded.
+    reportInterval : int
+        Interval between recorded frames, in steps. Correlation functions
+        resolve nothing faster than twice this interval times the time step.
+    atom_indices : sequence of int or None, optional
+        Atoms whose centroid velocities are kept. Default is None, which
+        keeps every atom -- for a solvated system that is a lot of memory,
+        since every frame holds ``3 * n_atoms`` doubles until close.
+
+    Raises
+    ------
+    TypeError
+        If *reportInterval* or an atom index is not an integer.
+    ValueError
+        If *reportInterval* is not positive, *atom_indices* is empty,
+        contains a duplicate, or a negative index.
+    """
+
+    def __init__(self, file: str | os.PathLike[str], reportInterval: int,
+                 atom_indices: Sequence[int] | None = None) -> None:
+        self._reportInterval = require_integer(
+            reportInterval,
+            name="reportInterval",
+            minimum=1,
+        )
+        self._atom_indices: list[int] | None = None
+        if atom_indices is not None:
+            indices = [
+                require_integer(
+                    index,
+                    name=f"atom_indices[{position}]",
+                    minimum=0,
+                )
+                for position, index in enumerate(atom_indices)
+            ]
+            if not indices:
+                raise ValueError("atom_indices must not be empty")
+            if len(set(indices)) != len(indices):
+                raise ValueError("atom_indices contains duplicate indices")
+            self._atom_indices = indices
+        self._file = os.fspath(file)
+        self._times_ps: list[float] = []
+        self._frames: list[npt.NDArray[np.float64]] = []
+        self._masses: npt.NDArray[np.float64] | None = None
+        self._kept: npt.NDArray[np.intp] | None = None
+        self._closed = False
+
+    def describeNextReport(self, simulation: app.Simulation,
+                           ) -> tuple[int, bool, bool, bool, bool]:
+        """
+        Report when the next report is due and what state it needs.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Returns
+        -------
+        tuple
+            ``(steps, positions, velocities, forces, energies)``. No state is
+            requested: the bead velocities come from the integrator instead.
+        """
+        steps = self._reportInterval - simulation.currentStep % self._reportInterval
+        return (steps, False, False, False, False)
+
+    def _prepare(self, simulation: app.Simulation) -> None:
+        """
+        Resolve the atom selection and masses on the first report.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+
+        Raises
+        ------
+        TypeError
+            If the Simulation does not use an RPMD-style integrator.
+        ValueError
+            If an atom index lies outside the System.
+        """
+        if not hasattr(simulation.integrator, "getNumCopies"):
+            raise TypeError(
+                "RPMDVelocityReporter requires an RPMDIntegrator"
+            )
+        masses = _particle_masses_dalton(simulation.system)
+        if self._atom_indices is None:
+            kept = np.arange(len(masses), dtype=np.intp)
+        else:
+            out_of_range = [
+                index for index in self._atom_indices
+                if index >= len(masses)
+            ]
+            if out_of_range:
+                raise ValueError(
+                    f"atom_indices {out_of_range} lie outside the System "
+                    f"with {len(masses)} particles"
+                )
+            kept = np.asarray(self._atom_indices, dtype=np.intp)
+        self._kept = kept
+        self._masses = masses[kept]
+
+    def report(self, simulation: app.Simulation, state: openmm.State) -> None:
+        """
+        Record the centroid velocities for the current step.
+
+        Parameters
+        ----------
+        simulation : openmm.app.Simulation
+            The simulation this reporter is attached to.
+        state : openmm.State
+            Unused; the bead velocities come from the RPMD integrator.
+        """
+        if self._kept is None:
+            self._prepare(simulation)
+        assert self._kept is not None
+
+        integrator = simulation.integrator
+        n_beads = integrator.getNumCopies()
+        time_ps: float | None = None
+        mean_velocities: npt.NDArray[np.float64] | None = None
+        for bead in range(n_beads):
+            bead_state = integrator.getState(bead, getVelocities=True)
+            velocities = bead_state.getVelocities(asNumpy=True).value_in_unit(
+                unit.nanometer / unit.picosecond
+            )[self._kept]
+            if mean_velocities is None:
+                time_ps = bead_state.getTime().value_in_unit(unit.picosecond)
+                mean_velocities = np.array(velocities, dtype=np.float64)
+            else:
+                mean_velocities += velocities
+        assert mean_velocities is not None and time_ps is not None
+        self._times_ps.append(float(time_ps))
+        self._frames.append(mean_velocities / n_beads)
+
+    def close(self) -> None:
+        """Write the accumulated frames as one ``.npz`` archive, once."""
+        if getattr(self, "_closed", True):
+            return
+        self._closed = True
+        if not self._frames:
+            return
+        assert self._kept is not None and self._masses is not None
+        np.savez(
+            self._file,
+            times_ps=np.asarray(self._times_ps, dtype=np.float64),
+            velocities_nm_per_ps=np.stack(self._frames),
+            atom_indices=np.asarray(self._kept, dtype=np.int64),
+            masses_dalton=np.asarray(self._masses, dtype=np.float64),
+        )
+
+    def __enter__(self) -> Self:
+        """Return this reporter for use as a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Finalize the velocity archive when leaving a context."""
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort fallback for callers that did not close the reporter."""
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def _read_velocity_archive(file: str | os.PathLike[str],
+                           ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Read a velocity archive back as validated bare arrays.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Archive written by :class:`RPMDVelocityReporter`.
+
+    Returns
+    -------
+    times_ps : numpy.ndarray
+        Frame times in picoseconds, shaped ``(n_frames,)``, uniformly
+        spaced and increasing.
+    velocities : numpy.ndarray
+        Centroid velocities in nm/ps, shaped ``(n_frames, n_atoms, 3)``.
+    masses : numpy.ndarray
+        Masses of the kept atoms in daltons, shaped ``(n_atoms,)``.
+
+    Raises
+    ------
+    ValueError
+        If the archive lacks a field, holds fewer than two frames, has
+        mismatched shapes or non-finite values, or its frames are not
+        uniformly spaced in time.
+    """
+    with np.load(os.fspath(file)) as archive:
+        missing = [
+            name
+            for name in ("times_ps", "velocities_nm_per_ps", "masses_dalton")
+            if name not in archive
+        ]
+        if missing:
+            raise ValueError(
+                f"velocity archive lacks field(s): {', '.join(missing)}"
+            )
+        times = np.asarray(archive["times_ps"], dtype=np.float64)
+        velocities = np.asarray(
+            archive["velocities_nm_per_ps"], dtype=np.float64
+        )
+        masses = np.asarray(archive["masses_dalton"], dtype=np.float64)
+
+    if times.ndim != 1 or len(times) < 2:
+        raise ValueError("velocity archive must hold at least two frames")
+    if velocities.shape != (len(times), len(masses), 3):
+        raise ValueError(
+            f"velocity archive shapes disagree: {len(times)} times, "
+            f"velocities {velocities.shape}, {len(masses)} masses"
+        )
+    if not (np.isfinite(times).all() and np.isfinite(velocities).all()
+            and np.isfinite(masses).all()):
+        raise ValueError("velocity archive contains non-finite values")
+    intervals = np.diff(times)
+    if np.any(intervals <= 0.0) or not np.allclose(
+        intervals, intervals[0], rtol=1.0e-6, atol=0.0
+    ):
+        raise ValueError(
+            "velocity archive frames must be uniformly spaced in time"
+        )
+    return times, velocities, masses
+
+
+def rpmd_velocity_autocorrelation(file: str | os.PathLike[str], *,
+                                  max_time: unit.Quantity | float | None = None,
+                                  mass_weighted: bool = True,
+                                  ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute the centroid velocity autocorrelation function from an archive.
+
+    For operators linear in momentum, the centroid correlation function of a
+    thermostat-off RPMD run is the ring-polymer approximation to the
+    Kubo-transformed quantum correlation function, so this is the
+    ``C_vv(t)`` that vibrational spectra and diffusion coefficients start
+    from.  Each atom's Cartesian components are correlated by FFT with the
+    unbiased ``1/(n-k)`` lag normalization and summed.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Archive written by :class:`RPMDVelocityReporter`.
+    max_time : openmm.unit.Quantity or float or None, optional
+        Longest lag to keep. A bare number is read as picoseconds. Long lags
+        average few frame pairs and are mostly noise, so a fraction of the
+        run length is usual. Default is None, which keeps every lag.
+    mass_weighted : bool, optional
+        If True, weight each atom's term by its mass, giving ``C_vv`` in
+        dalton nm^2/ps^2 -- the weighting under a vibrational density of
+        states. If False, atoms are averaged unweighted, in nm^2/ps^2.
+        Default is True.
+
+    Returns
+    -------
+    times_ps : numpy.ndarray
+        Lag times in picoseconds, starting at zero.
+    vacf : numpy.ndarray
+        The autocorrelation at each lag, in the units *mass_weighted*
+        selects.
+
+    Raises
+    ------
+    ValueError
+        If the archive is malformed (see
+        :class:`RPMDVelocityReporter`), or *max_time* is not positive and
+        finite.
+    """
+    times, velocities, masses = _read_velocity_archive(file)
+    dt = float(times[1] - times[0])
+    n_frames = len(times)
+
+    n_lags = n_frames
+    if max_time is not None:
+        max_time_ps = require_positive_finite_scalar_in_unit(
+            max_time,
+            unit.picosecond,
+            name="max_time",
+        )
+        n_lags = min(n_frames, int(np.floor(max_time_ps / dt)) + 1)
+
+    # Wiener-Khinchin: correlate each atom's Cartesian component by FFT,
+    # zero-padded to double length so the circular correlation is linear.
+    n_fft = 2 * n_frames
+    spectra = np.fft.rfft(velocities, n=n_fft, axis=0)
+    correlations = np.fft.irfft(
+        spectra * np.conj(spectra), n=n_fft, axis=0
+    )[:n_lags].real
+    correlations /= (n_frames - np.arange(n_lags))[:, np.newaxis, np.newaxis]
+
+    per_atom = correlations.sum(axis=2)
+    if mass_weighted:
+        vacf = per_atom @ masses
+    else:
+        vacf = per_atom.mean(axis=1)
+    return np.arange(n_lags) * dt, vacf
+
+
+def rpmd_vibrational_spectrum(file: str | os.PathLike[str], *,
+                              window: Literal["hann", "none"] = "hann",
+                              max_time: unit.Quantity | float | None = None,
+                              ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute a vibrational density of states from a velocity archive.
+
+    The spectrum is the cosine transform of the mass-weighted centroid
+    velocity autocorrelation function, so a peak sits at each vibrational
+    frequency the centroid dynamics carries.  No normalization is invented:
+    the intensity is in dalton nm^2/ps, proportional to the vibrational
+    density of states, and only relative heights are meaningful.
+
+    Thermostat-off ring-polymer spectra carry known artifacts: the free
+    ring-polymer spring frequencies contaminate the spectrum near and above
+    ``n_beads k_B T / hbar``, and resonances between them and physical modes
+    can split or shift high-frequency peaks (Witt et al., J. Chem. Phys.
+    130, 194510 (2009)).  Read high-frequency features with that in mind.
+
+    Parameters
+    ----------
+    file : str or os.PathLike
+        Archive written by :class:`RPMDVelocityReporter`.
+    window : {"hann", "none"}, optional
+        Taper applied to the autocorrelation before transforming. The Hann
+        window suppresses the ringing a truncated correlation function
+        otherwise scatters around every peak. Default is ``"hann"``.
+    max_time : openmm.unit.Quantity or float or None, optional
+        Longest correlation lag transformed, which sets the frequency
+        resolution to roughly ``1 / max_time``. A bare number is read as
+        picoseconds. Default is None, which uses every lag.
+
+    Returns
+    -------
+    frequencies_invcm : numpy.ndarray
+        Frequency axis in reciprocal centimetres.
+    intensities : numpy.ndarray
+        Spectral intensity at each frequency, in dalton nm^2/ps.
+
+    Raises
+    ------
+    ValueError
+        If the archive is malformed, *max_time* is not positive and finite,
+        or *window* is not a recognized name.
+    """
+    if window not in ("hann", "none"):
+        raise ValueError(f"unknown window {window!r}; use 'hann' or 'none'")
+    times, vacf = rpmd_velocity_autocorrelation(
+        file,
+        max_time=max_time,
+        mass_weighted=True,
+    )
+    dt = float(times[1] - times[0])
+    n_lags = len(vacf)
+
+    tapered = vacf
+    if window == "hann":
+        # Descending half of an odd Hann window: exactly 1 at lag zero,
+        # exactly 0 at the last lag.
+        tapered = vacf * np.hanning(2 * n_lags - 1)[n_lags - 1:]
+
+    # Cosine transform of the one-sided C(t), zero-padded fourfold so the
+    # returned grid samples each peak smoothly.
+    n_fft = 4 * n_lags
+    intensities = 2.0 * dt * np.fft.rfft(tapered, n=n_fft).real
+    frequencies_per_ps = np.fft.rfftfreq(n_fft, d=dt)
+
+    # 1/ps to cm^-1: divide by c = 0.0299792458 cm/ps.
+    speed_of_light_cm_per_ps = 1.0e2 * unit.SPEED_OF_LIGHT_C.value_in_unit(
+        unit.meter / unit.picosecond
+    )
+    return frequencies_per_ps / speed_of_light_cm_per_ps, intensities

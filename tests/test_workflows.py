@@ -99,7 +99,11 @@ class _Integrator:
         self.segment_lengths = []
         self.adaptation_rates = []
         self.random_seeds = []
+        self.applied_thermostats = []
         self.particle_types: dict[int, int] = {}
+
+    def setApplyThermostat(self, apply: bool) -> None:
+        self.applied_thermostats.append(apply)
 
     def setParticleType(self, particle: int, type_index: int) -> None:
         self.particle_types[particle] = type_index
@@ -185,6 +189,7 @@ def workflow_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         rpmd_progress_reporters=[],
         rpmd_reporters=[],
         rpmd_steps=[],
+        rpmd_snapshots=[],
         saved=[],
         checkpoints=[],
         bead_initializations=[],
@@ -270,6 +275,11 @@ def workflow_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         nqe_openmm,
         "_save_final_state",
         lambda *args, **kwargs: calls.saved.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        nqe_openmm,
+        "_save_rpmd_restart",
+        lambda *args, **kwargs: calls.rpmd_snapshots.append((args, kwargs)),
     )
     monkeypatch.setattr(
         nqe_openmm,
@@ -942,7 +952,12 @@ def test_rpmd_production_loads_checkpoint_and_saves_centroid(
     assert runtime.calls.rpmd_reporters == [
         (
             (simulation, runtime.modeller.topology, "rpmd_prod", 5, 6, None),
-            {"expansion_metric": "rms", "distance_pairs": None},
+            {
+                "expansion_metric": "rms",
+                "distance_pairs": None,
+                "velocity_record_interval": None,
+                "velocity_atom_indices": None,
+            },
         )
     ]
     assert runtime.calls.rpmd_progress_reporters == [
@@ -1163,3 +1178,172 @@ def test_adqtb_equilibration_configures_adaptation_and_checkpoint_reporting(
     ]
     assert integrator.particle_types == {0: 1, 1: 0}
     assert runtime.calls.saved == [((simulation, "adqtb"), {})]
+
+
+# Both RPMD production stages expose apply_thermostat; parametrize the pair,
+# with barostat_freq=None so the microcanonical guard is satisfied.
+_NVE_CAPABLE_STAGES = [
+    pytest.param(nqe_openmm.run_openmm_rpmd_prod, id="rpmd_prod"),
+    pytest.param(nqe_openmm.run_openmm_rpmd_contracted, id="rpmd_contracted"),
+]
+
+
+@pytest.mark.parametrize("stage", _NVE_CAPABLE_STAGES)
+def test_rpmd_stages_disable_the_thermostat_only_when_asked(
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., Any],
+) -> None:
+    runtime = workflow_runtime
+
+    stage(
+        runtime.modeller,
+        forcefield=object(),
+        apply_thermostat=False,
+        barostat_freq=None,
+    )
+
+    assert runtime.calls.integrators[0].applied_thermostats == [False]
+    assert runtime.calls.barostats == []
+
+
+@pytest.mark.parametrize("stage", _NVE_CAPABLE_STAGES)
+def test_rpmd_stages_default_path_never_touches_the_thermostat_toggle(
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., Any],
+) -> None:
+    # The default must stay byte-identical to the pre-toggle behaviour, so
+    # setApplyThermostat is only ever called to turn the thermostat off.
+    runtime = workflow_runtime
+
+    stage(runtime.modeller, forcefield=object())
+
+    assert runtime.calls.integrators[0].applied_thermostats == []
+
+
+@pytest.mark.parametrize("stage", _NVE_CAPABLE_STAGES)
+def test_rpmd_stages_refuse_a_barostat_without_a_thermostat(
+    workflow_runtime: SimpleNamespace,
+    stage: Callable[..., Any],
+) -> None:
+    # A Monte Carlo barostat samples no ensemble without a thermostat, and
+    # the refusal must come before any System is built.
+    runtime = workflow_runtime
+
+    with pytest.raises(ValueError, match="barostat_freq=None"):
+        stage(runtime.modeller, forcefield=object(), apply_thermostat=False)
+
+    assert runtime.calls.builds == []
+
+
+def test_rpmd_prod_nve_still_fixes_the_thermostat_stream(
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    # The seed registry stays static whichever way the toggle points: the
+    # thermostat stream is still drawn and set, it is just inert.
+    runtime = workflow_runtime
+
+    nqe_openmm.run_openmm_rpmd_prod(
+        runtime.modeller,
+        forcefield=object(),
+        apply_thermostat=False,
+        barostat_freq=None,
+        seed=4321,
+    )
+
+    expected = nqe_openmm._derive_seeds(4321, "thermostat")[0]
+    assert runtime.calls.integrators[0].random_seeds == [expected]
+
+
+def test_rpmd_prod_snapshot_interval_chunks_steps_and_saves_each(
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    runtime = workflow_runtime
+
+    nqe_openmm.run_openmm_rpmd_prod(
+        runtime.modeller,
+        forcefield=object(),
+        output_prefix="harvest",
+        n_beads=6,
+        steps=20,
+        snapshot_interval=7,
+    )
+
+    simulation = runtime.calls.simulations[0]
+    assert runtime.calls.rpmd_steps == [
+        (simulation, 7),
+        (simulation, 7),
+        (simulation, 6),
+    ]
+    assert runtime.calls.rpmd_snapshots == [
+        ((simulation, "harvest_snapshot_00000.npz", 6), {}),
+        ((simulation, "harvest_snapshot_00001.npz", 6), {}),
+    ]
+
+
+def test_rpmd_prod_snapshot_interval_dividing_steps_leaves_no_remainder(
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    runtime = workflow_runtime
+
+    nqe_openmm.run_openmm_rpmd_prod(
+        runtime.modeller,
+        forcefield=object(),
+        steps=20,
+        snapshot_interval=10,
+    )
+
+    simulation = runtime.calls.simulations[0]
+    assert runtime.calls.rpmd_steps == [(simulation, 10), (simulation, 10)]
+    assert len(runtime.calls.rpmd_snapshots) == 2
+
+
+def test_rpmd_prod_snapshot_interval_beyond_steps_warns_and_writes_none(
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    runtime = workflow_runtime
+
+    with pytest.warns(UserWarning, match="no snapshot"):
+        nqe_openmm.run_openmm_rpmd_prod(
+            runtime.modeller,
+            forcefield=object(),
+            steps=5,
+            snapshot_interval=9,
+        )
+
+    simulation = runtime.calls.simulations[0]
+    assert runtime.calls.rpmd_snapshots == []
+    assert runtime.calls.rpmd_steps == [(simulation, 5)]
+
+
+@pytest.mark.parametrize("bad_interval", [0, -3, True, 2.5])
+def test_rpmd_prod_snapshot_interval_rejects_non_positive_and_non_integers(
+    workflow_runtime: SimpleNamespace,
+    bad_interval: Any,
+) -> None:
+    runtime = workflow_runtime
+
+    with pytest.raises((TypeError, ValueError)):
+        nqe_openmm.run_openmm_rpmd_prod(
+            runtime.modeller,
+            forcefield=object(),
+            snapshot_interval=bad_interval,
+        )
+
+    assert runtime.calls.builds == []
+
+
+def test_rpmd_prod_velocity_recording_threads_through_to_the_reporters(
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    runtime = workflow_runtime
+
+    nqe_openmm.run_openmm_rpmd_prod(
+        runtime.modeller,
+        forcefield=object(),
+        velocity_record_interval=50,
+        velocity_atom_indices=[1],
+    )
+
+    (_, kwargs) = runtime.calls.rpmd_reporters[0]
+    assert kwargs["velocity_record_interval"] == 50
+    assert kwargs["velocity_atom_indices"] == [1]

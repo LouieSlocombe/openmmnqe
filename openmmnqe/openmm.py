@@ -18,7 +18,11 @@ statistics with enough beads, but costs a force evaluation per bead;
 the adaptive quantum thermal bath costs no more than a classical run but is
 an approximation. :func:`run_openmm_steered` sits outside the sequence and
 pulls a collective variable to generate a reference path (see
-:mod:`reactiontools.tools_path`).
+:mod:`reactiontools.tools_path`). The RPMD production stages can also run
+with their thermostat off (``apply_thermostat=False``), which is the
+microcanonical ring-polymer dynamics that RPMD time-correlation observables
+are defined in; :func:`openmmnqe.rates.run_openmm_rpmd_recrossing` builds a
+transmission-coefficient calculation on top of that.
 
 Every stage takes the same shape: build the system, optionally deuterate it,
 attach a PLUMED bias and the reporters, run, then save its final structure.
@@ -41,7 +45,7 @@ import sys
 import tempfile
 import warnings
 import zipfile
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any, Literal, overload
 
@@ -58,6 +62,7 @@ from .reporters import (
     RPMDCentroidReporter,
     RPMDQuantumSpreadReporter,
     RPMDThermodynamicReporter,
+    RPMDVelocityReporter,
     _validate_observable_indices,
 )
 from .tools import (
@@ -908,6 +913,8 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
                         atoms_to_watch: list[int] | None,
                         expansion_metric: Literal["rms", "mean"] = "rms",
                         distance_pairs: Iterable[tuple[int, int]] | None = None,
+                        velocity_record_interval: int | None = None,
+                        velocity_atom_indices: Sequence[int] | None = None,
                         ) -> None:
     """
     Append the RPMD reporter trio: optional spread, then centroid and beads.
@@ -934,12 +941,21 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
     distance_pairs : iterable of pair of int or None, optional
         Atom pairs whose centroid distance is logged alongside the expansion.
         Default is None.
+    velocity_record_interval : int or None, optional
+        If set, also attach an :class:`~openmmnqe.reporters.RPMDVelocityReporter`
+        writing centroid velocities to ``<prefix>_velocities.npz`` every this
+        many steps. Default is None.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose centroid velocities are recorded. Requires
+        *velocity_record_interval*. Default is None, which records every
+        atom.
 
     Raises
     ------
     ValueError
         If *distance_pairs* is given without *atoms_to_watch*, or an index
-        lies outside *topology*.
+        lies outside *topology*, or *velocity_atom_indices* is given without
+        *velocity_record_interval*.
 
     Notes
     -----
@@ -987,6 +1003,17 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
         file=f'{output_prefix}_thermo.log',
         reportInterval=n_report,
     ))
+
+    if velocity_atom_indices is not None and velocity_record_interval is None:
+        raise ValueError(
+            "velocity_atom_indices require velocity_record_interval"
+        )
+    if velocity_record_interval is not None:
+        simulation.reporters.append(RPMDVelocityReporter(
+            file=f'{output_prefix}_velocities.npz',
+            reportInterval=velocity_record_interval,
+            atom_indices=velocity_atom_indices,
+        ))
 
 
 # The adQTB noise buffer is transformed with a mixed-radix FFT, so a segment
@@ -2680,6 +2707,7 @@ def run_openmm_rpmd_contracted(
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
         seed: int | None = None,
+        apply_thermostat: bool = True,
 ) -> None:
     """
     Run a contracted ring-polymer MD (RPMD) production simulation.
@@ -2688,6 +2716,8 @@ def run_openmm_rpmd_contracted(
     components (e.g. PME reciprocal space) on fewer bead copies, reducing
     computational cost. A checkpoint from a prior RPMD equilibration is
     required. An optional PLUMED bias and ML/MM mixed potential are supported.
+    With *apply_thermostat* set to False the run is microcanonical
+    ring-polymer dynamics on the contracted forces.
 
     Parameters
     ----------
@@ -2751,6 +2781,12 @@ def run_openmm_rpmd_contracted(
         run reproducible. The ring polymer itself comes from
         *checkpoint_file*, so it is unaffected. If None, OpenMM chooses both
         non-deterministically. Default is None.
+    apply_thermostat : bool, optional
+        If False, disable the PILE thermostat and run microcanonical
+        (constant-energy) ring-polymer dynamics. *temperature* is still
+        required -- it sets the ring-polymer spring constants and so defines
+        the Hamiltonian, not a thermostat target -- and *barostat_freq* must
+        be None. *friction* is ignored by the dynamics. Default is True.
 
     Raises
     ------
@@ -2759,13 +2795,20 @@ def run_openmm_rpmd_contracted(
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
         a contraction is invalid, or *barostat_freq* is set on a nonperiodic
-        System, or *seed* is negative or not an integer.
+        System, or *seed* is negative or not an integer, or
+        *apply_thermostat* is False while *barostat_freq* is set.
 
     Warns
     -----
     UserWarning
         If *barostat_freq* is set on a System carrying a ``PythonForce``.
     """
+    if not apply_thermostat and barostat_freq is not None:
+        raise ValueError(
+            "apply_thermostat=False is microcanonical; a Monte Carlo "
+            "barostat samples no ensemble without a thermostat. Pass "
+            "barostat_freq=None."
+        )
     n_beads = _validate_rpmd_n_beads(n_beads)
     contractions = _validate_rpmd_contractions(contractions, n_beads)
     thermostat_seed, barostat_seed = _derive_seeds(
@@ -2816,6 +2859,8 @@ def run_openmm_rpmd_contracted(
     print(f"\nInitializing RPMDIntegrator with contractions: {contractions}", flush=True)
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep, contractions)
     _seed_random_stream(integrator, thermostat_seed)
+    if not apply_thermostat:
+        integrator.setApplyThermostat(False)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
 
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
@@ -2876,13 +2921,22 @@ def run_openmm_rpmd_prod(
         expansion_metric: Literal["rms", "mean"] = "rms",
         distance_pairs_to_watch: Iterable[tuple[int, int]] | None = None,
         seed: int | None = None,
+        apply_thermostat: bool = True,
+        snapshot_interval: int | None = None,
+        velocity_record_interval: int | None = None,
+        velocity_atom_indices: Sequence[int] | None = None,
 ) -> None:
     """
     Run a full ring-polymer MD (RPMD) production simulation.
 
     Loads a checkpoint from a prior RPMD equilibration and continues with a
     production run using the ``RPMDIntegrator``. An optional PLUMED bias,
-    RPMD barostat, and ML/MM mixed potential are supported.
+    RPMD barostat, and ML/MM mixed potential are supported. With
+    *apply_thermostat* set to False the run is microcanonical ring-polymer
+    dynamics, the ensemble every RPMD time-correlation observable is defined
+    in; *snapshot_interval* harvests full-bead restart archives along the way,
+    which is how :func:`openmmnqe.rates.run_openmm_rpmd_recrossing` gets its
+    dividing-surface configurations.
 
     Parameters
     ----------
@@ -2942,6 +2996,33 @@ def run_openmm_rpmd_prod(
         run reproducible. The ring polymer itself comes from
         *checkpoint_file*, so it is unaffected. If None, OpenMM chooses both
         non-deterministically. Default is None.
+    apply_thermostat : bool, optional
+        If False, disable the PILE thermostat and run microcanonical
+        (constant-energy) ring-polymer dynamics. *temperature* is still
+        required -- it sets the ring-polymer spring constants and so defines
+        the Hamiltonian, not a thermostat target -- and *barostat_freq* must
+        be None. *gamma* is ignored by the dynamics. The conserved quantity
+        is the ``E_ring(kJ/mol)`` column of the thermodynamic log; check it
+        with :func:`openmmnqe.reporters.rpmd_energy_conservation`.
+        Default is True.
+    snapshot_interval : int or None, optional
+        If set, write a full-bead RPMD restart archive
+        ``<output_prefix>_snapshot_<i>.npz`` after every *snapshot_interval*
+        steps, numbered from zero. The archives are ordinary RPMD restarts:
+        each holds every bead's positions and velocities and can seed
+        :func:`openmmnqe.rates.run_openmm_rpmd_recrossing`. Steps left over
+        after the last whole interval still run. Default is None, which
+        writes no snapshots.
+    velocity_record_interval : int or None, optional
+        If set, record the bead-averaged (centroid) velocities every this
+        many steps and write them to ``<output_prefix>_velocities.npz`` via
+        :class:`openmmnqe.reporters.RPMDVelocityReporter`, for the
+        correlation-function readers. The frames accumulate in memory until
+        the run ends. Default is None, which records nothing.
+    velocity_atom_indices : sequence of int or None, optional
+        Atoms whose centroid velocities are recorded. Requires
+        *velocity_record_interval*. Default is None, which records every
+        atom.
 
     Raises
     ------
@@ -2950,13 +3031,36 @@ def run_openmm_rpmd_prod(
     ValueError
         If an ML potential or calculator is given without *ml_idx*, or if
         *barostat_freq* is set on a nonperiodic System, or *seed* is negative
-        or not an integer.
+        or not an integer, or *apply_thermostat* is False while
+        *barostat_freq* is set, or *velocity_atom_indices* is given without
+        *velocity_record_interval*, or *snapshot_interval* or
+        *velocity_record_interval* is not a positive integer.
 
     Warns
     -----
     UserWarning
-        If *barostat_freq* is set on a System carrying a ``PythonForce``.
+        If *barostat_freq* is set on a System carrying a ``PythonForce``, or
+        if *snapshot_interval* exceeds *steps* so no snapshot is written.
     """
+    if not apply_thermostat and barostat_freq is not None:
+        raise ValueError(
+            "apply_thermostat=False is microcanonical; a Monte Carlo "
+            "barostat samples no ensemble without a thermostat. Pass "
+            "barostat_freq=None."
+        )
+    if snapshot_interval is not None:
+        snapshot_interval = require_integer(
+            snapshot_interval,
+            name="snapshot_interval",
+            minimum=1,
+        )
+        if snapshot_interval > steps:
+            warnings.warn(
+                f"snapshot_interval={snapshot_interval} exceeds "
+                f"steps={steps}; no snapshot will be written",
+                UserWarning,
+                stacklevel=2,
+            )
     thermostat_seed, barostat_seed = _derive_seeds(
         seed, "thermostat", "barostat"
     )
@@ -2978,6 +3082,8 @@ def run_openmm_rpmd_prod(
                                        gamma,
                                        time_step)
     _seed_random_stream(integrator, thermostat_seed)
+    if not apply_thermostat:
+        integrator.setApplyThermostat(False)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     _load_checkpoint(simulation, checkpoint_file, n_beads=n_beads)
 
@@ -2991,12 +3097,29 @@ def run_openmm_rpmd_prod(
             atoms_to_watch,
             expansion_metric=expansion_metric,
             distance_pairs=distance_pairs_to_watch,
+            velocity_record_interval=velocity_record_interval,
+            velocity_atom_indices=velocity_atom_indices,
         )
 
         _add_rpmd_progress_reporters(simulation, output_prefix, n_report)
 
         print(f"Starting production run for {steps} steps...", flush=True)
-        step_rpmd(simulation, steps)
+        if snapshot_interval is None:
+            step_rpmd(simulation, steps)
+        else:
+            completed = 0
+            snapshot_index = 0
+            while completed + snapshot_interval <= steps:
+                step_rpmd(simulation, snapshot_interval)
+                completed += snapshot_interval
+                _save_rpmd_restart(
+                    simulation,
+                    f'{output_prefix}_snapshot_{snapshot_index:05d}.npz',
+                    n_beads,
+                )
+                snapshot_index += 1
+            if completed < steps:
+                step_rpmd(simulation, steps - completed)
         print("Production run complete.", flush=True)
 
         _save_final_state(
