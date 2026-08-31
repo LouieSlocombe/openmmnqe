@@ -188,7 +188,7 @@ nitpick_ignore_regex = [
     # words, and anything containing a character a dotted Python name cannot
     # hold -- a quote, a brace, a space or a hyphen. A genuine typo in an
     # openmmnqe name is still a valid identifier, so it still fails the build.
-    (r"py:class", r"optional|iterable|sequence|pair|scalar|callable"),
+    (r"py:class", r"optional|iterable|sequence|mapping|pair|scalar|callable"),
     (r"py:class", r".*[^\w.].*"),
 ]
 

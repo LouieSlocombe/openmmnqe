@@ -161,11 +161,9 @@ figure, axes = nqe.plot_rpmd_atom_expansion(
 )
 ```
 
-Repeated path/window values are averaged automatically, and `progress_bins`
-forms conditional means for a continuous progress coordinate. For separate
-umbrella windows, repeat each window's normalised centre for its reporter rows
-before concatenating the logs. Matplotlib is available through the `plot`
-optional dependency.
+Repeated path values are averaged automatically, and `progress_bins`
+forms conditional means for a continuous progress coordinate. Matplotlib is
+available through the `plot` optional dependency.
 
 ## Trajectory formats
 

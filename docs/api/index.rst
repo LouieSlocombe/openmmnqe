@@ -18,3 +18,4 @@ authoritative list of what is public.
    rates
    reporters
    tools
+   walkers

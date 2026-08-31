@@ -191,3 +191,4 @@ plumed.dat
 py.out
 ligands.xml
 forcefill_work/
+walker_*/

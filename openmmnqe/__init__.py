@@ -6,7 +6,8 @@ including RPMD and adQTB nuclear-quantum-effect integrators and ML/MM
 potentials (:mod:`openmmnqe.openmm`), RPMD reporters
 (:mod:`openmmnqe.reporters`), equilibrium isotope effects
 (:mod:`openmmnqe.isotopes`), ring-polymer rate dynamics
-(:mod:`openmmnqe.rates`) and assorted simulation-setup utilities
+(:mod:`openmmnqe.rates`), independent multi-walker orchestration
+(:mod:`openmmnqe.walkers`) and assorted simulation-setup utilities
 (:mod:`openmmnqe.tools`).
 
 This package is the simulation itself, and it has two dependencies that are
@@ -54,7 +55,9 @@ free-energy surface that comes out -- lives in
     product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
     neb_path = rt.quick_guess_path(reactant, product)
     plumed_input, fes_command = rt.plumed_input_1pt(modeller, idx, temperature)
-    nqe.run_openmm_prod(modeller, forcefield, plumed_script_path=plumed_input)
+    with open("plumed.dat", "w") as f:
+        f.write(plumed_input)
+    nqe.run_openmm_prod(modeller, forcefield, plumed_script_path="plumed.dat")
     rt.plot_plumed_fes("fes.dat", filename="fes")
 
 The reactiontools builders take the ``openmm.app.Modeller`` and
@@ -164,6 +167,10 @@ from .tools import (
     write_multimodel_pdb,
     zero_velocities,
 )
+from .walkers import (
+    WalkerEnsemble,
+    run_openmm_walkers,
+)
 
 __all__ = [
     "IsotopeFreeEnergy",
@@ -182,6 +189,7 @@ __all__ = [
     "TrajectoryOptions",
     "TransmissionResult",
     "VelocityArchiveReporter",
+    "WalkerEnsemble",
     "__version__",
     "adqtb_convergence",
     "adqtb_fdt_residual",
@@ -239,6 +247,7 @@ __all__ = [
     "run_openmm_rpmd_prod",
     "run_openmm_rpmd_recrossing",
     "run_openmm_steered",
+    "run_openmm_walkers",
     "sample_rpmd_velocities",
     "save_only_index_atoms",
     "save_pdb_selection",

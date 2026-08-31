@@ -14,11 +14,10 @@ python examples/rpmd.py --help
 python examples/workflows.py --help
 ```
 
-`opes.py` and `steered_path.py` each run one complete workflow. For
-multiple-walker metadynamics, prepare `plumed.dat` in the current directory
-and run `examples/run_walker.sh`; `run_walker.py --help` documents the
-single-walker options.
+`opes.py`, `steered_path.py` and `walkers.py` each run one complete workflow;
+`walkers.py` launches several independent OPES walkers as parallel processes
+and combines them into one free-energy surface by reweighting.
 
 These are research-scale examples, not CI tests. Depending on the workflow,
-they require a CUDA GPU, MACE model downloads, PLUMED, ORCA, WHAM, or
+they require a CUDA GPU, MACE model downloads, PLUMED, ORCA, or
 AmberTools.
