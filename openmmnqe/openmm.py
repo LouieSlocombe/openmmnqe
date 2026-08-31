@@ -788,7 +788,7 @@ def _warn_barostat_on_python_force(system: openmm.System) -> None:
 
 
 def _load_plumed(system: openmm.System,
-                 plumed_script_path: str | None) -> None:
+                 plumed_script_path: str | None) -> PlumedForce | None:
     """
     Attach a PLUMED bias force to the system if a script path is given.
 
@@ -798,15 +798,106 @@ def _load_plumed(system: openmm.System,
         System the bias force is added to, in place.
     plumed_script_path : str or None
         Path to a PLUMED input script. None makes this a no-op.
+
+    Returns
+    -------
+    PlumedForce or None
+        The force that was added, so a ring-polymer stage can put it in its
+        own force group and contract it onto the centroid, or None when
+        there was no script.
     """
-    if plumed_script_path is not None:
-        print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
+    if plumed_script_path is None:
+        return None
 
-        with open(plumed_script_path) as f:
-            script_content = f.read()
+    print(f"Adding PLUMED bias from {plumed_script_path}...", flush=True)
 
-        plumed_force = PlumedForce(script_content)
-        system.addForce(plumed_force)
+    with open(plumed_script_path) as f:
+        script_content = f.read()
+
+    plumed_force = PlumedForce(script_content)
+    system.addForce(plumed_force)
+    return plumed_force
+
+
+def _free_force_group(system: openmm.System,
+                      reserved: Iterable[int] = ()) -> int:
+    """The lowest force group nothing in *system* is using.
+
+    Both halves of a ``NonbondedForce`` count, since the reciprocal space
+    part carries a group of its own, and so does anything in *reserved* --
+    a group the caller has already asked to contract is spoken for even if
+    no force carries it yet, and taking it would silently overwrite their
+    contraction with this one.
+    """
+    taken = set(reserved)
+    for force in system.getForces():
+        taken.add(force.getForceGroup())
+        if isinstance(force, openmm.NonbondedForce):
+            taken.add(force.getReciprocalSpaceForceGroup())
+    for group in range(32):
+        if group not in taken:
+            return group
+    raise RuntimeError("all 32 force groups are in use, so the bias cannot "
+                       "be given one of its own to contract")
+
+
+def _centroid_bias_contraction(
+        system: openmm.System,
+        bias: PlumedForce | None,
+        contractions: Mapping[int, int] | None,
+        centroid_bias: bool,
+) -> dict[int, int] | None:
+    """Contract the PLUMED bias onto the ring-polymer centroid.
+
+    ``RPMDIntegrator`` evaluates a force group on every bead unless the
+    contractions map says otherwise -- so a bias simply added to the System
+    is applied *per bead*, at each bead's own coordinates. That is not the
+    centroid potential of mean force, which is the quantity that connects a
+    ring polymer to a quantum rate; and PLUMED is a stateful engine, so being
+    handed ``n_beads`` coordinate sets per step also makes its ``COLVAR``,
+    its kernels and its reconstructed surface describe beads rather than
+    centroids.
+
+    Contracting the bias' group to a single copy evaluates it on the
+    contracted position -- the centroid -- and transforms the force back onto
+    every bead, which is centroid biasing exactly. The bias needs a group to
+    itself for that, because contraction is keyed on the group and the
+    default group 0 is shared with the bonded forces.
+
+    Parameters
+    ----------
+    system : openmm.System
+        System holding the bias, whose force group is set here.
+    bias : PlumedForce or None
+        The bias to contract, or None when the run is unbiased.
+    contractions : Mapping or None
+        Contractions the caller already wants, which are kept.
+    centroid_bias : bool
+        False leaves the bias on every bead, which is what runs made before
+        this existed did. Reproducing one of those is the only reason to.
+
+    Returns
+    -------
+    dict or None
+        The contractions to hand ``RPMDIntegrator``, or None for its default.
+    """
+    merged = dict(contractions) if contractions else {}
+    if bias is None or not centroid_bias:
+        if bias is not None:
+            warnings.warn(
+                "centroid_bias=False evaluates the PLUMED bias separately on "
+                "every bead, so the surface that comes out is not a centroid "
+                "free energy; use it only to reproduce an earlier run",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        return merged or None
+    group = _free_force_group(system, merged)
+    bias.setForceGroup(group)
+    merged[group] = 1
+    print(f"PLUMED bias in force group {group}, contracted onto the centroid",
+          flush=True)
+    return merged
 
 
 def _is_inline_plumed_input(plumed_input: str | os.PathLike[str]) -> bool:
@@ -3208,6 +3299,7 @@ def run_openmm_rpmd_contracted(
         steps: int = 100_000,
         n_report: int = 1_000,
         contractions: Mapping[int, int] | None = None,
+        centroid_bias: bool = True,
         platform_name: str | None = None,
         deuterate: bool = False,
         deuterate_option: WorkflowDeuterationOption = 'water',
@@ -3243,6 +3335,13 @@ def run_openmm_rpmd_contracted(
     plumed_script_path : str or None, optional
         Path to a PLUMED input script. If None, no bias is applied.
         Default is None.
+    centroid_bias : bool, optional
+        Evaluate the PLUMED bias on the ring-polymer centroid rather than
+        separately on every bead, by giving it a force group of its own and
+        contracting that group to one copy. A bias merely added to the System
+        is applied per bead, which does not give the centroid potential of
+        mean force and feeds PLUMED one coordinate set per bead per step.
+        Default is True; False reproduces a run made before this existed.
     checkpoint_file : str, optional
         Path to the equilibration checkpoint. Default is ``'rpmd_ready.chk'``.
     output_prefix : str, optional
@@ -3364,7 +3463,7 @@ def run_openmm_rpmd_contracted(
         _seed_random_stream(barostat, barostat_seed)
         system.addForce(barostat)
 
-    _load_plumed(system, plumed_script_path)
+    bias = _load_plumed(system, plumed_script_path)
 
     # Contraction is keyed on force group, so the forces have to be sorted into
     # the groups `contractions` names: the costlier the force, the fewer beads
@@ -3387,12 +3486,21 @@ def run_openmm_rpmd_contracted(
             force.setForceGroup(0)
             print(f"  - {force.__class__.__name__}: Group 0")
 
+        elif isinstance(force, PlumedForce):
+            # Placed below, once every other group is settled: the bias needs
+            # a group of its own so it can be contracted onto the centroid.
+            pass
+
         else:
-            # An unrecognised force (an external PythonForce potential, a
-            # PLUMED bias) keeps its group: groups absent from the
-            # contractions dict run on every bead.
+            # An unrecognised force -- an external PythonForce potential --
+            # keeps its group: groups absent from the contractions dict run
+            # on every bead.
             print(f"  - {force.__class__.__name__}: keeping group "
                   f"{force.getForceGroup()}")
+
+    contractions = _centroid_bias_contraction(
+        system, bias, contractions, centroid_bias
+    )
 
     print(f"\nInitializing RPMDIntegrator with contractions: {contractions}", flush=True)
     integrator = openmm.RPMDIntegrator(n_beads, temperature, friction, timestep, contractions)
@@ -3469,6 +3577,7 @@ def run_openmm_rpmd_prod(
         velocity_record_interval: int | None = None,
         velocity_atom_indices: Sequence[int] | None = None,
         trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
+        centroid_bias: bool = True,
 ) -> None:
     """
     Run a full ring-polymer MD (RPMD) production simulation.
@@ -3491,6 +3600,13 @@ def run_openmm_rpmd_prod(
     plumed_script_path : str or None, optional
         Path to a PLUMED input script. If None, no bias is applied.
         Default is None.
+    centroid_bias : bool, optional
+        Evaluate the PLUMED bias on the ring-polymer centroid rather than
+        separately on every bead, by giving it a force group of its own and
+        contracting that group to one copy. A bias merely added to the System
+        is applied per bead, which does not give the centroid potential of
+        mean force and feeds PLUMED one coordinate set per bead per step.
+        Default is True; False reproduces a run made before this existed.
     checkpoint_file : str, optional
         Path to the equilibration checkpoint. Default is ``'rpmd_ready.chk'``.
     output_prefix : str, optional
@@ -3634,11 +3750,19 @@ def run_openmm_rpmd_prod(
         _seed_random_stream(barostat, barostat_seed)
         system.addForce(barostat)
 
-    _load_plumed(system, plumed_script_path)
-    integrator = openmm.RPMDIntegrator(n_beads,
-                                       temperature,
-                                       gamma,
-                                       time_step)
+    bias = _load_plumed(system, plumed_script_path)
+    contractions = _centroid_bias_contraction(system, bias, None, centroid_bias)
+    if contractions is None:
+        integrator = openmm.RPMDIntegrator(n_beads,
+                                           temperature,
+                                           gamma,
+                                           time_step)
+    else:
+        integrator = openmm.RPMDIntegrator(n_beads,
+                                           temperature,
+                                           gamma,
+                                           time_step,
+                                           contractions)
     _seed_random_stream(integrator, thermostat_seed)
     if not apply_thermostat:
         integrator.setApplyThermostat(False)

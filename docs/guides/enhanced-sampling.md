@@ -64,5 +64,17 @@ exercise: a proton transfer barrier that is too high to cross on its own, in a
 system where the proton's zero-point energy is precisely what you are trying to
 measure.
 
-Bear in mind that the bias acts on the centroid, and see [](reporters.md) for
-reading the bead spread back out along the biased coordinate.
+The bias acts on the **centroid**, and it takes work to make that true.
+`RPMDIntegrator` evaluates a force group on every bead unless its contractions
+map says otherwise, so a bias merely added to the System is applied once per
+bead, at each bead's own coordinates -- which is not the centroid potential of
+mean force, and which hands PLUMED, a stateful engine, `n_beads` coordinate
+sets per step. Both production stages therefore give the bias a force group of
+its own and contract that group to a single copy, so it is evaluated on the
+contracted position and the force transformed back onto every bead.
+
+Pass `centroid_bias=False` only to reproduce a run made before that was so; it
+warns, because the surface it produces is not a centroid free energy.
+
+See [](reporters.md) for reading the bead spread back out along the biased
+coordinate.
