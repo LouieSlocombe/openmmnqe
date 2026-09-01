@@ -177,6 +177,15 @@ none at all. `velocity_record_interval` writes a `<prefix>_velocities.npz`
 archive on any stage, classical or ring-polymer, and
 `nqe.vibrational_spectrum` turns it into a vibrational density of states.
 
+The ring-polymer centroid and bead trajectories wrap molecules into the box
+against the *Topology*'s bonds rather than by asking OpenMM to do it, and
+honour `TrajectoryOptions.enforce_periodic_box` like the classical stages do.
+The distinction matters on a mixed ML/MM system: `createMixedSystem` deletes
+every bonded term inside the ML region, so a molecule modelled entirely by the
+ML potential is invisible to the molecule list OpenMM wraps by, and its atoms
+would be scattered across the box one at a time. A non-periodic System is now
+left alone rather than folded into OpenMM's default 2 nm box.
+
 ## Ring-polymer thermodynamics
 
 Every RPMD stage writes `<prefix>_thermo.log` alongside its spread, centroid and
@@ -209,12 +218,26 @@ trajectory are correlated and `std / sqrt(n)` would flatter them. Call
 `nqe.rpmd_thermodynamics(simulation)` to take the same set of readings once,
 outside any reporter.
 
-Each report reads every bead, costing about one RPMD step, so the default
-`n_report` of 1000 makes it a fraction of a percent. Two caveats are worth
-knowing: `KE_cv` is biased for a system with constraints, because OpenMM's
-forces omit constraint forces -- the reporter warns, and the fix is to run the
-beads flexible -- and under ring-polymer contraction the estimators describe the
-full potential rather than the contracted one that drives the dynamics.
+Each report reads every bead with its forces, costing about one RPMD step, so
+the default `n_report` of 1000 makes it a fraction of a percent. That holds on a
+mixed ML/MM system too: the centroid and bead trajectory reporters ask for
+positions alone, which OpenMM answers without running the ML model at all.
+
+Two caveats are worth knowing: `KE_cv` is biased for a system with constraints,
+because OpenMM's forces omit constraint forces -- the reporter warns, and the
+fix is to run the beads flexible -- and under ring-polymer contraction the
+estimators describe the full potential rather than the contracted one that
+drives the dynamics.
+
+`E_ring` and `E_spring` are reconstructed from the bead pass rather than read
+from `RPMDIntegrator.getTotalEnergy()`. That method agrees with the
+reconstruction to within one part in a million, but it cannot be called at all
+on a mixed ML/MM system on CUDA or OpenCL: the ML potential is an
+`openmm.PythonForce`, those platforms evaluate forces on a worker thread, and
+the method holds the GIL while it waits for one, so the call deadlocks and the
+run stops dead at its first report. Reconstructing costs one assumption --
+that OpenMM links neighbouring copies with springs of frequency
+`P k_B T / hbar` -- which the test suite pins against OpenMM itself.
 
 `nqe.RPMDKineticDecompositionReporter` splits that same `KE_cv` over individual
 atoms, which is the diagnostic that says how quantum one particular proton is: a

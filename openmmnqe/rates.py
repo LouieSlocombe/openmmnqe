@@ -65,9 +65,11 @@ from .openmm import (
     _maybe_deuterate,
     _validate_rpmd_n_beads,
 )
+from .reporters import _rpmd_ring_energies
 from .tools import (
     WorkflowDeuterationOption,
     _centroid_of_beads,
+    _particle_masses_dalton,
     _sample_maxwell_boltzmann_velocities,
     step_rpmd,
 )
@@ -770,6 +772,7 @@ def run_openmm_rpmd_recrossing(
     integrator.setApplyThermostat(False)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     periodic = system.usesPeriodicBoundaryConditions()
+    particle_masses = _particle_masses_dalton(system)
 
     child_sequences = _spawn_child_sequences(
         seed,
@@ -847,8 +850,11 @@ def run_openmm_rpmd_recrossing(
                         f"{s_value:.17g}",
                     ]
                     if record_energy:
-                        energy = integrator.getTotalEnergy().value_in_unit(
-                            unit.kilojoule_per_mole
+                        # Not RPMDIntegrator.getTotalEnergy(): that method
+                        # deadlocks on a mixed ML/MM System on CUDA or
+                        # OpenCL, which is exactly what this driver runs.
+                        energy, _ = _rpmd_ring_energies(
+                            integrator, particle_masses
                         )
                         fields.append(f"{energy:.17g}")
                     log.write("\t".join(fields) + "\n")

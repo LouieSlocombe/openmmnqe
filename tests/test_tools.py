@@ -586,6 +586,202 @@ def test_init_beads_rejects_temperature_inconsistent_with_integrator() -> None:
         )
 
 
+def _bonded_chain_topology(sizes: Sequence[int]) -> app.Topology:
+    """A Topology of bonded chains, one residue each, with no System behind it."""
+    topology = app.Topology()
+    chain = topology.addChain()
+    for size in sizes:
+        residue = topology.addResidue("MOL", chain)
+        previous = None
+        for _ in range(size):
+            atom = topology.addAtom("C", app.element.carbon, residue)
+            if previous is not None:
+                topology.addBond(previous, atom)
+            previous = atom
+    return topology
+
+
+def _bonded_chain_system(topology: app.Topology, box: np.ndarray,
+                         bonded: bool) -> tuple[openmm.System, np.ndarray]:
+    """
+    Build a System for *topology*, optionally without any bonded terms.
+
+    With *bonded* False the System carries the bonds nowhere, which is what
+    ``MLPotential.createMixedSystem`` leaves behind for a molecule modelled
+    entirely by the ML potential: it deletes every bonded term inside the ML
+    region, and the ``openmm.PythonForce`` that replaces them reports no
+    pairs. OpenMM then treats each of those atoms as its own molecule.
+    """
+    system = openmm.System()
+    force = openmm.HarmonicBondForce()
+    for _ in topology.atoms():
+        system.addParticle(12.011 * unit.dalton)
+    if bonded:
+        for bond in topology.bonds():
+            force.addBond(
+                bond.atom1.index,
+                bond.atom2.index,
+                0.15 * unit.nanometer,
+                1000.0 * unit.kilojoule_per_mole / unit.nanometer**2,
+            )
+    system.addForce(force)
+    nonbonded = openmm.NonbondedForce()
+    nonbonded.setNonbondedMethod(openmm.NonbondedForce.CutoffPeriodic)
+    for _ in topology.atoms():
+        nonbonded.addParticle(
+            0.0, 0.3 * unit.nanometer, 0.1 * unit.kilojoule_per_mole
+        )
+    system.addForce(nonbonded)
+    system.setDefaultPeriodicBoxVectors(
+        *[Vec3(*row) * unit.nanometer for row in box]
+    )
+    topology.setPeriodicBoxVectors([Vec3(*row) * unit.nanometer for row in box])
+    return system, box
+
+
+@pytest.mark.parametrize("box", [
+    np.array([[2.5, 0.0, 0.0], [0.0, 2.7, 0.0], [0.0, 0.0, 2.4]]),
+    np.array([[2.5, 0.0, 0.0], [0.4, 2.6, 0.0], [0.3, 0.35, 2.4]]),
+], ids=["orthorhombic", "triclinic"])
+def test_wrap_molecules_reproduces_openmm_where_openmm_is_right(
+    box: np.ndarray,
+) -> None:
+    # Where the System does carry the bonds, OpenMM's own molecule list is
+    # complete and enforcePeriodicBox is correct. Matching it exactly there
+    # is what makes the Topology-driven replacement a drop-in.
+    topology = _bonded_chain_topology([3] * 40)
+    system, box = _bonded_chain_system(topology, box, bonded=True)
+    generator = np.random.default_rng(1)
+    positions = np.concatenate([
+        base + np.array([[0.0, 0.0, 0.0], [0.12, 0.0, 0.0], [0.24, 0.0, 0.0]])
+        for base in generator.uniform(-1.0, 3.0, (40, 3))[:, np.newaxis, :]
+    ])
+
+    integrator = openmm.RPMDIntegrator(
+        2, 300 * unit.kelvin, 1.0 / unit.picosecond, 0.0002 * unit.picoseconds
+    )
+    simulation = app.Simulation(
+        topology, system, integrator,
+        openmm.Platform.getPlatform("Reference"),
+    )
+    simulation.context.setPositions(positions * unit.nanometer)
+    for bead in range(2):
+        integrator.setPositions(bead, positions * unit.nanometer)
+
+    raw = integrator.getState(
+        copy=0, getPositions=True, enforcePeriodicBox=False
+    ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    expected = integrator.getState(
+        copy=0, getPositions=True, enforcePeriodicBox=True
+    ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+
+    wrapped = nqe_tools._wrap_molecules(
+        raw, box, nqe_tools._topology_molecule_tree(topology)
+    )
+    assert wrapped == pytest.approx(expected, abs=1e-6)
+
+
+def test_wrap_molecules_keeps_a_molecule_the_system_has_no_bonds_for() -> None:
+    # The mixed ML/MM case: the Topology knows the molecule, the System does
+    # not, and OpenMM therefore wraps each atom on its own.
+    box = np.array([[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]])
+    topology = _bonded_chain_topology([4])
+    system, box = _bonded_chain_system(topology, box, bonded=False)
+    # A chain straddling x = 0, so wrapping has something to get wrong.
+    positions = np.array([
+        [-0.10, 1.0, 1.0], [0.05, 1.0, 1.0], [0.20, 1.0, 1.0], [0.35, 1.0, 1.0],
+    ])
+
+    integrator = openmm.RPMDIntegrator(
+        2, 300 * unit.kelvin, 1.0 / unit.picosecond, 0.0002 * unit.picoseconds
+    )
+    simulation = app.Simulation(
+        topology, system, integrator,
+        openmm.Platform.getPlatform("Reference"),
+    )
+    simulation.context.setPositions(positions * unit.nanometer)
+    for bead in range(2):
+        integrator.setPositions(bead, positions * unit.nanometer)
+
+    openmm_wrapped = integrator.getState(
+        copy=0, getPositions=True, enforcePeriodicBox=True
+    ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    ours = nqe_tools._wrap_molecules(
+        positions, box, nqe_tools._topology_molecule_tree(topology)
+    )
+
+    def span(values: np.ndarray) -> float:
+        return float(np.ptp(values[:, 0]))
+
+    # OpenMM throws the first atom a whole box length away from the rest.
+    assert span(openmm_wrapped) > 1.5
+    assert span(ours) == pytest.approx(0.45)
+    # Every bond survives, and the molecule's centre lands inside the box.
+    assert np.linalg.norm(np.diff(ours, axis=0), axis=1) == pytest.approx(0.15)
+    assert 0.0 <= ours.mean(axis=0)[0] < 2.0
+
+
+def _straddling_chain_simulation() -> tuple[app.Simulation, np.ndarray]:
+    """A 4-atom chain across x = 0 whose bonds the System does not carry."""
+    box = np.array([[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]])
+    topology = _bonded_chain_topology([4])
+    system, box = _bonded_chain_system(topology, box, bonded=False)
+    positions = np.array([
+        [-0.10, 1.0, 1.0], [0.05, 1.0, 1.0], [0.20, 1.0, 1.0], [0.35, 1.0, 1.0],
+    ])
+    integrator = openmm.RPMDIntegrator(
+        2, 300 * unit.kelvin, 1.0 / unit.picosecond, 0.0002 * unit.picoseconds
+    )
+    simulation = app.Simulation(
+        topology, system, integrator,
+        openmm.Platform.getPlatform("Reference"),
+    )
+    simulation.context.setPositions(positions * unit.nanometer)
+    for bead in range(2):
+        integrator.setPositions(bead, positions * unit.nanometer)
+    return simulation, positions
+
+
+def test_centroid_positions_wraps_by_topology_molecules() -> None:
+    simulation, positions = _straddling_chain_simulation()
+
+    centroid = np.asarray(
+        nqe.centroid_positions(simulation, n_atoms=4, n_beads=2).value_in_unit(
+            unit.nanometer
+        )
+    )
+
+    # Every bond survives, and the molecule's centre lands inside the box.
+    assert np.linalg.norm(
+        np.diff(centroid, axis=0), axis=1
+    ) == pytest.approx(0.15)
+    assert 0.0 <= centroid.mean(axis=0)[0] < 2.0
+
+
+def test_centroid_positions_can_be_told_not_to_wrap() -> None:
+    simulation, positions = _straddling_chain_simulation()
+
+    centroid = np.asarray(
+        nqe.centroid_positions(
+            simulation, n_atoms=4, n_beads=2, enforce_periodic_box=False
+        ).value_in_unit(unit.nanometer)
+    )
+
+    assert centroid == pytest.approx(positions)
+
+
+def test_molecule_tree_groups_atoms_by_topology_bonds() -> None:
+    tree = nqe_tools._topology_molecule_tree(_bonded_chain_topology([3, 2, 1]))
+
+    assert tree.n_molecules == 3
+    assert tree.molecule.tolist() == [0, 0, 0, 1, 1, 2]
+    # Roots carry no parent; every other atom is reached from a bonded one.
+    assert tree.parent.tolist() == [-1, 0, 1, -1, 3, -1]
+    # Levels hold the atoms at each bond distance, so a whole level can be
+    # unwrapped at once after its parents are settled.
+    assert [level.tolist() for level in tree.levels] == [[1, 4], [2]]
+
+
 def test_centroid_positions_unwraps_beads_across_box_boundary() -> None:
     simulation = SimpleNamespace(
         integrator=_Integrator(

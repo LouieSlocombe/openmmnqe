@@ -50,6 +50,18 @@ The centroid reporter is the one to use for anything that expects a normal
 trajectory, since the centroid is the closest classical analogue of "the
 position of the atom".
 
+Both reporters read the raw stored coordinates and wrap molecules into the box
+themselves, following the *Topology*'s bonds. OpenMM's own
+`enforcePeriodicBox` cannot be used here: it wraps by a molecule list built
+from the bonded pairs the forces report, and
+`MLPotential.createMixedSystem` deletes every bonded term inside the ML region
+while the `openmm.PythonForce` that replaces them reports none. A molecule
+modelled entirely by the ML potential would therefore have each of its atoms
+moved into the box separately, which tears it apart. Where OpenMM's list *is*
+complete the two agree exactly, so nothing changes for a plain MM run. Pass
+`enforce_periodic_box=False` in the trajectory options to keep the raw
+coordinates instead; a non-periodic System is never wrapped either way.
+
 ## Trajectory formats
 
 Every stage writes a PDB by default, and for a long solvated run that is the
@@ -120,6 +132,16 @@ any simulation. {func}`~openmmnqe.reporters.rpmd_thermodynamic_averages` reads
 the log back with block-averaged standard errors, and
 {func}`~openmmnqe.reporters.plot_rpmd_thermodynamics` plots it.
 
+`E_ring` and `E_spring` are reconstructed from the bead pass — the bead
+kinetic and potential energies plus springs of frequency `P k_B T / hbar` —
+rather than read from `RPMDIntegrator.getTotalEnergy()`. The two agree to
+within one part in a million, but that method cannot be called at all on a
+mixed ML/MM System on CUDA or OpenCL: the ML potential is an
+`openmm.PythonForce`, those platforms evaluate forces on a worker thread, and
+the method holds the GIL while it waits for one. `step()` and `getState()` do
+release it, so such a run used to advance normally and then stop dead at its
+first report.
+
 ### Per-atom kinetic decomposition
 
 The system `KE_cv` answers "how quantum is this system". Keeping the atom axis
@@ -154,7 +176,14 @@ It reads the beads a second time per report, so turning it on for everyone who
 passes `atoms_to_watch` would quietly double their per-report cost. At the
 default `n_report` of 1000 that second pass is irrelevant; at the interval of
 ten or so that per-atom statistics want, give the thermodynamic reporter the
-coarser interval of the two.
+coarser interval of the two — which means attaching the reporters by hand,
+because the drivers hand every reporter the same `n_report`.
+
+These are the only two reporters that cost anything. The centroid and bead
+trajectory reporters ask for positions alone, which OpenMM answers without
+evaluating any force — including, on a mixed ML/MM system, without running the
+ML model. So the several bead passes a report makes are not several force
+evaluations.
 
 ### Two quantities deliberately absent
 

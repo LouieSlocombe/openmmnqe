@@ -1353,10 +1353,10 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
         *atoms_to_watch*. Default is False.
     trajectory : TrajectoryOptions, optional
         Resolved trajectory options for the centroid and bead trajectories.
-        Its interval is not used: the bead states are read once per report
-        for every reporter here, so a second cadence would buy nothing.
-        Default writes PDB, which one file per bead makes the most expensive
-        output the package has.
+        Its interval is not used: reading a bead's positions is free next to
+        reading its forces, so a second cadence would buy little. Its
+        ``enforce_periodic_box`` is honoured. Default writes PDB, which one
+        file per bead makes the most expensive output the package has.
 
     Raises
     ------
@@ -1371,9 +1371,17 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
     -----
     The thermodynamic reporter is always attached: an RPMD Context carries no
     meaningful energy or temperature, so without it a run leaves no energy
-    trace at all.  Each of its reports reads every bead once, costing roughly
-    one RPMD step; at the drivers' default *n_report* of 1000 that is a
-    fraction of a percent.
+    trace at all.  Each of its reports reads every bead once with forces,
+    costing roughly one RPMD step; at the drivers' default *n_report* of 1000
+    that is a fraction of a percent.  The kinetic decomposition reporter pays
+    the same again, because it takes its own bead pass rather than sharing
+    that one.
+
+    Only those two cost anything.  The centroid and bead trajectory reporters
+    ask for positions alone, which OpenMM answers without evaluating any
+    force -- including, on a mixed ML/MM System, without running the ML model.
+    So the several bead passes a report makes are not several force
+    evaluations.
 
     Under ring-polymer contraction its estimators use the full, uncontracted
     forces evaluated at each bead, so they describe the full potential rather
@@ -1417,6 +1425,7 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
             num_beads=n_beads,
             format=trajectory.format,
             atom_indices=trajectory.atom_indices,
+            enforce_periodic_box=trajectory.enforce_periodic_box,
         ))
 
         simulation.reporters.append(RPMDBeadReporter(
@@ -1426,6 +1435,7 @@ def _add_rpmd_reporters(simulation: app.Simulation, topology: app.Topology,
             num_beads=n_beads,
             format=trajectory.format,
             atom_indices=trajectory.atom_indices,
+            enforce_periodic_box=trajectory.enforce_periodic_box,
         ))
         _write_trajectory_topology(simulation, output_prefix, trajectory)
 

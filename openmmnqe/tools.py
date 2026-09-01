@@ -18,7 +18,7 @@ import os
 import re
 from collections.abc import Sequence
 from numbers import Integral
-from typing import Any, Literal, TextIO
+from typing import Any, Literal, NamedTuple, TextIO
 
 import numpy as np
 import numpy.typing as npt
@@ -343,6 +343,261 @@ def _particle_masses_dalton(system: openmm.System) -> np.ndarray:
     return masses
 
 
+def _ring_spring_energy(bead_positions_nm: npt.NDArray[np.float64],
+                        masses_amu: npt.NDArray[np.float64],
+                        temperature_k: float,
+                        ) -> float:
+    r"""
+    Energy of the harmonic springs linking neighbouring beads.
+
+    OpenMM links copy :math:`i` to copy :math:`i+1` with a spring of angular
+    frequency :math:`\omega_P = P k_B T / \hbar`, so the ring's spring term is
+
+    .. math::
+
+        E_{spring} = \frac{1}{2} \omega_P^2 \sum_{i=1}^{P} \sum_{a}
+                     m_a \left|\mathbf{r}_{i+1,a}-\mathbf{r}_{i,a}\right|^2
+
+    with the bead index taken modulo ``P``.  Massless particles drop out on
+    their own, so virtual sites and frozen atoms need no masking.
+
+    This exists because ``RPMDIntegrator.getTotalEnergy()`` cannot be called
+    on a mixed ML/MM System on a GPU platform: the ML potential is an
+    ``openmm.PythonForce``, CUDA and OpenCL evaluate forces on a worker
+    thread, and that method does not release the GIL, so the worker can
+    never enter the Python callback and the call deadlocks.  Reconstructing
+    the ring energy from a bead pass avoids the method entirely.
+
+    Parameters
+    ----------
+    bead_positions_nm : numpy.ndarray
+        Bead positions in nanometres, shaped ``(n_beads, n_atoms, 3)``.
+        These must be the raw stored coordinates, contiguous within a ring
+        polymer rather than wrapped copy by copy.
+    masses_amu : numpy.ndarray
+        Particle masses in daltons, shaped ``(n_atoms,)``.
+    temperature_k : float
+        The integrator's temperature setpoint in kelvin, which is what sets
+        the spring frequency.  An estimator temperature chosen by a caller
+        does not belong here.
+
+    Returns
+    -------
+    float
+        Spring energy in kJ/mol.
+
+    Notes
+    -----
+    Daltons times nm squared per ps squared is exactly kJ/mol, so the only
+    conversion needed is of ``omega_P`` from SI into inverse picoseconds.
+    """
+    positions = np.asarray(bead_positions_nm, dtype=np.float64)
+    masses = np.asarray(masses_amu, dtype=np.float64)
+    n_beads = positions.shape[0]
+
+    # The same omega_P as _sample_free_ring_polymer_displacements, carried
+    # from SI into inverse picoseconds so the result lands in kJ/mol.
+    omega_p = (
+        n_beads * constants.k * temperature_k / constants.hbar * 1.0e-12
+    )
+
+    displacements = np.roll(positions, -1, axis=0) - positions
+    return 0.5 * omega_p**2 * float(np.sum(
+        masses[np.newaxis, :, np.newaxis] * displacements**2
+    ))
+
+
+class _MoleculeTree(NamedTuple):
+    """
+    The molecules of a Topology, as a bond-following spanning forest.
+
+    Attributes
+    ----------
+    parent : numpy.ndarray
+        For each atom, the index of the bonded atom it was reached from, or
+        -1 if it is the root of its molecule. Shaped ``(n_atoms,)``.
+    levels : tuple of numpy.ndarray
+        Atom indices grouped by their distance in bonds from their root,
+        nearest first and roots excluded. Every atom in ``levels[k]`` has its
+        parent in ``levels[k - 1]`` or among the roots, so walking the tuple
+        in order resolves each atom after its parent while letting a whole
+        level be handled in one vectorized step.
+    molecule : numpy.ndarray
+        Which molecule each atom belongs to, shaped ``(n_atoms,)``.
+    n_molecules : int
+        Number of connected components, counting an unbonded atom as one.
+    """
+
+    parent: npt.NDArray[np.int64]
+    levels: tuple[npt.NDArray[np.int64], ...]
+    molecule: npt.NDArray[np.int64]
+    n_molecules: int
+
+
+def _topology_molecule_tree(topology: app.Topology) -> _MoleculeTree:
+    """
+    Group a Topology's atoms into molecules by following its bonds.
+
+    The Topology is the right source for this, not the System.  OpenMM
+    derives its own molecule list from the bonded pairs the forces report,
+    and ``MLPotential.createMixedSystem`` deletes every bonded term whose
+    atoms all lie in the ML region while an ``openmm.PythonForce`` reports
+    no pairs at all.  A molecule modelled entirely by the ML potential
+    therefore looks to OpenMM like a loose cloud of single atoms, each
+    wrapped into the box on its own.  ``createMixedSystem`` edits only the
+    System, so the Topology still holds the real connectivity.
+
+    Parameters
+    ----------
+    topology : openmm.app.Topology
+        Topology whose bonds define the molecules.
+
+    Returns
+    -------
+    _MoleculeTree
+        The spanning forest, ready for :func:`_unwrap_by_bonds`.
+    """
+    n_atoms = topology.getNumAtoms()
+    neighbours: list[list[int]] = [[] for _ in range(n_atoms)]
+    for bond in topology.bonds():
+        i, j = bond.atom1.index, bond.atom2.index
+        neighbours[i].append(j)
+        neighbours[j].append(i)
+
+    parent = np.full(n_atoms, -1, dtype=np.int64)
+    molecule = np.full(n_atoms, -1, dtype=np.int64)
+    levels: list[list[int]] = []
+    n_molecules = 0
+
+    for root in range(n_atoms):
+        if molecule[root] != -1:
+            continue
+        molecule[root] = n_molecules
+        frontier = [root]
+        depth = 0
+        while frontier:
+            following = []
+            for atom in frontier:
+                for other in neighbours[atom]:
+                    if molecule[other] == -1:
+                        molecule[other] = n_molecules
+                        parent[other] = atom
+                        following.append(other)
+            if following:
+                if depth == len(levels):
+                    levels.append([])
+                levels[depth].extend(following)
+            frontier = following
+            depth += 1
+        n_molecules += 1
+
+    return _MoleculeTree(
+        parent=parent,
+        levels=tuple(np.asarray(level, dtype=np.int64) for level in levels),
+        molecule=molecule,
+        n_molecules=n_molecules,
+    )
+
+
+def _unwrap_by_bonds(positions_nm: npt.NDArray[np.float64],
+                     box_vectors_nm: npt.NDArray[np.float64],
+                     tree: _MoleculeTree,
+                     ) -> npt.NDArray[np.float64]:
+    """
+    Make every molecule contiguous by walking its bonds.
+
+    Each atom is moved by whole box vectors onto the minimum image of the
+    atom it is bonded to nearer the root.  That is exact for any molecule
+    whose individual bonds are shorter than half a box, however large the
+    molecule itself, unlike shifting every atom onto one reference.
+
+    Parameters
+    ----------
+    positions_nm : numpy.ndarray
+        Positions in nanometres, shaped ``(n_atoms, 3)``.
+    box_vectors_nm : numpy.ndarray
+        Periodic box vectors in nanometres, shaped ``(3, 3)`` in OpenMM's
+        reduced form.
+    tree : _MoleculeTree
+        The Topology's spanning forest, from
+        :func:`_topology_molecule_tree`.
+
+    Returns
+    -------
+    numpy.ndarray
+        Reassembled positions in nanometres, shaped ``(n_atoms, 3)``. The
+        molecules may lie outside the box; :func:`_wrap_molecules` puts them
+        back.
+    """
+    positions = np.array(positions_nm, dtype=float, copy=True)
+    box = np.asarray(box_vectors_nm, dtype=float)
+
+    for level in tree.levels:
+        parents = tree.parent[level]
+        displacement = positions[level] - positions[parents]
+        # OpenMM box vectors are in reduced form, so removing whole c, b then
+        # a vectors gives the minimum image -- the convention
+        # _centroid_of_beads already uses.
+        for axis in (2, 1, 0):
+            displacement -= box[axis] * np.round(
+                displacement[:, axis:axis + 1] / box[axis][axis]
+            )
+        positions[level] = positions[parents] + displacement
+
+    return positions
+
+
+def _wrap_molecules(positions_nm: npt.NDArray[np.float64],
+                    box_vectors_nm: npt.NDArray[np.float64],
+                    tree: _MoleculeTree,
+                    ) -> npt.NDArray[np.float64]:
+    """
+    Reassemble each molecule and translate it back into the box.
+
+    This is what ``enforcePeriodicBox=True`` is meant to do, done against the
+    Topology's connectivity rather than OpenMM's force-derived molecule list,
+    which a mixed ML/MM System leaves incomplete.  Each molecule moves
+    rigidly, so no bond is ever split.
+
+    Parameters
+    ----------
+    positions_nm : numpy.ndarray
+        Positions in nanometres, shaped ``(n_atoms, 3)``.
+    box_vectors_nm : numpy.ndarray
+        Periodic box vectors in nanometres, shaped ``(3, 3)`` in OpenMM's
+        reduced form.
+    tree : _MoleculeTree
+        The Topology's spanning forest, from
+        :func:`_topology_molecule_tree`.
+
+    Returns
+    -------
+    numpy.ndarray
+        Wrapped positions in nanometres, shaped ``(n_atoms, 3)``, with the
+        centre of every molecule inside the box.
+    """
+    positions = _unwrap_by_bonds(positions_nm, box_vectors_nm, tree)
+    box = np.asarray(box_vectors_nm, dtype=float)
+
+    counts = np.bincount(
+        tree.molecule, minlength=tree.n_molecules
+    ).astype(float)
+    sums = np.zeros((tree.n_molecules, 3), dtype=float)
+    np.add.at(sums, tree.molecule, positions)
+    centres = sums / counts[:, np.newaxis]
+
+    # Floor rather than round, so a molecule centre lands in [0, L) along
+    # each reduced-form axis rather than straddling the origin.
+    shift = np.zeros_like(centres)
+    residual = centres.copy()
+    for axis in (2, 1, 0):
+        boxes = np.floor(residual[:, axis:axis + 1] / box[axis][axis])
+        shift -= box[axis] * boxes
+        residual -= box[axis] * boxes
+
+    return positions + shift[tree.molecule]
+
+
 def _centroid_of_beads(bead_positions_nm: npt.NDArray[np.float64],
                        box_vectors_nm: npt.NDArray[np.float64] | None,
                        ) -> npt.NDArray[np.float64]:
@@ -393,7 +648,9 @@ def _centroid_of_beads(bead_positions_nm: npt.NDArray[np.float64],
 
 
 def centroid_positions(simulation: app.Simulation, n_atoms: int,
-                       n_beads: int) -> unit.Quantity:
+                       n_beads: int,
+                       enforce_periodic_box: bool | None = None,
+                       ) -> unit.Quantity:
     """
     Average the bead positions of an RPMD simulation into a centroid structure.
 
@@ -405,6 +662,10 @@ def centroid_positions(simulation: app.Simulation, n_atoms: int,
         Number of atoms in the system.
     n_beads : int
         Number of beads in the ring polymer.
+    enforce_periodic_box : bool or None, optional
+        Whether to wrap molecules into the periodic box. Default is None,
+        which wraps whenever the System is periodic. A nonperiodic System is
+        never wrapped, whatever this is set to.
 
     Returns
     -------
@@ -413,16 +674,24 @@ def centroid_positions(simulation: app.Simulation, n_atoms: int,
 
     Notes
     -----
-    For periodic systems, each bead is wrapped and then unwrapped relative to
-    bead 0 with the minimum-image convention before averaging. This prevents
-    beads on opposite sides of a box face from producing a centroid near the
-    middle of the box.
+    For periodic systems, each bead is unwrapped relative to bead 0 with the
+    minimum-image convention before averaging. This prevents beads on
+    opposite sides of a box face from producing a centroid near the middle
+    of the box.
+
+    The centroid is then wrapped molecule by molecule against the
+    *Topology*, not by asking OpenMM to wrap each bead. OpenMM builds its
+    molecule list from the bonded pairs the forces report, and a mixed ML/MM
+    System has none inside the ML region, so it would move each ML atom into
+    the box on its own and tear the molecule apart. A *simulation* carrying
+    no topology is returned unwrapped, there being nothing to define its
+    molecules.
     """
     integrator = simulation.integrator
     periodic = simulation.system.usesPeriodicBoundaryConditions()
 
     ref_state = integrator.getState(
-        0, getPositions=True, enforcePeriodicBox=periodic
+        0, getPositions=True, enforcePeriodicBox=False
     )
 
     box = None
@@ -437,10 +706,16 @@ def centroid_positions(simulation: app.Simulation, n_atoms: int,
     )
     for bead in range(1, n_beads):
         positions[bead] = integrator.getState(
-            bead, getPositions=True, enforcePeriodicBox=periodic
+            bead, getPositions=True, enforcePeriodicBox=False
         ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
 
     centroid = _centroid_of_beads(positions, box)
+    topology = getattr(simulation, "topology", None)
+    if (box is not None and topology is not None
+            and enforce_periodic_box is not False):
+        centroid = _wrap_molecules(
+            centroid, box, _topology_molecule_tree(topology)
+        )
     return [openmm.Vec3(*centroid[i]) for i in range(n_atoms)] * unit.nanometer
 
 

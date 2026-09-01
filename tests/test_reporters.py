@@ -653,11 +653,14 @@ def test_bead_reporter_writes_consecutive_models_and_one_footer(
             line for line in contents.splitlines() if line.startswith("MODEL")
         ] == ["MODEL        1", "MODEL        2"]
         assert contents.splitlines().count("END") == 1
+    # The raw stored coordinates are asked for: the wrapping is done against
+    # the Topology, not by OpenMM, whose molecule list a mixed ML/MM System
+    # leaves incomplete.
     assert integrator.calls == [
-        (0, {"getPositions": True, "enforcePeriodicBox": True}),
-        (1, {"getPositions": True, "enforcePeriodicBox": True}),
-        (0, {"getPositions": True, "enforcePeriodicBox": True}),
-        (1, {"getPositions": True, "enforcePeriodicBox": True}),
+        (0, {"getPositions": True, "enforcePeriodicBox": False}),
+        (1, {"getPositions": True, "enforcePeriodicBox": False}),
+        (0, {"getPositions": True, "enforcePeriodicBox": False}),
+        (1, {"getPositions": True, "enforcePeriodicBox": False}),
     ]
 
 
@@ -670,8 +673,8 @@ def test_centroid_reporter_writes_consecutive_models_and_one_footer(
     monkeypatch.setattr(
         reporters,
         "centroid_positions",
-        lambda simulation, n_atoms, n_beads: (
-            calls.append((simulation, n_atoms, n_beads))
+        lambda simulation, n_atoms, n_beads, wrap=None: (
+            calls.append((simulation, n_atoms, n_beads, wrap))
             or [Vec3(0.5, 0.0, 0.0)] * unit.nanometer
         ),
     )
@@ -689,7 +692,7 @@ def test_centroid_reporter_writes_consecutive_models_and_one_footer(
     reporter.close()
     reporter.__del__()
 
-    assert calls == [(simulation, 1, 2), (simulation, 1, 2)]
+    assert calls == [(simulation, 1, 2, None), (simulation, 1, 2, None)]
     contents = output.read_text()
     assert [
         line for line in contents.splitlines() if line.startswith("MODEL")
@@ -751,10 +754,9 @@ class _ThermoState:
 class _ThermoIntegrator:
     """Minimal stand-in for an ``RPMDIntegrator`` holding fixed bead states."""
 
-    def __init__(self, states: Sequence[_ThermoState], total_energy: float,
+    def __init__(self, states: Sequence[_ThermoState],
                  temperature: float = 300.0) -> None:
         self._states = list(states)
-        self._total_energy = total_energy * unit.kilojoule_per_mole
         self._temperature = temperature * unit.kelvin
         self.calls: list[dict[str, Any]] = []
 
@@ -767,7 +769,16 @@ class _ThermoIntegrator:
         return self._states[copy]
 
     def getTotalEnergy(self) -> unit.Quantity:
-        return self._total_energy
+        # Deliberately fatal. RPMDIntegrator.getTotalEnergy() deadlocks on a
+        # mixed ML/MM System on CUDA or OpenCL -- the ML potential is an
+        # openmm.PythonForce, those platforms evaluate forces on a worker
+        # thread, and the method holds the GIL while it waits. Neither the
+        # Reference nor the CPU platform can reproduce that, so this double
+        # is the only guard the test suite can offer against the call
+        # creeping back into the estimators.
+        raise AssertionError(
+            "the RPMD estimators must not call getTotalEnergy()"
+        )
 
     def getTemperature(self) -> unit.Quantity:
         return self._temperature
@@ -804,7 +815,7 @@ def _hand_built_simulation() -> SimpleNamespace:
         ),
     ]
     return SimpleNamespace(
-        integrator=_ThermoIntegrator(states, total_energy=100.0),
+        integrator=_ThermoIntegrator(states),
         system=_one_particle_system(),
         currentStep=40,
     )
@@ -857,9 +868,15 @@ def test_rpmd_thermodynamics_matches_hand_computed_estimators() -> None:
     assert kilojoules["potential_mean"] == pytest.approx(2.0)
     assert kilojoules["potential_sd"] == pytest.approx(1.0)
     assert kilojoules["energy_quantum"] == pytest.approx(expected_kinetic + 2.0)
-    assert kilojoules["energy_ring"] == pytest.approx(100.0)
-    # 100 - (1 + 3) - (5 + 7)
-    assert kilojoules["energy_spring"] == pytest.approx(84.0)
+    # The ring energy is reconstructed, not read from getTotalEnergy(): the
+    # bead energies plus springs of frequency omega_P = P k_B T / hbar over
+    # the two 0.2 nm bead displacements of a 1 Da particle.
+    omega_p = 2 * _BOLTZMANN * 300.0 / _HBAR
+    expected_spring = 0.5 * 1.0 * omega_p**2 * (0.2**2 + 0.2**2)
+    assert kilojoules["energy_spring"] == pytest.approx(expected_spring)
+    assert kilojoules["energy_ring"] == pytest.approx(
+        (1.0 + 3.0) + (5.0 + 7.0) + expected_spring
+    )
 
     # 2 * sum(KE) / (dof * P**2 * k_B)
     assert values["temperature_ring"].value_in_unit(unit.kelvin) == pytest.approx(
@@ -926,7 +943,7 @@ def _virtual_site_simulation() -> SimpleNamespace:
     system.addParticle(0.0 * unit.dalton)
     system.setVirtualSite(2, openmm.TwoParticleAverageSite(0, 1, 0.25, 0.75))
     return SimpleNamespace(
-        integrator=_ThermoIntegrator(states, total_energy=100.0),
+        integrator=_ThermoIntegrator(states),
         system=system,
         currentStep=40,
     )
@@ -1019,7 +1036,7 @@ def _constrained_simulation() -> SimpleNamespace:
     system.addParticle(1.0 * unit.dalton)
     system.addConstraint(0, 1, 0.1 * unit.nanometer)
     return SimpleNamespace(
-        integrator=_ThermoIntegrator(states, total_energy=10.0),
+        integrator=_ThermoIntegrator(states),
         system=system,
         currentStep=0,
     )
@@ -1102,6 +1119,32 @@ def test_reported_spring_energy_matches_openmm_ring_polymer_convention() -> None
     assert values["energy_spring"].value_in_unit(
         unit.kilojoule_per_mole
     ) == pytest.approx(expected, rel=1e-5)
+
+
+def test_reported_ring_energy_matches_openmm_get_total_energy() -> None:
+    # The other half of the convention guard. The reporter reconstructs the
+    # ring Hamiltonian rather than calling RPMDIntegrator.getTotalEnergy(),
+    # which deadlocks on a mixed ML/MM System on CUDA or OpenCL. Reference
+    # can still answer, so it is the reference the reconstruction is pinned
+    # to -- in the direction that now matters.
+    simulation = _rpmd_simulation(
+        n_beads=8,
+        mass=1.008,
+        force_constant=1000.0,
+        temperature=300.0,
+    )
+    simulation.integrator.step(200)
+
+    values = rpmd_thermodynamics(simulation)
+
+    assert values["energy_ring"].value_in_unit(
+        unit.kilojoule_per_mole
+    ) == pytest.approx(
+        simulation.integrator.getTotalEnergy().value_in_unit(
+            unit.kilojoule_per_mole
+        ),
+        rel=1e-5,
+    )
 
 
 def test_thermodynamic_estimators_reproduce_the_exact_harmonic_ring_polymer() -> None:
@@ -1479,7 +1522,7 @@ def _three_particle_reduced_dof_simulation() -> SimpleNamespace:
     system.addConstraint(0, 1, 0.1 * unit.nanometer)
     system.addForce(openmm.CMMotionRemover())
     return SimpleNamespace(
-        integrator=_ThermoIntegrator(states, total_energy=10.0),
+        integrator=_ThermoIntegrator(states),
         system=system,
         currentStep=0,
     )
@@ -2483,7 +2526,7 @@ def test_bead_and_centroid_reporters_write_every_format(
     monkeypatch.setattr(
         reporters,
         "centroid_positions",
-        lambda simulation, n_atoms, n_beads: _TWO_ATOM_POSITIONS,
+        lambda simulation, n_atoms, n_beads, wrap=None: _TWO_ATOM_POSITIONS,
     )
 
     with RPMDBeadReporter(
@@ -2512,12 +2555,12 @@ def test_bead_and_centroid_reporters_write_every_format(
 def test_centroid_reporter_asks_for_the_full_atom_count_under_a_subset(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    calls: list[tuple[Any, int, int]] = []
+    calls: list[tuple[Any, int, int, bool | None]] = []
     monkeypatch.setattr(
         reporters,
         "centroid_positions",
-        lambda simulation, n_atoms, n_beads: (
-            calls.append((simulation, n_atoms, n_beads))
+        lambda simulation, n_atoms, n_beads, wrap=None: (
+            calls.append((simulation, n_atoms, n_beads, wrap))
             or _TWO_ATOM_POSITIONS
         ),
     )
@@ -2533,7 +2576,124 @@ def test_centroid_reporter_asks_for_the_full_atom_count_under_a_subset(
         reporter.report(simulation, state=None)
 
     # Two, the whole System -- not the one atom the subset topology holds.
-    assert calls == [(simulation, 2, 3)]
+    assert calls == [(simulation, 2, 3, None)]
+
+
+def _ml_like_chain_simulation(periodic: bool) -> tuple[app.Simulation, np.ndarray]:
+    """
+    A 4-atom chain the Topology knows about and the System does not.
+
+    That is what ``MLPotential.createMixedSystem`` leaves behind for a
+    molecule modelled entirely by the ML potential: every bonded term inside
+    the ML region is deleted, and the ``openmm.PythonForce`` that replaces
+    them reports no pairs, so OpenMM sees four separate molecules.
+    """
+    topology = app.Topology()
+    chain = topology.addChain()
+    residue = topology.addResidue("MOL", chain)
+    previous = None
+    system = openmm.System()
+    for index in range(4):
+        # Distinct names, or the PDB round trip merges them as duplicates.
+        atom = topology.addAtom(f"C{index + 1}", app.element.carbon, residue)
+        if previous is not None:
+            topology.addBond(previous, atom)
+        previous = atom
+        system.addParticle(12.011 * unit.dalton)
+    if periodic:
+        box = [Vec3(2.0, 0.0, 0.0), Vec3(0.0, 2.0, 0.0), Vec3(0.0, 0.0, 2.0)]
+        box = box * unit.nanometer
+        system.setDefaultPeriodicBoxVectors(*box)
+        topology.setPeriodicBoxVectors(box)
+        force = openmm.NonbondedForce()
+        force.setNonbondedMethod(openmm.NonbondedForce.CutoffPeriodic)
+        for _ in range(4):
+            force.addParticle(
+                0.0, 0.3 * unit.nanometer, 0.1 * unit.kilojoule_per_mole
+            )
+        system.addForce(force)
+
+    # A chain straddling x = 0 when periodic, and one sitting well outside
+    # any default box when not.
+    positions = (
+        np.array([[-0.10, 1.0, 1.0], [0.05, 1.0, 1.0],
+                  [0.20, 1.0, 1.0], [0.35, 1.0, 1.0]])
+        if periodic else
+        np.array([[3.00, 1.0, 1.0], [3.15, 1.0, 1.0],
+                  [3.30, 1.0, 1.0], [3.45, 1.0, 1.0]])
+    )
+    integrator = openmm.RPMDIntegrator(
+        2, 300 * unit.kelvin, 1.0 / unit.picosecond, 0.0002 * unit.picoseconds
+    )
+    simulation = app.Simulation(
+        topology, system, integrator,
+        openmm.Platform.getPlatform("Reference"),
+    )
+    simulation.context.setPositions(positions * unit.nanometer)
+    for bead in range(2):
+        integrator.setPositions(bead, positions * unit.nanometer)
+    return simulation, positions
+
+
+def _reported_bead_positions(tmp_path: Path, simulation: app.Simulation,
+                             **kwargs: Any) -> np.ndarray:
+    """Run one report and read bead 0's frame back out of the PDB."""
+    with RPMDBeadReporter(
+        file_base_name=str(tmp_path / "beads"),
+        reportInterval=1,
+        num_beads=2,
+        topology=simulation.topology,
+        **kwargs,
+    ) as reporter:
+        reporter.report(simulation, state=None)
+    return app.PDBFile(
+        str(tmp_path / "beads_bead_0.pdb")
+    ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+
+
+def test_bead_reporter_keeps_a_molecule_the_system_has_no_bonds_for(
+    tmp_path: Path,
+) -> None:
+    simulation, positions = _ml_like_chain_simulation(periodic=True)
+
+    # What OpenMM would have written: the first atom a box length adrift.
+    openmm_wrapped = simulation.integrator.getState(
+        copy=0, getPositions=True, enforcePeriodicBox=True
+    ).getPositions(asNumpy=True).value_in_unit(unit.nanometer)
+    assert float(np.ptp(openmm_wrapped[:, 0])) > 1.5
+
+    written = _reported_bead_positions(tmp_path, simulation)
+
+    assert np.linalg.norm(
+        np.diff(written, axis=0), axis=1
+    ) == pytest.approx(0.15, abs=1e-3)
+    assert 0.0 <= written.mean(axis=0)[0] < 2.0
+
+
+def test_bead_reporter_can_be_told_not_to_wrap(tmp_path: Path) -> None:
+    simulation, positions = _ml_like_chain_simulation(periodic=True)
+
+    written = _reported_bead_positions(
+        tmp_path, simulation, enforce_periodic_box=False
+    )
+
+    # The raw stored coordinates, straddling the boundary as they were set.
+    assert written == pytest.approx(positions, abs=1e-3)
+
+
+def test_bead_reporter_does_not_wrap_a_nonperiodic_system(
+    tmp_path: Path,
+) -> None:
+    # A System with no periodic forces still reports OpenMM's default 2 nm
+    # box, so asking OpenMM to wrap would fold a gas-phase molecule into a
+    # box that does not exist.
+    simulation, positions = _ml_like_chain_simulation(periodic=False)
+    assert not simulation.system.usesPeriodicBoundaryConditions()
+
+    written = _reported_bead_positions(tmp_path, simulation)
+
+    assert written == pytest.approx(positions, abs=1e-3)
+    assert written[:, 0].min() > 2.0
 
 
 def test_bead_reporter_rejects_a_format_it_cannot_write(tmp_path: Path) -> None:

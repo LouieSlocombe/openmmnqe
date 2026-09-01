@@ -70,7 +70,13 @@ from ._logs import (
     _select_log_columns,
 )
 from ._validation import require_integer, require_positive_finite_scalar_in_unit
-from .tools import _particle_masses_dalton, centroid_positions
+from .tools import (
+    _particle_masses_dalton,
+    _ring_spring_energy,
+    _topology_molecule_tree,
+    _wrap_molecules,
+    centroid_positions,
+)
 
 _SPREAD_METRICS = {"rms", "mean"}
 
@@ -1391,6 +1397,11 @@ class RPMDBeadReporter:
         the ring polymer.
     atom_indices : sequence of int or None, optional
         Atoms to write. Default is None, which writes every atom.
+    enforce_periodic_box : bool or None, optional
+        Whether to wrap molecules into the periodic box. Default is None,
+        which wraps whenever the System is periodic. A nonperiodic System is
+        never wrapped, whatever this is set to, because it has no box to
+        wrap into.
 
     Raises
     ------
@@ -1399,12 +1410,22 @@ class RPMDBeadReporter:
     ValueError
         If *reportInterval* or *num_beads* is not positive, *format* is not
         recognized, or an atom index lies outside *topology*.
+
+    Notes
+    -----
+    The wrapping is done here, against *topology*, rather than by asking
+    OpenMM for it. OpenMM builds its molecule list from the bonded pairs the
+    forces report, and ``MLPotential.createMixedSystem`` deletes every
+    bonded term inside the ML region while an ``openmm.PythonForce`` reports
+    none, so a molecule modelled entirely by the ML potential would have
+    each of its atoms moved into the box separately.
     """
 
     def __init__(self, file_base_name: str, reportInterval: int,
                  num_beads: int, topology: app.Topology,
                  format: TrajectoryFormat = "pdb",
-                 atom_indices: Sequence[int] | None = None) -> None:
+                 atom_indices: Sequence[int] | None = None,
+                 enforce_periodic_box: bool | None = None) -> None:
         self._reportInterval = require_integer(
             reportInterval,
             name="reportInterval",
@@ -1416,6 +1437,8 @@ class RPMDBeadReporter:
             minimum=1,
         )
         self._closed = False
+        self._enforce_periodic_box = enforce_periodic_box
+        self._molecules = _topology_molecule_tree(topology)
 
         suffix = _require_integrator_format(format)
         self._is_binary = format != "pdb"
@@ -1468,12 +1491,32 @@ class RPMDBeadReporter:
         integrator = simulation.integrator
         step_size = integrator.getStepSize() if self._is_binary else None
 
+        system = getattr(simulation, "system", None)
+        periodic = (
+            system is not None and system.usesPeriodicBoundaryConditions()
+        )
+        wrap = periodic and self._enforce_periodic_box is not False
+
         for i, writer in enumerate(self._writers):
-            # getState(bead_index, ...) is specific to RPMDIntegrator.
-            bead_state = integrator.getState(i, getPositions=True, enforcePeriodicBox=True)
+            # getState(bead_index, ...) is specific to RPMDIntegrator. The
+            # raw stored coordinates are asked for and wrapped below against
+            # the Topology: OpenMM's own molecule list is incomplete on a
+            # mixed ML/MM System.
+            bead_state = integrator.getState(
+                i, getPositions=True, enforcePeriodicBox=False
+            )
             box = bead_state.getPeriodicBoxVectors() if self._is_binary else None
+            positions = bead_state.getPositions(asNumpy=True)
+            if wrap:
+                positions = _wrap_molecules(
+                    positions.value_in_unit(unit.nanometer),
+                    bead_state.getPeriodicBoxVectors(
+                        asNumpy=True
+                    ).value_in_unit(unit.nanometer),
+                    self._molecules,
+                ) * unit.nanometer
             writer.write(
-                writer.select(bead_state.getPositions()),
+                writer.select(positions),
                 step_size=step_size,
                 periodic_box_vectors=box,
             )
@@ -1541,6 +1584,11 @@ class RPMDCentroidReporter:
         the ring polymer.
     atom_indices : sequence of int or None, optional
         Atoms to write. Default is None, which writes every atom.
+    enforce_periodic_box : bool or None, optional
+        Whether to wrap molecules into the periodic box. Default is None,
+        which wraps whenever the System is periodic. The wrapping follows
+        the Topology's bonds rather than OpenMM's molecule list, which a
+        mixed ML/MM System leaves incomplete.
 
     Raises
     ------
@@ -1554,7 +1602,8 @@ class RPMDCentroidReporter:
     def __init__(self, file_name: str, reportInterval: int,
                  num_beads: int, topology: app.Topology,
                  format: TrajectoryFormat = "pdb",
-                 atom_indices: Sequence[int] | None = None) -> None:
+                 atom_indices: Sequence[int] | None = None,
+                 enforce_periodic_box: bool | None = None) -> None:
         self._reportInterval = require_integer(
             reportInterval,
             name="reportInterval",
@@ -1570,6 +1619,7 @@ class RPMDCentroidReporter:
         # The full atom count, which is what centroid_positions needs -- the
         # writer's topology may hold only a subset.
         self._num_atoms = topology.getNumAtoms()
+        self._enforce_periodic_box = enforce_periodic_box
         self._closed = False
         self._writer = _TrajectoryWriter(
             file_name,
@@ -1621,6 +1671,7 @@ class RPMDCentroidReporter:
             simulation,
             self._num_atoms,
             self._num_beads,
+            self._enforce_periodic_box,
         )
 
         box = None
@@ -1694,6 +1745,61 @@ class _BeadThermodynamicStates(NamedTuple):
     potential: npt.NDArray[np.float64]
     kinetic: npt.NDArray[np.float64]
     time: float
+
+
+def _rpmd_ring_energies(integrator: openmm.RPMDIntegrator,
+                        masses_amu: np.ndarray,
+                        *,
+                        states: _BeadThermodynamicStates | None = None,
+                        ) -> tuple[float, float]:
+    """
+    Ring-polymer Hamiltonian and its spring term, without ``getTotalEnergy``.
+
+    ``RPMDIntegrator.getTotalEnergy()`` deadlocks on a mixed ML/MM System on
+    CUDA or OpenCL -- the ML potential is an ``openmm.PythonForce``, those
+    platforms evaluate forces on a worker thread, and the method holds the
+    GIL while it waits, so the worker can never enter the callback.  The two
+    energies are therefore assembled here from a bead pass instead: the bead
+    kinetic and potential energies OpenMM reports per copy, plus the springs
+    linking neighbouring copies.
+
+    Parameters
+    ----------
+    integrator : openmm.RPMDIntegrator
+        The integrator holding the ring polymer.
+    masses_amu : numpy.ndarray
+        Particle masses in daltons, shaped ``(n_particles,)``.
+    states : _BeadThermodynamicStates or None, optional
+        Bead states already read from *integrator*. If None they are read
+        here, at one force evaluation per bead. Default is None.
+
+    Returns
+    -------
+    energy_ring : float
+        The ring-polymer Hamiltonian in kJ/mol.
+    energy_spring : float
+        The spring term alone in kJ/mol.
+
+    Notes
+    -----
+    Reading its own bead pass costs a little more than the method it replaces
+    -- measured at 1.0 ms against 0.7 ms for a 900-atom, four-bead System on
+    CUDA, the difference being that each copy is read back separately rather
+    than summed on the device. Asking for fewer fields per copy barely helps:
+    the cost is in the round trips, not the arrays. A caller that already
+    holds the beads should pass them in and pay nothing.
+    """
+    if states is None:
+        states = _bead_thermodynamic_states(integrator)
+    energy_spring = _ring_spring_energy(
+        states.positions,
+        masses_amu,
+        integrator.getTemperature().value_in_unit(unit.kelvin),
+    )
+    energy_ring = float(
+        states.potential.sum() + states.kinetic.sum()
+    ) + energy_spring
+    return energy_ring, energy_spring
 
 
 def _thermodynamic_degrees_of_freedom(system: openmm.System) -> int:
@@ -1835,15 +1941,25 @@ def rpmd_thermodynamics(simulation: app.Simulation, *,
     the mean bead potential energy :math:`\frac{1}{P}\sum_i V(\mathbf{r}_i)`.
 
     The remaining entries are diagnostics rather than observables.
-    ``energy_ring`` is the ring-polymer Hamiltonian reported by
-    ``RPMDIntegrator.getTotalEnergy()`` -- bead kinetic and potential energies
-    plus the harmonic springs -- and is worth watching for drift, not for
-    physics.  ``energy_spring`` is the spring term alone, obtained by
-    subtracting the bead energies from it, which keeps this function free of
-    any assumption about OpenMM's internal spring frequency.
-    ``temperature_ring`` and ``temperature_centroid`` should both sit at the
-    integrator's setpoint once the thermostat has taken hold, the first
-    covering all ``P`` copies and the second the centroid mode alone.
+    ``energy_spring`` is the harmonic spring term alone, summed over the
+    springs of angular frequency ``P k_B T / hbar`` that link neighbouring
+    copies, and ``energy_ring`` is the ring-polymer Hamiltonian: the bead
+    kinetic and potential energies plus those springs.  It is worth watching
+    for drift, not for physics.  ``temperature_ring`` and
+    ``temperature_centroid`` should both sit at the integrator's setpoint once
+    the thermostat has taken hold, the first covering all ``P`` copies and the
+    second the centroid mode alone.
+
+    ``energy_ring`` is reconstructed rather than read from
+    ``RPMDIntegrator.getTotalEnergy()``, which agrees with it to within one
+    part in a million but cannot be called at all on a mixed ML/MM System on
+    CUDA or OpenCL: the ML potential is an ``openmm.PythonForce``, those
+    platforms evaluate forces on a worker thread, and the method holds the
+    GIL while waiting for it, so the call deadlocks.  The cost of that is one
+    assumption -- that OpenMM links neighbouring copies with springs of
+    angular frequency ``P k_B T / hbar`` -- which
+    ``test_reported_ring_energy_matches_openmm_get_total_energy`` pins
+    against OpenMM itself.
 
     Every bead read is a force evaluation, so one call costs roughly what one
     RPMD step does.
@@ -1981,11 +2097,8 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
     potential_mean = float(states.potential.mean())
     potential_sd = float(states.potential.std())
 
-    energy_ring = float(
-        integrator.getTotalEnergy().value_in_unit(unit.kilojoule_per_mole)
-    )
-    energy_spring = energy_ring - float(
-        states.potential.sum() + states.kinetic.sum()
+    energy_ring, energy_spring = _rpmd_ring_energies(
+        integrator, masses, states=states
     )
 
     # Ring-polymer momenta are sampled at P times the physical temperature,
@@ -3107,12 +3220,13 @@ def rpmd_energy_conservation(file: str | os.PathLike[str], *,
     """
     Check a thermodynamic log for ring-polymer energy conservation.
 
-    ``E_ring(kJ/mol)`` is ``RPMDIntegrator.getTotalEnergy()``, the full
-    ring-polymer Hamiltonian; with the thermostat off it is the conserved
-    quantity of the dynamics, so its net drift is the integration-quality
-    signal for a microcanonical run.  The verdict compares the drift across
-    the retained rows with the size of the fluctuation about it: a good
-    thermostat-off run drifts by less than it oscillates.
+    ``E_ring(kJ/mol)`` is the full ring-polymer Hamiltonian -- bead kinetic
+    and potential energies plus the springs linking neighbouring copies.  With
+    the thermostat off it is the conserved quantity of the dynamics, so its
+    net drift is the integration-quality signal for a microcanonical run.  The
+    verdict compares the drift across the retained rows with the size of the
+    fluctuation about it: a good thermostat-off run drifts by less than it
+    oscillates.
 
     This is a practical check that the dynamics is not losing energy, not a
     statistical test with a calibrated false-positive rate.  It also cannot
