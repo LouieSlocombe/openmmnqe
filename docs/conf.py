@@ -3,9 +3,8 @@
 openmmnqe cannot be imported for real here. Every module imports ``openmm`` at
 module scope; ``openmmnqe/openmm.py`` also imports ``openmmml`` and
 ``openmmplumed``, and ``openmmnqe/io.py`` imports ``pdbfixer``, ``rdkit`` and
-``reactiontools``. None of those are installable from PyPI at the versions this
-project pins -- ``build_tools/README.md`` explains why the runtime environment
-is conda plus a PLUMED source build. The docs build therefore puts the checkout
+``reactiontools``. The full dependency set needs conda, git checkouts, and a
+PLUMED source build -- see ``build_tools/README.md``. The docs build puts the checkout
 on ``sys.path``, mocks those distributions, and installs only the doc toolchain
 plus numpy and scipy for real.
 """

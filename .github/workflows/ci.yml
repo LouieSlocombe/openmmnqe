@@ -41,7 +41,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         # -l so every step runs in the activated micromamba environment
@@ -52,6 +52,20 @@ jobs:
         with:
           environment-file: build_tools/environment_ci.yml
           cache-environment: true
+      # Rebuild on every run, including cache hits, so the plugin and Python
+      # bindings always match OpenMM and the shared PLUMED source pins.
+      - name: Build PLUMED and its bindings
+        run: |
+          set -eo pipefail
+          source build_tools/build_plumed.sh
+          plumed_build_dir="$(mktemp -d "${RUNNER_TEMP}/openmmnqe-plumed.XXXXXX")"
+          build_plumed "${plumed_build_dir}"
+          build_py_plumed "${plumed_build_dir}"
+          plumed --no-mpi config -q module opes
+          python -c "import plumed; plumed.Plumed()"
+          python -c "from openmmplumed import PlumedForce"
+      - name: Verify OpenMM baseline
+        run: python -c "from importlib.metadata import version; assert version('openmm') == '8.6.0', version('openmm')"
       - run: pip install -e . --no-deps
       - run: python -c "import openmmnqe; print(openmmnqe.__version__)"
       - run: pytest tests --cov=openmmnqe --cov-branch --cov-report=term-missing --cov-fail-under=90 -q

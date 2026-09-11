@@ -6,13 +6,13 @@ There are three ways to install `openmmnqe`, depending on what you need:
 |---|---|---|
 | Conda environment | Normal use. Everything from conda-forge except PLUMED and the editable checkouts. | `conda_install.sh` |
 | Sol cluster | Running on Sol. Same split, plus the module loads and SLURM wrapper. | `custom_install_sol.sh` |
-| Source build | You need an unreleased OpenMM, openmm-torch or NNPOps. | `custom_install.sh` |
+| Source build | You need to compile OpenMM, openmm-torch or NNPOps. | `custom_install.sh` |
 
 Every route compiles PLUMED, the `openmm-plumed` plugin and the PLUMED Python
-bindings (py-plumed), because there is no prebuilt combination that works:
-conda-forge's `openmm-plumed` requires `openmm <8.5`, while `openmm-ml >=1.6` —
-the first release with the `'ase'` potential that `openmmnqe.openmm` uses —
-requires `openmm >=8.5`. Building from source also gets you PLUMED's `opes`
+bindings (py-plumed) against the selected OpenMM installation. Prebuilt
+`openmm-plumed` packages are tied to the OpenMM minor version they were built
+with, so a build for an older OpenMM cannot satisfy this project's requirement
+of OpenMM 8.6.0 or higher. Building from source also gets you PLUMED's `opes`
 module, which the conda-forge build omits, and py-plumed — the `plumed` module
 that `reactiontools`' `plumed_calculator` imports on first use — matched to the
 same PLUMED version.
@@ -21,6 +21,7 @@ same PLUMED version.
 
 - A compatible operating system: Linux, macOS, or Windows via WSL.
 - Python 3.12 or higher.
+- OpenMM 8.6.0 or higher (installed by the scripts).
 - Conda or Mamba.
 - Git, to clone the PLUMED sources and the editable dependencies. The compiler,
   `cmake` and `make` come from the environment; git does not.
@@ -100,6 +101,9 @@ integration signal that a sibling moved; forcefill bumps its `version` on API-vi
 changes, so comparing `pip show forcefill` against a checkout's `pyproject.toml` tells
 a stale install from a new one.
 
+CI pins OpenMM to 8.6.0 to test the minimum supported release and builds PLUMED
+and its bindings with the same shared build functions before running the tests.
+
 ## Sol cluster
 
 `custom_install_sol.sh` builds the `openmmnqe` environment on Sol. Most dependencies come
@@ -138,7 +142,8 @@ together in one job with a `run.sh` that calls each script in turn.
 
 `custom_install.sh` compiles OpenMM, openmm-torch, NNPOps, OpenMM-ML and PLUMED from
 source into a separate `openmmnqe_custom` environment, leaving any existing `openmmnqe`
-environment untouched. Pin the versions at the top of the script, then:
+environment untouched. It defaults to the OpenMM `8.6.1` release tag. Adjust the
+versions at the top of the script if needed, then:
 
 ```bash
 bash custom_install.sh

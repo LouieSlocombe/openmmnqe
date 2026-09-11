@@ -17,7 +17,7 @@ authors = [
 dependencies = [
     "numpy",
     "scipy",
-    "openmm>=8.5.2",
+    "openmm>=8.6.0",
     "openmmml>=1.6",  # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
     "openmmplumed",  # conda-forge: openmm-plumed (dist name OpenMMPlumed) -- same
     "ase",

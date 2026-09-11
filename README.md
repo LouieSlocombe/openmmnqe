@@ -263,6 +263,8 @@ forces alone do not give under periodic boundary conditions.
 
 ## Installation
 
+OpenMM 8.6.0 or higher and Python 3.12 or higher are required.
+
 Some dependencies (openmm-ml, openmm-plumed) are not installable from PyPI, and openmm-plumed has to be compiled, so
 the package is installed into a conda environment. AmberTools is conda-only too — forcefill's GAFF backend runs the
 `antechamber` and `parmchk2` executables, which have to be on `PATH`. See
