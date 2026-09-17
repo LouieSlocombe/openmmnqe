@@ -9,5 +9,5 @@ sphinx>=8.2,<10
 furo>=2024.8.6
 myst-parser>=4,<6
 sphinx-copybutton>=0.5.2
-numpy
+numpy>=2.0
 scipy
