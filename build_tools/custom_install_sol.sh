@@ -51,8 +51,8 @@ mamba install -c conda-forge -y \
     "pytorch=*=cuda*" \
     "pymace>=0.3.16" \
     "ase>=3.28.0" \
-    "openmm>=8.6.0" \
-    "openmm-ml>=1.6" \
+    "openmm>=8.6.1" \
+    "openmm-ml>=1.8" \
     openmmforcefields \
     ambertools \
     pdbfixer \

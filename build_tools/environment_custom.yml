@@ -12,8 +12,8 @@ dependencies:
   - "pytorch=*=cuda*"
   - pymace=0.3.15
   - ase=3.28.0
-  - openmm=8.6.0
-  - openmm-ml=1.6
+  - openmm=8.6.1
+  - openmm-ml=1.8
   - openmmforcefields=0.15.1
   # forcefill's gaff backend runs the antechamber and parmchk2 executables, which
   # exist only as a conda package. openmmforcefields already depends on ambertools,

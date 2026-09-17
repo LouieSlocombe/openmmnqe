@@ -10,6 +10,8 @@ import numpy as np
 import openmm.app as app
 import openmm.unit as unit
 import pytest
+from ase import Atoms
+from ase import units as ase_units
 from ase.calculators.lj import LennardJones
 from openmm import openmm
 from openmmml import MLPotential
@@ -339,3 +341,123 @@ def test_bare_calculator_uses_ase_potential_fallback(monkeypatch: pytest.MonkeyP
     assert constructed == ["ase"]
     assert fallback.calls[0][2] == [0]
     assert fallback.calls[0][3]["calculator"] is calculator
+
+
+@pytest.mark.parametrize("periodic", [False, True])
+@pytest.mark.parametrize("explicit_potential", [False, True])
+def test_ase_mixed_system_preserves_energies_and_sparse_subset_forces(
+    monkeypatch: pytest.MonkeyPatch,
+    periodic: bool,
+    explicit_potential: bool,
+) -> None:
+    """Exercise OpenMM-ML's actual embedding and PythonForce.setParticles path."""
+    # Building a mixed system normally selects CUDA. Reference lets this
+    # dependency integration check also run on CI machines without a GPU.
+    monkeypatch.setattr(nqe_openmm, "check_platform", lambda name: "Reference")
+    topology = app.Topology()
+    chain = topology.addChain()
+    mm_system = openmm.System()
+    nonbonded = openmm.NonbondedForce()
+    for index, charge in enumerate([0.25, 0.0, -0.25]):
+        residue = topology.addResidue("AR", chain)
+        topology.addAtom(f"Ar{index}", app.element.argon, residue)
+        mm_system.addParticle(app.element.argon.mass)
+        nonbonded.addParticle(charge, 0.2, 0.0)
+    nonbonded.setCutoffDistance(0.9 * unit.nanometer)
+    if periodic:
+        nonbonded.setNonbondedMethod(openmm.NonbondedForce.PME)
+        box = np.eye(3) * 3.0 * unit.nanometer
+        topology.setPeriodicBoxVectors(box)
+        mm_system.setDefaultPeriodicBoxVectors(*box)
+    else:
+        nonbonded.setNonbondedMethod(openmm.NonbondedForce.CutoffNonPeriodic)
+    mm_system.addForce(nonbonded)
+    positions = np.array([[0.2, 0.2, 0.2], [1.7, 1.3, 1.3], [0.55, 0.2, 0.2]])
+    modeller = app.Modeller(topology, positions * unit.nanometer)
+    ml_idx = [2, 0]  # Non-contiguous and deliberately out of topology order.
+    calculator = LennardJones(sigma=2.8, epsilon=1.0)
+
+    system, platform = _build_system(
+        modeller,
+        PreparedSystem(mm_system),
+        "Reference",
+        potential=MLPotential("ase") if explicit_potential else None,
+        ml_idx=ml_idx,
+        calculator=calculator,
+    )
+
+    context = openmm.Context(system, openmm.VerletIntegrator(0.001), platform)
+    context.setPositions(modeller.positions)
+    state = context.getState(getEnergy=True, getForces=True)
+
+    # The pre-1.8 mechanical convention removes the direct ML pair and
+    # retains MM periodic-image electrostatics. Compare with that independently
+    # constructed MM reference plus ASE's own energy and scattered forces.
+    reference_system = openmm.XmlSerializer.deserialize(openmm.XmlSerializer.serialize(mm_system))
+    reference_nonbonded = reference_system.getForce(0)
+    reference_nonbonded.addException(2, 0, 0.0, 1.0, 0.0, True)
+    reference_context = openmm.Context(
+        reference_system, openmm.VerletIntegrator(0.001), platform,
+    )
+    reference_context.setPositions(modeller.positions)
+    reference_state = reference_context.getState(getEnergy=True, getForces=True)
+    atoms = Atoms("Ar2", positions=positions[ml_idx] * 10.0, pbc=periodic)
+    if periodic:
+        atoms.set_cell(np.eye(3) * 30.0)
+    atoms.calc = LennardJones(sigma=2.8, epsilon=1.0)
+    ev_to_kj_mol = 1.0 / (ase_units.kJ / ase_units.mol)
+    expected_energy = reference_state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
+    expected_energy += atoms.get_potential_energy() * ev_to_kj_mol
+    expected_forces = reference_state.getForces(asNumpy=True).value_in_unit(
+        unit.kilojoule_per_mole / unit.nanometer,
+    )
+    expected_forces[ml_idx] += atoms.get_forces() * 10.0 * ev_to_kj_mol
+
+    assert state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole) == pytest.approx(
+        expected_energy, abs=1e-5,
+    )
+    np.testing.assert_allclose(
+        state.getForces(asNumpy=True).value_in_unit(unit.kilojoule_per_mole / unit.nanometer),
+        expected_forces,
+        rtol=1e-6,
+        atol=1e-5,
+    )
+
+
+@pytest.mark.parametrize("long_range", [False, True])
+def test_periodic_mixed_system_leaves_known_model_range_to_openmmml(
+    fake_platform: list[str],
+    long_range: bool,
+) -> None:
+    potential = _Potential()
+    potential._impl = SimpleNamespace(getMLLongRange=lambda: long_range)
+
+    _build_system(
+        SimpleNamespace(topology=_Topology(periodic=True)),
+        _ForceField(),
+        "CPU",
+        potential=potential,
+        ml_idx=[0],
+        calculator=None,
+    )
+
+    # OpenMM-ML rejects mlLongRange whenever its model declares a known value.
+    assert "mlLongRange" not in potential.calls[0][3]
+
+
+def test_mixed_system_rejects_added_link_atoms(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(nqe_openmm, "check_platform", lambda name: "Reference")
+    modeller = _toluene_modeller()
+    mm_system = openmm.System()
+    for atom in modeller.topology.atoms():
+        mm_system.addParticle(atom.element.mass)
+
+    with pytest.raises(ValueError, match="Select complete molecules"):
+        _build_system(
+            modeller,
+            PreparedSystem(mm_system),
+            "Reference",
+            potential=MLPotential("ase"),
+            ml_idx=[0],
+            calculator=LennardJones(),
+        )

@@ -64,8 +64,13 @@ jobs:
           plumed --no-mpi config -q module opes
           python -c "import plumed; plumed.Plumed()"
           python -c "from openmmplumed import PlumedForce"
-      - name: Verify OpenMM baseline
-        run: python -c "from importlib.metadata import version; assert version('openmm') == '8.6.0', version('openmm')"
+      - name: Verify OpenMM and OpenMM-ML baselines
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          assert version('openmm') == '8.6.1', version('openmm')
+          assert version('openmmml') == '1.8', version('openmmml')
+          PY
       - run: pip install -e . --no-deps
       - run: python -c "import openmmnqe; print(openmmnqe.__version__)"
       - run: pytest tests --cov=openmmnqe --cov-branch --cov-report=term-missing --cov-fail-under=90 -q

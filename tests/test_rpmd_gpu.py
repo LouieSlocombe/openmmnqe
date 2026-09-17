@@ -1,14 +1,13 @@
 """
 GPU-only guards for the RPMD reporters on a mixed ML/MM System.
 
-The bug these cover cannot be reproduced on the Reference or CPU platform.
+The historical bug covered here occurred before OpenMM 8.6.1 on GPU platforms.
 ``MLPotential.createMixedSystem`` attaches the ML model as an
-``openmm.PythonForce``, so every force evaluation re-enters Python.  CUDA and
-OpenCL run force kernels on a worker thread, while Reference and CPU run them
-on the calling thread, and ``RPMDIntegrator.getTotalEnergy()`` does not
-release the GIL -- so on a GPU platform the worker can never enter the
-callback and the call deadlocks.  ``step()`` and ``getState()`` do release it,
-which is why a run only hangs once a report falls due.
+``openmm.PythonForce``, so every force evaluation re-enters Python. CUDA and
+OpenCL used to evaluate it on a worker thread, while
+``RPMDIntegrator.getTotalEnergy()`` held the GIL. The worker could not enter
+the callback, so a run hung when a report fell due. OpenMM 8.6.1 disables the
+worker-thread path for ``PythonForce``; these tests still guard GPU reporting.
 
 Each case runs in a subprocess under a timeout, so a regression fails the
 suite instead of hanging it.  ``tests/test_reporters.py`` carries the

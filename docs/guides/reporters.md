@@ -135,12 +135,11 @@ the log back with block-averaged standard errors, and
 `E_ring` and `E_spring` are reconstructed from the bead pass — the bead
 kinetic and potential energies plus springs of frequency `P k_B T / hbar` —
 rather than read from `RPMDIntegrator.getTotalEnergy()`. The two agree to
-within one part in a million, but that method cannot be called at all on a
-mixed ML/MM System on CUDA or OpenCL: the ML potential is an
-`openmm.PythonForce`, those platforms evaluate forces on a worker thread, and
-the method holds the GIL while it waits for one. `step()` and `getState()` do
-release it, so such a run used to advance normally and then stop dead at its
-first report.
+within one part in a million. Before OpenMM 8.6.1, that method could deadlock
+on CUDA or OpenCL when a `PythonForce` callback needed the GIL held by the
+reporting thread. OpenMM 8.6.1 disables that worker-thread path for
+`PythonForce`. The reconstruction still reuses the bead states needed for
+the other observables, and the GPU tests guard scheduled reporting.
 
 ### Per-atom kinetic decomposition
 

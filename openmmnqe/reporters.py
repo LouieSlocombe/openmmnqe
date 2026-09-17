@@ -1755,11 +1755,10 @@ def _rpmd_ring_energies(integrator: openmm.RPMDIntegrator,
     """
     Ring-polymer Hamiltonian and its spring term, without ``getTotalEnergy``.
 
-    ``RPMDIntegrator.getTotalEnergy()`` deadlocks on a mixed ML/MM System on
-    CUDA or OpenCL -- the ML potential is an ``openmm.PythonForce``, those
-    platforms evaluate forces on a worker thread, and the method holds the
-    GIL while it waits, so the worker can never enter the callback.  The two
-    energies are therefore assembled here from a bead pass instead: the bead
+    Before OpenMM 8.6.1, ``RPMDIntegrator.getTotalEnergy()`` could deadlock
+    on CUDA or OpenCL when a ``PythonForce`` worker needed the GIL held by
+    the caller. OpenMM 8.6.1 disables that worker-thread path. These energies
+    still reuse the states collected in the thermodynamic bead pass: the bead
     kinetic and potential energies OpenMM reports per copy, plus the springs
     linking neighbouring copies.
 
@@ -1952,11 +1951,10 @@ def rpmd_thermodynamics(simulation: app.Simulation, *,
 
     ``energy_ring`` is reconstructed rather than read from
     ``RPMDIntegrator.getTotalEnergy()``, which agrees with it to within one
-    part in a million but cannot be called at all on a mixed ML/MM System on
-    CUDA or OpenCL: the ML potential is an ``openmm.PythonForce``, those
-    platforms evaluate forces on a worker thread, and the method holds the
-    GIL while waiting for it, so the call deadlocks.  The cost of that is one
-    assumption -- that OpenMM links neighbouring copies with springs of
+    part in a million. Before OpenMM 8.6.1, that method could deadlock on
+    CUDA or OpenCL when a ``PythonForce`` worker needed the GIL held by the
+    caller. The reconstruction still reuses the states read for the other
+    observables. It assumes that OpenMM links neighbouring copies with springs of
     angular frequency ``P k_B T / hbar`` -- which
     ``test_reported_ring_energy_matches_openmm_get_total_energy`` pins
     against OpenMM itself.

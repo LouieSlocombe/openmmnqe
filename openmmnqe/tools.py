@@ -361,12 +361,10 @@ def _ring_spring_energy(bead_positions_nm: npt.NDArray[np.float64],
     with the bead index taken modulo ``P``.  Massless particles drop out on
     their own, so virtual sites and frozen atoms need no masking.
 
-    This exists because ``RPMDIntegrator.getTotalEnergy()`` cannot be called
-    on a mixed ML/MM System on a GPU platform: the ML potential is an
-    ``openmm.PythonForce``, CUDA and OpenCL evaluate forces on a worker
-    thread, and that method does not release the GIL, so the worker can
-    never enter the Python callback and the call deadlocks.  Reconstructing
-    the ring energy from a bead pass avoids the method entirely.
+    Before OpenMM 8.6.1, ``RPMDIntegrator.getTotalEnergy()`` could deadlock
+    on CUDA or OpenCL when a ``PythonForce`` worker needed the GIL held by
+    the caller. OpenMM 8.6.1 disables that worker-thread path. Reconstructing
+    the ring energy still lets the reporters reuse their existing bead pass.
 
     Parameters
     ----------

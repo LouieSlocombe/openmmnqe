@@ -850,9 +850,9 @@ def run_openmm_rpmd_recrossing(
                         f"{s_value:.17g}",
                     ]
                     if record_energy:
-                        # Not RPMDIntegrator.getTotalEnergy(): that method
-                        # deadlocks on a mixed ML/MM System on CUDA or
-                        # OpenCL, which is exactly what this driver runs.
+                        # Share the reporters' bead-based energy definition,
+                        # which also avoided PythonForce GPU deadlocks before
+                        # OpenMM 8.6.1.
                         energy, _ = _rpmd_ring_energies(
                             integrator, particle_masses
                         )

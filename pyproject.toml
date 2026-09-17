@@ -17,8 +17,8 @@ authors = [
 dependencies = [
     "numpy",
     "scipy",
-    "openmm>=8.6.0",
-    "openmmml>=1.6",  # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
+    "openmm>=8.6.1",
+    "openmmml>=1.8",  # conda-forge: openmm-ml (not on PyPI) -- module-level import in openmmnqe/openmm.py
     "openmmplumed",  # conda-forge: openmm-plumed (dist name OpenMMPlumed) -- same
     "ase",
     "pdbfixer",      # openmmnqe.io.fix_pdb -- forcefill is subtractive only and will not repair

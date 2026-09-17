@@ -25,6 +25,17 @@ bonding changes over the trajectory — a proton that transfers, and both the do
 and acceptor it moves between. An ML region that clips one of those describes a
 bond breaking against a force field that says it cannot.
 
+Select complete molecules in `ml_idx`. OpenMM-ML 1.8 can add link atoms when
+bonds cross the ML/MM boundary, but these stage drivers require the System,
+topology, and starting coordinates to contain the same atoms. They reject such
+systems with an error explaining how to adjust the selection.
+
+For periodic mixed systems, ASE calculators and custom models that do not
+declare their long-range behavior retain the previous coupling convention:
+the ML potential replaces direct interactions within the ML region, while
+the classical periodic-image electrostatics remain. Models that declare their
+long-range behavior use OpenMM-ML's corresponding embedding choice.
+
 ## Bringing your own system
 
 {class}`~openmmnqe.openmm.PreparedSystem` is a stand-in force field: it hands a

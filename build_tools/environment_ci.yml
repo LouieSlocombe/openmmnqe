@@ -1,7 +1,7 @@
 # CPU-only environment for CI (GitHub Actions), derived from environment.yml:
 # no CUDA pins, a CPU PyTorch build, and no nnpops. PLUMED, openmm-plumed,
 # and py-plumed are built by build_plumed.sh against this OpenMM version.
-# Python and OpenMM are pinned to the oldest supported versions.
+# Python, OpenMM, and OpenMM-ML are pinned to the oldest supported versions.
 #
 # It also keeps the git dependencies that environment.yml drops. A runner has only
 # this repository checked out, so there are no sibling checkouts for
@@ -25,8 +25,8 @@ dependencies:
   - "pytorch=*=cpu*"
   - pymace>=0.3.16
   - ase>=3.28.0
-  - openmm=8.6.0
-  - openmm-ml>=1.6
+  - openmm=8.6.1
+  - openmm-ml=1.8
   - openmmforcefields
   # forcefill's gaff backend runs the antechamber and parmchk2 executables, which
   # exist only as a conda package. openmmforcefields already depends on ambertools,

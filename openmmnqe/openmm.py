@@ -604,7 +604,11 @@ def _build_system(modeller: app.Modeller,
     * **ML/MM mixed** -- *potential* (or *calculator*, which implies
       ``MLPotential('ase')``) together with *ml_idx* promotes the MM system to
       a mixed system via ``createMixedSystem``, and the platform is forced to
-      CUDA.
+      CUDA. For models whose long-range behavior is unspecified (including
+      ASE calculators), periodic mixing retains the pre-1.8 convention:
+      replace the direct ML--ML pairs while retaining their MM periodic-image
+      electrostatics. Select complete molecules; link atoms are not supported
+      by these drivers.
 
     Parameters
     ----------
@@ -640,7 +644,8 @@ def _build_system(modeller: app.Modeller,
         through would quietly run the whole simulation at pure MM instead.
         Also raised when *ml_idx* is empty or is supplied without either an ML
         potential or calculator, or when an ML atom index is negative,
-        duplicated, or outside the topology.
+        duplicated, or outside the topology, or when mixed-system construction
+        adds link atoms that have no coordinates in the supplied Modeller.
     """
     if potential is not None and ml_idx is None:
         raise ValueError(
@@ -702,7 +707,25 @@ def _build_system(modeller: app.Modeller,
     mm_system = forcefield.createSystem(modeller.topology, **system_kwargs)
     if calculator is not None:
         system_kwargs['calculator'] = calculator
+    # OpenMM-ML 1.8 requires an explicit range choice for periodic ASE and
+    # user-supplied models. Its previous mechanical embedding retained the
+    # MM periodic-image electrostatics, equivalent to mlLongRange=False.
+    # Models with a known range reject this option, so let those declare it.
+    # OpenMM-ML currently exposes this query on its implementation only.
+    get_ml_long_range = getattr(getattr(potential, '_impl', None),
+                                'getMLLongRange', None)
+    if callable(get_ml_long_range) and get_ml_long_range() is None:
+        system_kwargs['mlLongRange'] = False
     system = potential.createMixedSystem(modeller.topology, mm_system, ml_idx, **system_kwargs)
+    if (isinstance(system, openmm.System)
+            and system.getNumParticles() != modeller.topology.getNumAtoms()):
+        raise ValueError(
+            "Mixed-system construction changed the particle count. OpenMM-ML "
+            "1.8 adds link atoms when bonds cross the ML/MM boundary, but these "
+            "drivers require the supplied topology and positions to match the "
+            "System. Select complete molecules with ml_idx; link-atom mixed "
+            "systems are not supported by these drivers."
+        )
 
     return system, platform
 

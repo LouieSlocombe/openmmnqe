@@ -18,7 +18,7 @@ set -eo pipefail
 
 ENV_NAME="openmmnqe_custom"
 OPENMM_VERSION="8.6.1"
-OPENMM_ML_VERSION="main" # 1.6
+OPENMM_ML_VERSION="1.8"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

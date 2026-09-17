@@ -12,7 +12,7 @@ Every route compiles PLUMED, the `openmm-plumed` plugin and the PLUMED Python
 bindings (py-plumed) against the selected OpenMM installation. Prebuilt
 `openmm-plumed` packages are tied to the OpenMM minor version they were built
 with, so a build for an older OpenMM cannot satisfy this project's requirement
-of OpenMM 8.6.0 or higher. Building from source also gets you PLUMED's `opes`
+of OpenMM 8.6.1 or higher. Building from source also gets you PLUMED's `opes`
 module, which the conda-forge build omits, and py-plumed — the `plumed` module
 that `reactiontools`' `plumed_calculator` imports on first use — matched to the
 same PLUMED version.
@@ -21,7 +21,7 @@ same PLUMED version.
 
 - A compatible operating system: Linux, macOS, or Windows via WSL.
 - Python 3.12 or higher.
-- OpenMM 8.6.0 or higher (installed by the scripts).
+- OpenMM 8.6.1 or higher and OpenMM-ML 1.8 or higher (installed by the scripts).
 - Conda or Mamba.
 - Git, to clone the PLUMED sources and the editable dependencies. The compiler,
   `cmake` and `make` come from the environment; git does not.
@@ -101,8 +101,9 @@ integration signal that a sibling moved; forcefill bumps its `version` on API-vi
 changes, so comparing `pip show forcefill` against a checkout's `pyproject.toml` tells
 a stale install from a new one.
 
-CI pins OpenMM to 8.6.0 to test the minimum supported release and builds PLUMED
-and its bindings with the same shared build functions before running the tests.
+CI pins OpenMM to 8.6.1 and OpenMM-ML to 1.8 to test the minimum supported
+releases and builds PLUMED and its bindings with the same shared build functions
+before running the tests.
 
 ## Sol cluster
 
@@ -142,8 +143,8 @@ together in one job with a `run.sh` that calls each script in turn.
 
 `custom_install.sh` compiles OpenMM, openmm-torch, NNPOps, OpenMM-ML and PLUMED from
 source into a separate `openmmnqe_custom` environment, leaving any existing `openmmnqe`
-environment untouched. It defaults to the OpenMM `8.6.1` release tag. Adjust the
-versions at the top of the script if needed, then:
+environment untouched. It defaults to the OpenMM `8.6.1` and OpenMM-ML `1.8`
+release tags. Adjust the versions at the top of the script if needed, then:
 
 ```bash
 bash custom_install.sh

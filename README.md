@@ -231,11 +231,11 @@ drives the dynamics.
 
 `E_ring` and `E_spring` are reconstructed from the bead pass rather than read
 from `RPMDIntegrator.getTotalEnergy()`. That method agrees with the
-reconstruction to within one part in a million, but it cannot be called at all
-on a mixed ML/MM system on CUDA or OpenCL: the ML potential is an
-`openmm.PythonForce`, those platforms evaluate forces on a worker thread, and
-the method holds the GIL while it waits for one, so the call deadlocks and the
-run stops dead at its first report. Reconstructing costs one assumption --
+reconstruction to within one part in a million. Before OpenMM 8.6.1, that
+method could deadlock on CUDA or OpenCL when a `PythonForce` callback needed
+the GIL held by the reporting thread. OpenMM 8.6.1 disables that worker-thread
+path for `PythonForce`; the reconstruction still reuses the bead states read
+for the other observables. Reconstructing costs one assumption --
 that OpenMM links neighbouring copies with springs of frequency
 `P k_B T / hbar` -- which the test suite pins against OpenMM itself.
 
@@ -263,7 +263,7 @@ forces alone do not give under periodic boundary conditions.
 
 ## Installation
 
-OpenMM 8.6.0 or higher and Python 3.12 or higher are required.
+OpenMM 8.6.1 or higher, OpenMM-ML 1.8 or higher, and Python 3.12 or higher are required.
 
 Some dependencies (openmm-ml, openmm-plumed) are not installable from PyPI, and openmm-plumed has to be compiled, so
 the package is installed into a conda environment. AmberTools is conda-only too — forcefill's GAFF backend runs the

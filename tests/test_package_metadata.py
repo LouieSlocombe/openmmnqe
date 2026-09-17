@@ -125,8 +125,8 @@ def test_runtime_version_matches_project_and_installed_metadata() -> None:
 
 def test_critical_dependency_minimums_are_declared() -> None:
     dependencies = set(_project_metadata()["dependencies"])
-    assert "openmm>=8.6.0" in dependencies
-    assert "openmmml>=1.6" in dependencies
+    assert "openmm>=8.6.1" in dependencies
+    assert "openmmml>=1.8" in dependencies
 
 
 def test_docs_requirements_match_docs_extra() -> None:
