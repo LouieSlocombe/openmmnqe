@@ -127,6 +127,25 @@ def test_critical_dependency_minimums_are_declared() -> None:
     dependencies = set(_project_metadata()["dependencies"])
     assert "openmm>=8.6.1" in dependencies
     assert "openmmml>=1.8" in dependencies
+    # The two sibling packages, at the releases this package is written
+    # against. build_tools/environment_ci.yml installs exactly these versions.
+    assert "forcefill>=1.0" in dependencies
+    assert "reactiontools>=1.0" in dependencies
+
+
+def test_no_dependency_is_a_direct_url() -> None:
+    """Every dependency is a version requirement, not a `name @ git+...` URL.
+
+    forcefill and reactiontools were declared that way until each released a
+    1.0.0. A URL requirement tracks a branch rather than a release, so there is
+    no version to compare a checkout against, and pip re-fetches it on every
+    install -- over the top of an editable install of the same package.
+    """
+    project = _project_metadata()
+    declared = list(project["dependencies"])
+    for extra in project["optional-dependencies"].values():
+        declared.extend(extra)
+    assert [requirement for requirement in declared if "@" in requirement] == []
 
 
 def test_docs_requirements_match_docs_extra() -> None:

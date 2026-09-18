@@ -3,8 +3,8 @@
 openmmnqe cannot be imported for real here. Every module imports ``openmm`` at
 module scope; ``openmmnqe/openmm.py`` also imports ``openmmml`` and
 ``openmmplumed``, and ``openmmnqe/io.py`` imports ``pdbfixer``, ``rdkit`` and
-``reactiontools``. The full dependency set needs conda, git checkouts, and a
-PLUMED source build -- see ``build_tools/README.md``. The docs build puts the checkout
+``reactiontools``. The full dependency set needs conda and a PLUMED source
+build -- see ``build_tools/README.md``. The docs build puts the checkout
 on ``sys.path``, mocks those distributions, and installs only the doc toolchain
 plus numpy and scipy for real.
 """

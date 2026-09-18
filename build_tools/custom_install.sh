@@ -6,9 +6,9 @@
 # The environment is recreated from scratch on every run, and sources are cloned
 # into ../../openmmnqe_sources (a sibling of the repo).
 #
-# forcefill, reactiontools, geodesic_interpolate and sella are cloned next to this
-# repository and installed editable. Existing checkouts are used as they are, never
-# wiped. Set SRC_DIR to keep them somewhere else:
+# forcefill and reactiontools are cloned next to this repository and installed
+# editable, in place of the releases pyproject.toml asks for. Existing checkouts
+# are used as they are, never wiped. Set SRC_DIR to keep them somewhere else:
 #
 #   SRC_DIR="${HOME}/src" bash custom_install.sh
 
@@ -28,8 +28,8 @@ SRC_DIR="${SRC_DIR:-$(dirname "${REPO_DIR}")}"
 
 # Pulls in build_plumed() and build_py_plumed(), with the PLUMED versions they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
-# Pulls in install_editable_repos() and check_editable_repos(), with the git
-# dependencies they clone.
+# Pulls in install_editable_repos() and check_editable_repos(), with the sibling
+# packages they clone.
 source "${SCRIPT_DIR}/editable_repos.sh"
 
 echo "=== Initializing Conda Environment ==="

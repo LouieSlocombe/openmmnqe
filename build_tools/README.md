@@ -48,8 +48,8 @@ ENV_NAME=openmmnqe2 bash conda_install.sh
 
 The script creates the environment from `environment.yml`, compiles PLUMED, the
 `openmm-plumed` plugin and py-plumed into it (sources are cloned into the gitignored
-`build_tools/sources/`, wiped on each run), installs `openmmnqe` and its four git
-dependencies in editable mode so changes to the source are picked up without
+`build_tools/sources/`, wiped on each run), installs `openmmnqe` and the two sibling
+packages in editable mode so changes to the source are picked up without
 reinstalling, and finishes with import checks. It is equivalent to running, from this
 directory:
 
@@ -68,38 +68,41 @@ take the same working directory, and the PLUMED version is pinned there in one p
 
 ### Editable dependencies
 
-`forcefill`, `reactiontools`, `geodesic_interpolate` and `sella` are all repositories
-that get edited alongside this package, so every installer clones them **next to the
-repository** and installs them editable rather than pulling them from GitHub on each
-install:
+`forcefill` and `reactiontools` are released packages: `pyproject.toml` asks for
+`forcefill>=1.0` and `reactiontools>=1.0`, and pip takes both from PyPI. They are also
+edited alongside this package, so every installer clones them **next to the repository**
+and installs them editable in place of those releases:
 
 ```
 skunkworks/
 ├── openmmnqe/
 ├── forcefill/
-├── reactiontools/
-├── geodesic_interpolate/
-└── sella/
+└── reactiontools/
 ```
 
 Set `SRC_DIR` to keep them elsewhere. A checkout that is already there is used exactly
 as it is — the installer never pulls, resets or removes one, so uncommitted work is safe
 across a rebuild. Only a missing one is cloned.
 
-The editable installs run **after** `pip install -e ..`, not before: `pyproject.toml`
-declares `forcefill` and `reactiontools` as `name @ git+...` dependencies, and pip
-re-clones those even when the package is already installed, so an editable install done
-first would be replaced by the copy pip pulls. The same applies within the list itself,
-which is why `reactiontools` is installed before `geodesic_interpolate` and `sella` —
-the two it declares the same way. Every installer finishes by checking each one imports
-from its checkout rather than from `site-packages`.
+`geodesic_interpolate` and `sella` used to be cloned here as well, because
+`reactiontools` declared them. It carries both itself as of its 1.0.0, as
+`reactiontools.tools_geodesic` and `reactiontools.tools_sella`, so a checkout of either
+would now only add a copy that nothing imports.
+
+The editable installs still run **after** `pip install -e ..`: pip resolves both
+releases from PyPI on the way to installing `openmmnqe`, and the editable installs then
+take their place. Only the cost of that order changed with the releases — while the two
+were declared as `name @ git+...`, pip re-cloned them over an editable install that was
+already there, and this was the only order that worked at all. Every installer finishes
+by checking each one imports from its checkout rather than from `site-packages`.
 
 `environment_ci.yml` is the exception: a GitHub runner has only this repository checked
-out, so CI keeps the `git+` pip entries and takes all four straight from GitHub. Those
-`git+` installs track each repository's default branch, so CI failing here is the
-integration signal that a sibling moved; forcefill bumps its `version` on API-visible
-changes, so comparing `pip show forcefill` against a checkout's `pyproject.toml` tells
-a stale install from a new one.
+out, so CI installs `forcefill==1.0.0` and `reactiontools==1.0.0` from PyPI — the floors
+`pyproject.toml` declares, tested the way OpenMM 8.6.1 and OpenMM-ML 1.8 are. The `git+`
+entries they replace tracked each repository's default branch, which made a failure here
+the signal that a sibling had moved; a sibling release now arrives deliberately instead,
+by raising the floor and this pin together. Within a checkout, `pip show forcefill`
+against its `pyproject.toml` still tells a stale editable install from a current one.
 
 CI pins OpenMM to 8.6.1 and OpenMM-ML to 1.8 to test the minimum supported
 releases and builds PLUMED and its bindings with the same shared build functions
@@ -113,7 +116,7 @@ not include the `opes` module. PLUMED sources are cloned into
 `$SCRATCH/openmmnqe_sources`, and both the environment and those sources are recreated
 from scratch on each run.
 
-`openmmnqe` itself and the four editable dependencies are cloned into
+`openmmnqe` itself and the two editable dependencies are cloned into
 `$HOME/openmmnqe_src` instead — outside the build area, since that is wiped — and
 installed editable, so `git pull` in a checkout is enough to update it. Set `SRC_DIR` to
 put them somewhere else.
@@ -155,8 +158,8 @@ environment and the sources are recreated from scratch on each run, so a full bu
 a while. The editable checkouts are shared with the other two routes and are not wiped.
 
 All three installers share `build_plumed.sh`, which is where the PLUMED and
-OpenMM-PLUMED versions are pinned, and `editable_repos.sh`, which is where the git
-dependencies are listed.
+OpenMM-PLUMED versions are pinned, and `editable_repos.sh`, which is where the sibling
+checkouts are listed.
 
 ## One environment for openmmnqe + openmmqmmm
 
@@ -185,8 +188,7 @@ checkouts above. If you need ORCA, follow the install steps in that repository's
 hand.
 
 That repository ships its own `build_tools/` with the same layout, for a CPU-only
-environment without OpenMM. The two share `geodesic_interpolate` and `sella`, so a single
-set of checkouts serves both.
+environment without OpenMM.
 
 ## Next steps
 

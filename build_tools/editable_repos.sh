@@ -1,24 +1,22 @@
 #!/bin/bash
-# Shared handling of the dependencies that come from git rather than conda-forge,
-# sourced by conda_install.sh, custom_install.sh and custom_install_sol.sh. All of
-# them are repositories that get edited alongside openmmnqe, so they are cloned
-# once and installed in editable mode instead of being pulled fresh from GitHub on
-# every install -- a `git pull` in the checkout is then all it takes to update one.
-#
-# reactiontools ships the same file, with the subset of this list that it needs.
+# Shared handling of the two sibling packages, sourced by conda_install.sh,
+# custom_install.sh and custom_install_sol.sh. Both are released on PyPI and
+# pyproject.toml asks for them by version, but they get edited alongside
+# openmmnqe, so every installer clones them once and installs them in editable
+# mode instead -- a `git pull` in the checkout is then all it takes to update
+# one, and the release is what everyone else gets.
 
 # name=url pairs, in install order. The name is both the directory the repo is
 # cloned into and the module the install is checked against.
 #
-# Order matters. pip re-fetches anything declared as a `name @ git+...` dependency
-# even when an editable install of it is already present, so a repository has to be
-# installed *before* the ones it declares: reactiontools drags in its own copies of
-# geodesic_interpolate and sella, which the two entries after it then replace.
+# geodesic_interpolate and sella used to follow reactiontools here, because it
+# declared both as `name @ git+...` dependencies and pip re-fetched them over
+# any editable install. reactiontools carries the code itself as of its 1.0.0,
+# in reactiontools.tools_geodesic and reactiontools.tools_sella, so cloning
+# either would now install a copy that nothing imports.
 EDITABLE_REPOS=(
     "forcefill=https://github.com/LouieSlocombe/forcefill.git"
     "reactiontools=https://github.com/LouieSlocombe/reactiontools.git"
-    "geodesic_interpolate=https://github.com/LouieSlocombe/geodesic_interpolate.git"
-    "sella=https://github.com/LouieSlocombe/sella.git"
 )
 
 # clone_repo <url> <path>
@@ -41,10 +39,13 @@ clone_repo() {
 }
 
 # install_editable_repos <src_dir>
-# Clones each git dependency into <src_dir> and installs it editable. Run this
-# *after* openmmnqe itself is installed: pip re-clones anything declared as a
-# `name @ git+...` dependency in pyproject.toml even when it is already present,
-# so an editable install done earlier would be overwritten by that copy.
+# Clones each sibling package into <src_dir> and installs it editable. It still
+# runs *after* openmmnqe itself, as it always has: pip resolves both releases
+# from PyPI on the way to installing openmmnqe, and the editable installs then
+# take their place. Only the cost of that changed with the releases -- while the
+# two were `name @ git+...` requirements, pip re-cloned them even when an
+# editable install was already there, and this order was the only one that
+# worked.
 install_editable_repos() {
     local src_dir="$1"
     local entry name url

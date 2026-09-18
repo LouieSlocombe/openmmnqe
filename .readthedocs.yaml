@@ -2,10 +2,12 @@
 # https://docs.readthedocs.com/platform/stable/config-file/v2.html
 #
 # The package is deliberately NOT installed. Its runtime dependencies are
-# conda-only (openmm-ml, openmm-plumed, pdbfixer) or git-only
-# (forcefill, reactiontools), and openmm-plumed has to be compiled -- see
-# build_tools/README.md. docs/conf.py puts the checkout on sys.path and mocks
-# them instead, which keeps this build under a minute.
+# conda-only (openmm-ml, openmm-plumed, pdbfixer), and openmm-plumed has to be
+# compiled -- see build_tools/README.md. forcefill and reactiontools are on PyPI
+# since their 1.0.0 releases, but forcefill pulls openmm and openff-toolkit in
+# behind it, so neither is any cheaper to install here. docs/conf.py puts the
+# checkout on sys.path and mocks them all instead, which keeps this build under
+# a minute.
 
 version: 2
 

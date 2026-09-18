@@ -2,7 +2,7 @@
 # One-command install of the openmmnqe conda environment: creates the environment
 # from environment.yml, compiles PLUMED (with the opes module), the OpenMM-PLUMED
 # plugin and the PLUMED Python bindings (py-plumed) into it, then installs
-# openmmnqe and its git dependencies in editable mode and verifies the result.
+# openmmnqe and the two sibling packages in editable mode and verifies the result.
 #
 #   bash conda_install.sh
 #
@@ -12,9 +12,9 @@
 #
 #   ENV_NAME=openmmnqe2 bash conda_install.sh
 #
-# forcefill, reactiontools, geodesic_interpolate and sella are cloned next to this
-# repository and installed editable. Existing checkouts are used as they are, never
-# wiped. Set SRC_DIR to keep them somewhere else:
+# forcefill and reactiontools are cloned next to this repository and installed
+# editable, in place of the releases pyproject.toml asks for. Existing checkouts
+# are used as they are, never wiped. Set SRC_DIR to keep them somewhere else:
 #
 #   SRC_DIR="${HOME}/src" bash conda_install.sh
 
@@ -32,8 +32,8 @@ SRC_DIR="${SRC_DIR:-$(dirname "${REPO_DIR}")}"
 
 # Pulls in build_plumed() and build_py_plumed(), with the PLUMED versions they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
-# Pulls in install_editable_repos() and check_editable_repos(), with the git
-# dependencies they clone.
+# Pulls in install_editable_repos() and check_editable_repos(), with the sibling
+# packages they clone.
 source "${SCRIPT_DIR}/editable_repos.sh"
 
 echo "=== Initializing Conda Environment ==="

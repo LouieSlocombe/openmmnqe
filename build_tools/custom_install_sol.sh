@@ -8,7 +8,7 @@
 #
 # The environment is recreated from scratch on every run.
 #
-# openmmnqe and its git dependencies are cloned into $SRC_DIR and installed
+# openmmnqe and the two sibling packages are cloned into $SRC_DIR and installed
 # editable, so a `git pull` there is all it takes to update them. Existing checkouts
 # are used as they are, never wiped.
 

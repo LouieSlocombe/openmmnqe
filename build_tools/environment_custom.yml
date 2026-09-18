@@ -30,8 +30,8 @@ dependencies:
   - pip:
       - torch-dftd
 
-# forcefill, reactiontools, geodesic_interpolate and sella are deliberately absent:
-# custom_install.sh clones them next to this repository and installs them editable
-# (see editable_repos.sh). Creating this environment on its own leaves them out, and
-# `pip install -e ..` then pulls them from git, as pyproject.toml declares them.
-# sella brings jax and jaxlib with it, from PyPI -- neither is pinned here.
+# forcefill and reactiontools are deliberately absent: custom_install.sh clones them
+# next to this repository and installs them editable (see editable_repos.sh).
+# Creating this environment on its own leaves them out, and `pip install -e ..`
+# then takes their releases from PyPI, at the versions pyproject.toml declares.
+# reactiontools brings jax and jaxlib with it, from PyPI -- neither is pinned here.
