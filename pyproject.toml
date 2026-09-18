@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openmmnqe"
-version = "0.1.0"
+version = "1.0.0"
 description = "OpenMM workflows for nuclear quantum effects: RPMD and adaptive QTB simulations with PLUMED enhanced sampling"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"

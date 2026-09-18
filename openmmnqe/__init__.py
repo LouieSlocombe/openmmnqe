@@ -267,6 +267,6 @@ try:
     __version__ = _distribution_version("openmmnqe")
 except _PackageNotFoundError:
     # Importing directly from an unpacked source tree has no installed metadata.
-    __version__ = "0.1.0"
+    __version__ = "1.0.0"
 
 openmm_nqe_dir = _os.path.dirname(_os.path.realpath(__file__))
