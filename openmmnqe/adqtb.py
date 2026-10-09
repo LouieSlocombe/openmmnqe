@@ -44,8 +44,7 @@ import math
 import os
 import re
 from collections.abc import Iterable, Mapping
-from types import TracebackType
-from typing import Any, NamedTuple, Self
+from typing import Any, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
@@ -54,7 +53,8 @@ from openmm import app, openmm
 from scipy import constants
 
 from ._logs import _read_reporter_log
-from ._validation import require_integer
+from ._reporting import _TabularReporter
+from ._validation import require_integer, require_whole_steps
 
 # Friction columns are named ``Gamma_<label>_<bin>``.  The label may itself
 # contain underscores and digits, so the bin is matched greedily from the
@@ -178,13 +178,10 @@ def _segment_steps(integrator: Any) -> int:
     segment_length = integrator.getSegmentLength().value_in_unit(
         unit.picosecond
     )
-    steps = int(round(segment_length / step_size))
-    if steps < 1 or abs(steps * step_size - segment_length) > 1e-9:
-        raise ValueError(
-            "segment length must be a whole number of steps, but "
-            f"{segment_length} ps is not a multiple of {step_size} ps"
-        )
-    return steps
+    return require_whole_steps(
+        segment_length, step_size,
+        message="segment length must be a whole number of steps",
+    )
 
 
 def _num_frequencies(segment_steps: int) -> int:
@@ -226,7 +223,7 @@ def _frequency_grid(num_freq: int, step_size: float) -> npt.NDArray[np.float64]:
     return np.arange(num_freq, dtype=float) * math.pi / (num_freq * step_size)
 
 
-class QTBFrictionReporter:
+class QTBFrictionReporter(_TabularReporter):
     """
     Log a ``QTBIntegrator``'s adapted friction spectra as they adapt.
 
@@ -324,8 +321,7 @@ class QTBFrictionReporter:
             for index in range(num_freq)
         ]
         header = "Step\tTime(ps)\t" + "\t".join(columns)
-        self._out = open(file, "w")
-        self._out.write(header + "\n")
+        super().__init__(file, header)
 
     def describeNextReport(self, simulation: app.Simulation,
                            ) -> tuple[int, bool, bool, bool, bool]:
@@ -367,8 +363,7 @@ class QTBFrictionReporter:
             written at construction.
         """
         integrator = simulation.integrator
-        line = f"{simulation.currentStep}"
-        line += f"\t{state.getTime().value_in_unit(unit.picosecond):.6f}"
+        values = [state.getTime().value_in_unit(unit.picosecond)]
         for label, particle in zip(self._labels, self._particles, strict=True):
             friction = np.asarray(
                 integrator.getAdaptedFriction(particle),
@@ -380,35 +375,8 @@ class QTBFrictionReporter:
                     f"coefficients for type {label}, but the log was opened "
                     f"for {self._num_freq}"
                 )
-            line += "".join(f"\t{value:.6f}" for value in friction)
-        self._out.write(line + "\n")
-        self._out.flush()
-
-    def close(self) -> None:
-        """Close the output file, safely allowing repeated calls."""
-        out = getattr(self, "_out", None)
-        if out is not None and not out.closed:
-            out.close()
-
-    def __enter__(self) -> Self:
-        """Return this reporter for use as a context manager."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Close the output file when leaving a context."""
-        self.close()
-
-    def __del__(self) -> None:
-        """Best-effort fallback for callers that did not close the reporter."""
-        try:
-            self.close()
-        except Exception:
-            pass
+            values.extend(friction)
+        self._write_row(simulation.currentStep, values)
 
 
 def track_adqtb_friction(simulation: app.Simulation,

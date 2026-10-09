@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from numbers import Integral, Real
 from typing import Any, cast
 
@@ -35,6 +36,23 @@ def require_integer(
             requirement = f"an integer greater than or equal to {minimum}"
         raise ValueError(f"{name} must be {requirement}")
     return result
+
+
+def require_unique_atom_indices(atom_indices: Iterable[object]) -> list[int]:
+    """Require a nonempty, unique atom selection without changing its order.
+
+    Trajectory and velocity archives share this policy. Observable selections
+    may repeat atoms and intentionally use their own validation instead.
+    """
+    indices = [
+        require_integer(index, name=f"atom_indices[{position}]", minimum=0)
+        for position, index in enumerate(atom_indices)
+    ]
+    if not indices:
+        raise ValueError("atom_indices must not be empty")
+    if len(set(indices)) != len(indices):
+        raise ValueError("atom_indices contains duplicate indices")
+    return indices
 
 
 def require_scalar_in_unit(
@@ -72,4 +90,58 @@ def require_positive_finite_scalar_in_unit(
     result = require_scalar_in_unit(value, expected_unit, name=name)
     if not math.isfinite(result) or result <= 0:
         raise ValueError(f"{name} must be finite and positive")
+    return result
+
+
+def require_whole_steps(duration_ps: float, step_size_ps: float, *,
+                        message: str) -> int:
+    """Convert a duration to steps using the shared absolute 1e-9 ps tolerance.
+
+    Callers retain their input-domain checks and contextual error wording.
+    This does not impose the FFT-factor restriction of an adQTB driver.
+    """
+    steps = int(round(duration_ps / step_size_ps))
+    if steps < 1 or abs(steps * step_size_ps - duration_ps) > 1e-9:
+        raise ValueError(
+            f"{message}, but {duration_ps} ps is not a multiple of "
+            f"{step_size_ps} ps"
+        )
+    return steps
+
+
+def require_seed(seed: object) -> int | None:
+    """Validate a NumPy/OpenMM master seed without changing stream derivation.
+
+    These entry points historically raise ValueError for all invalid seeds;
+    require_integer has a different type/error contract.
+    """
+    if seed is None:
+        return None
+    if (
+        isinstance(seed, (bool, np.bool_))
+        or not isinstance(seed, (int, np.integer))
+        or seed < 0
+    ):
+        raise ValueError("seed must be a non-negative integer or None")
+    return int(seed)
+
+
+def require_rpmd_n_beads(n_beads: object) -> int:
+    """Return a positive bead count, preserving the RPMD ValueError contract."""
+    if (
+        isinstance(n_beads, (bool, np.bool_))
+        or not isinstance(n_beads, (int, np.integer))
+        or n_beads <= 0
+    ):
+        raise ValueError("n_beads must be a positive integer")
+    return int(n_beads)
+
+
+def require_discard_fraction(discard: object) -> float:
+    """Validate a log's leading discard fraction without choosing a row policy."""
+    if isinstance(discard, bool) or not isinstance(discard, Real):
+        raise ValueError("discard must be a number in [0, 1)")
+    result = float(discard)
+    if not np.isfinite(result) or not 0.0 <= result < 1.0:
+        raise ValueError("discard must be a number in [0, 1)")
     return result

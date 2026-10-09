@@ -57,7 +57,13 @@ from openmmml import MLPotential
 from scipy import constants
 
 from ._logs import _read_reporter_log
-from ._validation import require_integer, require_positive_finite_scalar_in_unit
+from ._validation import (
+    require_integer,
+    require_positive_finite_scalar_in_unit,
+)
+from ._validation import (
+    require_seed as _validate_recrossing_seed,
+)
 from .openmm import (
     PreparedSystem,
     _build_system,
@@ -216,36 +222,6 @@ def _require_finite_number(value: object, *, name: str) -> float:
     if not math.isfinite(result):
         raise ValueError(f"{name} must be a finite number")
     return result
-
-
-def _validate_recrossing_seed(seed: int | None) -> int | None:
-    """
-    Validate a master seed the way the simulation stages do.
-
-    Parameters
-    ----------
-    seed : int or None
-        Master seed, or None for entropy-based seeding.
-
-    Returns
-    -------
-    int or None
-        The seed as a plain int, or None.
-
-    Raises
-    ------
-    ValueError
-        If *seed* is a bool, not an integer, or negative.
-    """
-    if seed is None:
-        return None
-    if (
-        isinstance(seed, (bool, np.bool_))
-        or not isinstance(seed, (int, np.integer))
-        or seed < 0
-    ):
-        raise ValueError("seed must be a non-negative integer or None")
-    return int(seed)
 
 
 def _spawn_child_sequences(seed: int | None, n_parents: int, n_children: int,

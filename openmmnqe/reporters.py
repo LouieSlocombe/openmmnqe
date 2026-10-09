@@ -69,8 +69,16 @@ from ._logs import (
     _read_reporter_log,
     _select_log_columns,
 )
-from ._validation import require_integer, require_positive_finite_scalar_in_unit
+from ._reporting import _TabularReporter
+from ._structures import _subset_modeller
+from ._validation import (
+    require_discard_fraction,
+    require_integer,
+    require_positive_finite_scalar_in_unit,
+    require_unique_atom_indices,
+)
 from .tools import (
+    _minimum_image_displacements,
     _particle_masses_dalton,
     _ring_spring_energy,
     _topology_molecule_tree,
@@ -286,10 +294,7 @@ def _simulation_bead_coordinates(simulation: app.Simulation,
         elif periodic:
             assert reference is not None and box is not None
             displacement = positions - reference
-            for axis in (2, 1, 0):
-                displacement -= box[axis] * np.round(
-                    displacement[:, axis:axis + 1] / box[axis][axis]
-                )
+            _minimum_image_displacements(displacement, box)
             positions = reference + displacement
         coordinates.append(positions)
 
@@ -516,17 +521,12 @@ def _calculate_report_observables(simulation: app.Simulation,
         for first, second in distance_pairs
     ])
     if box is not None:
-        # OpenMM stores box vectors in reduced form. Remove whole c, b, then a
-        # vectors to obtain the minimum image of each centroid displacement.
-        for axis in (2, 1, 0):
-            deltas -= box[axis] * np.round(
-                deltas[:, axis:axis + 1] / box[axis][axis]
-            )
+        _minimum_image_displacements(deltas, box)
     distances = np.linalg.norm(deltas, axis=1) * unit.nanometer
     return spreads, distances
 
 
-class RPMDQuantumSpreadReporter:
+class RPMDQuantumSpreadReporter(_TabularReporter):
     """
     Log the quantum spread of selected atoms during an RPMD simulation.
 
@@ -602,8 +602,7 @@ class RPMDQuantumSpreadReporter:
         if len(set(columns)) != len(columns):
             raise ValueError("reporter column names must be unique")
         header = "Step\t" + "\t".join(columns)
-        self._out = open(file, "w")
-        self._out.write(header + "\n")
+        super().__init__(file, header)
 
     def describeNextReport(self, simulation: app.Simulation,
                            ) -> tuple[int, bool, bool, bool, bool]:
@@ -646,37 +645,7 @@ class RPMDQuantumSpreadReporter:
         spread_values = spreads.value_in_unit(unit.nanometers)
         distance_values = distances.value_in_unit(unit.nanometers)
 
-        line = f"{step}"
-        for val in [*spread_values, *distance_values]:
-            line += f"\t{val:.6f}"
-        self._out.write(line + "\n")
-        self._out.flush()
-
-    def close(self) -> None:
-        """Close the output file, safely allowing repeated calls."""
-        out = getattr(self, "_out", None)
-        if out is not None and not out.closed:
-            out.close()
-
-    def __enter__(self) -> Self:
-        """Return this reporter for use as a context manager."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Close the output file when leaving a context."""
-        self.close()
-
-    def __del__(self) -> None:
-        """Best-effort fallback for callers that did not close the reporter."""
-        try:
-            self.close()
-        except Exception:
-            pass
+        self._write_row(step, [*spread_values, *distance_values])
 
 
 def track_rpmd_atom_expansion(simulation: app.Simulation, atom_index: int,
@@ -1142,11 +1111,7 @@ def _subset_topology(topology: app.Topology,
             f"{n_atoms} atoms"
         )
     placeholder = [openmm.Vec3(0.0, 0.0, 0.0)] * n_atoms * unit.nanometer
-    modeller = app.Modeller(topology, placeholder)
-    keep = frozenset(atom_indices)
-    modeller.delete([
-        atom for atom in modeller.topology.atoms() if atom.index not in keep
-    ])
+    modeller = _subset_modeller(topology, placeholder, atom_indices)
     subset = modeller.topology
     subset.setPeriodicBoxVectors(topology.getPeriodicBoxVectors())
     return subset
@@ -2126,7 +2091,7 @@ def _rpmd_thermodynamic_values(integrator: openmm.RPMDIntegrator,
     }
 
 
-class RPMDThermodynamicReporter:
+class RPMDThermodynamicReporter(_TabularReporter):
     """
     Log ring-polymer thermodynamic estimators during an RPMD simulation.
 
@@ -2193,8 +2158,7 @@ class RPMDThermodynamicReporter:
         header = "Step\t" + "\t".join(
             column for _, column in _THERMO_COLUMNS
         )
-        self._out = open(file, "w")
-        self._out.write(header + "\n")
+        super().__init__(file, header)
 
     def _prepare(self, simulation: app.Simulation) -> None:
         """
@@ -2271,37 +2235,10 @@ class RPMDThermodynamicReporter:
             self._masses,
         )
 
-        line = f"{simulation.currentStep}"
-        for key, _ in _THERMO_COLUMNS:
-            line += f"\t{values[key]:.6f}"
-        self._out.write(line + "\n")
-        self._out.flush()
-
-    def close(self) -> None:
-        """Close the output file, safely allowing repeated calls."""
-        out = getattr(self, "_out", None)
-        if out is not None and not out.closed:
-            out.close()
-
-    def __enter__(self) -> Self:
-        """Return this reporter for use as a context manager."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Close the output file when leaving a context."""
-        self.close()
-
-    def __del__(self) -> None:
-        """Best-effort fallback for callers that did not close the reporter."""
-        try:
-            self.close()
-        except Exception:
-            pass
+        self._write_row(
+            simulation.currentStep,
+            (values[key] for key, _ in _THERMO_COLUMNS),
+        )
 
 
 def _read_thermodynamic_log(file: str | os.PathLike[str],
@@ -2754,7 +2691,7 @@ def rpmd_kinetic_decomposition(simulation: app.Simulation,
     }
 
 
-class RPMDKineticDecompositionReporter:
+class RPMDKineticDecompositionReporter(_TabularReporter):
     """
     Log per-atom centroid-virial kinetic energies during an RPMD simulation.
 
@@ -2842,8 +2779,7 @@ class RPMDKineticDecompositionReporter:
         if len(set(columns)) != len(columns):
             raise ValueError("reporter column names must be unique")
         header = "Step\tTime(ps)\t" + "\t".join(columns)
-        self._out = open(file, "w")
-        self._out.write(header + "\n")
+        super().__init__(file, header)
 
     def _prepare(self, simulation: app.Simulation) -> None:
         """
@@ -2929,37 +2865,10 @@ class RPMDKineticDecompositionReporter:
             states, temperature_k, self._masses,
         )
 
-        line = f"{simulation.currentStep}\t{states.time:.6f}"
-        for index in self._atom_indices:
-            line += f"\t{kinetic[index]:.6f}"
-        self._out.write(line + "\n")
-        self._out.flush()
-
-    def close(self) -> None:
-        """Close the output file, safely allowing repeated calls."""
-        out = getattr(self, "_out", None)
-        if out is not None and not out.closed:
-            out.close()
-
-    def __enter__(self) -> Self:
-        """Return this reporter for use as a context manager."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Close the output file when leaving a context."""
-        self.close()
-
-    def __del__(self) -> None:
-        """Best-effort fallback for callers that did not close the reporter."""
-        try:
-            self.close()
-        except Exception:
-            pass
+        self._write_row(
+            simulation.currentStep,
+            [states.time, *(kinetic[index] for index in self._atom_indices)],
+        )
 
 
 def _read_kinetic_decomposition_log(file: str | os.PathLike[str],
@@ -3275,11 +3184,7 @@ def rpmd_energy_conservation(file: str | os.PathLike[str], *,
         unit.kelvin,
         name="temperature",
     )
-    if isinstance(discard, bool) or not isinstance(discard, Real):
-        raise ValueError("discard must be a number in [0, 1)")
-    discard = float(discard)
-    if not np.isfinite(discard) or not 0.0 <= discard < 1.0:
-        raise ValueError("discard must be a number in [0, 1)")
+    discard = require_discard_fraction(discard)
     if isinstance(tolerance, bool) or not isinstance(tolerance, Real):
         raise ValueError("tolerance must be a positive, finite number")
     tolerance = float(tolerance)
@@ -3380,19 +3285,7 @@ class _VelocityArchiveBase:
         )
         self._atom_indices: list[int] | None = None
         if atom_indices is not None:
-            indices = [
-                require_integer(
-                    index,
-                    name=f"atom_indices[{position}]",
-                    minimum=0,
-                )
-                for position, index in enumerate(atom_indices)
-            ]
-            if not indices:
-                raise ValueError("atom_indices must not be empty")
-            if len(set(indices)) != len(indices):
-                raise ValueError("atom_indices contains duplicate indices")
-            self._atom_indices = indices
+            self._atom_indices = require_unique_atom_indices(atom_indices)
         self._file = os.fspath(file)
         self._times_ps: list[float] = []
         self._frames: list[npt.NDArray[np.float64]] = []

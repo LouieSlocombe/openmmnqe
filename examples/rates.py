@@ -14,6 +14,7 @@ import reactiontools as rt
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+from openmmnqe._setup import load_parameterized_structure
 
 device = "CUDA"
 BASE_FORCEFIELD = ("amber14-all.xml", "amber14/tip3pfb.xml")
@@ -24,10 +25,9 @@ def ligand_forcefield(input_pdb: str) -> tuple[app.Modeller, app.ForceField]:
     result = ff.build_forcefield_xml(input_pdb, "ligands.xml",
                                      base_forcefield=BASE_FORCEFIELD)
     assert not result.skipped, f"forcefill skipped residues: {result.skipped}"
-    extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
-    pdb = app.PDBFile(input_pdb)
-    return (app.Modeller(pdb.topology, pdb.positions),
-            app.ForceField(*BASE_FORCEFIELD, *extra))
+    return load_parameterized_structure(
+        input_pdb, BASE_FORCEFIELD, result.forcefield_xml,
+    )
 
 
 def run_malonaldehyde_rate() -> None:

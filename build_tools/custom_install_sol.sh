@@ -25,7 +25,7 @@ SRC_DIR="${SRC_DIR:-${HOME}/${ENV_NAME}_src}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Pulls in build_plumed() and build_py_plumed(), with the PLUMED versions they pin.
+# Shared PLUMED build and smoke-check functions, with the versions they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
 # Pulls in clone_repo(), install_editable_repos() and check_editable_repos().
 source "${SCRIPT_DIR}/editable_repos.sh"
@@ -82,12 +82,7 @@ pip3 install -e "${SRC_DIR}/${ENV_NAME}"
 install_editable_repos "${SRC_DIR}"
 
 echo "=== Verifying Installation ==="
-plumed --no-mpi config -q module opes
-echo "PLUMED opes module: OK"
-python3 -c "import plumed; plumed.Plumed()"
-echo "py-plumed kernel load: OK"
-python3 -c "from openmmplumed import PlumedForce"
-echo "openmm-plumed: OK"
+check_plumed_installation python3
 check_editable_repos "${SRC_DIR}"
 echo "editable dependencies: OK"
 python3 -c "import openmmnqe"

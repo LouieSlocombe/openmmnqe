@@ -61,9 +61,7 @@ jobs:
           plumed_build_dir="$(mktemp -d "${RUNNER_TEMP}/openmmnqe-plumed.XXXXXX")"
           build_plumed "${plumed_build_dir}"
           build_py_plumed "${plumed_build_dir}"
-          plumed --no-mpi config -q module opes
-          python -c "import plumed; plumed.Plumed()"
-          python -c "from openmmplumed import PlumedForce"
+          check_plumed_installation python
       - name: Verify OpenMM and OpenMM-ML baselines
         run: |
           python - <<'PY'

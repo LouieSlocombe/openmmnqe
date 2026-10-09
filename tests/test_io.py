@@ -71,6 +71,21 @@ def test_remove_file_helpers_propagate_non_missing_errors(
         nqe.remove_file_pattern(str(tmp_path / "*.log"))
 
 
+def test_remove_file_pattern_tolerates_a_match_disappearing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    missing = tmp_path / "gone.log"
+    remaining = tmp_path / "remaining.log"
+    remaining.write_text("data")
+    monkeypatch.setattr(
+        nqe_io.glob, "glob", lambda pattern: [str(missing), str(remaining)],
+    )
+
+    nqe.remove_file_pattern(str(tmp_path / "*.log"))
+
+    assert not remaining.exists()
+
+
 def test_xyz_to_sdf_writes_readable_molecule(data_dir: Path, tmp_path: Path) -> None:
     output = tmp_path / "gc.sdf"
 
@@ -523,3 +538,32 @@ def test_save_only_index_atoms_materializes_one_shot_index_iterable(
     selected = app.PDBFile(str(output))
     expected = [list(modeller.topology.atoms())[index].name for index in (0, 4)]
     assert [atom.name for atom in selected.topology.atoms()] == expected
+
+
+@pytest.mark.parametrize("indices", [(8, 3, 0, 3, -1, 99), (), (99,)])
+def test_selection_writers_share_topology_order_and_ignore_absent_indices(
+    data_dir: Path, tmp_path: Path, indices: tuple[int, ...],
+) -> None:
+    source = data_dir / "pdb" / "malonaldehyde.pdb"
+    pdb = app.PDBFile(str(source))
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    original_positions = np.array(
+        modeller.positions.value_in_unit(unit.nanometer), copy=True,
+    )
+    from_path = tmp_path / "path.pdb"
+    from_modeller = tmp_path / "modeller.pdb"
+
+    nqe.save_pdb_selection(source, iter(indices), from_path)
+    nqe.save_only_index_atoms(modeller, iter(indices), from_modeller)
+
+    assert from_path.read_text() == from_modeller.read_text()
+    kept = [atom for atom in pdb.topology.atoms() if atom.index in indices]
+    records = [
+        line for line in from_path.read_text().splitlines()
+        if line.startswith(("ATOM  ", "HETATM"))
+    ]
+    assert [line[12:16].strip() for line in records] == [atom.name for atom in kept]
+    assert modeller.topology.getNumAtoms() == pdb.topology.getNumAtoms()
+    assert np.array_equal(
+        modeller.positions.value_in_unit(unit.nanometer), original_positions,
+    )

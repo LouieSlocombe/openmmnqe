@@ -210,33 +210,8 @@ def run_openmm_rpmd_mixed() -> None:
 def run_rpmd_quantum_spread_reporter() -> None:
     """Log how far two atoms' beads spread, then plot the result."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
-
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-    system = forcefield.createSystem(
-        modeller.topology,
-        nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-        nonbondedCutoff=1.0 * unit.nanometer,
-        constraints=None,
-        rigidWater=False,
-        removeCMMotion=True,
-        hydrogenMass=None,
-    )
-
     n_beads = 32
-    temperature = 300.0 * unit.kelvin
-    friction = 1.0 / unit.picosecond
-    dt = 0.5 * unit.femtosecond
-    integrator = openmm.RPMDIntegrator(n_beads,
-                                       temperature,
-                                       friction,
-                                       dt)
-
-    platform = openmm.Platform.getPlatformByName(device)
-    simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    nqe.init_beads(modeller, simulation, n_beads)
+    simulation, _ = _flexible_peptide_rpmd(n_beads=n_beads)
 
     atoms_to_watch = [0, 1]
     atom_names = ["Atom0", "Atom1"]
@@ -271,37 +246,11 @@ def run_rpmd_quantum_spread_reporter() -> None:
 def run_rpmd_bead_reporter() -> None:
     """Write each bead's own trajectory to its own PDB file."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
-
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-    system = forcefield.createSystem(
-        modeller.topology,
-        nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-        nonbondedCutoff=1.0 * unit.nanometer,
-        constraints=None,
-        rigidWater=False,
-        removeCMMotion=True,
-        hydrogenMass=None,
-    )
-
     n_beads = 4
-    temperature = 300.0 * unit.kelvin
-    friction = 1.0 / unit.picosecond
-    dt = 0.5 * unit.femtosecond
-    integrator = openmm.RPMDIntegrator(n_beads,
-                                       temperature,
-                                       friction,
-                                       dt)
-
-    platform = openmm.Platform.getPlatformByName(device)
-    simulation = app.Simulation(modeller.topology, system, integrator, platform)
-
-    nqe.init_beads(modeller, simulation, n_beads)
+    simulation, _ = _flexible_peptide_rpmd(n_beads=n_beads)
 
     simulation.reporters.append(nqe.RPMDBeadReporter(
-        topology=modeller.topology,
+        topology=simulation.topology,
         file_base_name="out",
         reportInterval=10,
         num_beads=n_beads,
@@ -315,37 +264,11 @@ def run_rpmd_bead_reporter() -> None:
 def run_rpmd_centroid_reporter() -> None:
     """Write the bead-averaged centroid trajectory to a single PDB file."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
-
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-    system = forcefield.createSystem(
-        modeller.topology,
-        nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-        nonbondedCutoff=1.0 * unit.nanometer,
-        constraints=None,
-        rigidWater=False,
-        removeCMMotion=True,
-        hydrogenMass=None,
-    )
-
     n_beads = 32
-    temperature = 300.0 * unit.kelvin
-    friction = 1.0 / unit.picosecond
-    dt = 0.5 * unit.femtosecond
-    integrator = openmm.RPMDIntegrator(n_beads,
-                                       temperature,
-                                       friction,
-                                       dt)
-
-    platform = openmm.Platform.getPlatformByName(device)
-    simulation = app.Simulation(modeller.topology, system, integrator, platform)
-
-    nqe.init_beads(modeller, simulation, n_beads)
+    simulation, _ = _flexible_peptide_rpmd(n_beads=n_beads)
 
     simulation.reporters.append(nqe.RPMDCentroidReporter(
-        topology=modeller.topology,
+        topology=simulation.topology,
         file_name="centroid.pdb",
         reportInterval=10,
         num_beads=n_beads,
@@ -358,36 +281,8 @@ def run_rpmd_centroid_reporter() -> None:
 def run_rpmd_thermodynamic_reporter() -> None:
     """Log ring-polymer energy estimators, then average and plot the log."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
-
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    has_box = modeller.topology.getUnitCellDimensions() is not None
-    system = forcefield.createSystem(
-        modeller.topology,
-        nonbondedMethod=app.PME if has_box else app.CutoffNonPeriodic,
-        nonbondedCutoff=1.0 * unit.nanometer,
-        # The centroid-virial estimator needs unconstrained forces, so the
-        # beads run fully flexible rather than with rigid bonds or water.
-        constraints=None,
-        rigidWater=False,
-        removeCMMotion=True,
-        hydrogenMass=None,
-    )
-
     n_beads = 32
-    temperature = 300.0 * unit.kelvin
-    friction = 1.0 / unit.picosecond
-    dt = 0.5 * unit.femtosecond
-    integrator = openmm.RPMDIntegrator(n_beads,
-                                       temperature,
-                                       friction,
-                                       dt)
-
-    platform = openmm.Platform.getPlatformByName(device)
-    simulation = app.Simulation(modeller.topology, system, integrator, platform)
-
-    nqe.init_beads(modeller, simulation, n_beads)
+    simulation, _ = _flexible_peptide_rpmd(n_beads=n_beads)
 
     simulation.reporters.append(nqe.RPMDThermodynamicReporter(
         file="thermo.log",

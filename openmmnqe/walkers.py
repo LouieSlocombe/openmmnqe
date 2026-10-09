@@ -33,7 +33,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from ._validation import require_integer
+from ._validation import require_integer, require_seed
 from .openmm import _is_inline_plumed_input
 
 # Mixed into the root SeedSequence alongside the master seed, so walker
@@ -128,12 +128,7 @@ def _derive_walker_seeds(seed: int | None, n_walkers: int) -> tuple[int, ...]:
     ValueError
         If *seed* is a bool, not an integer, or negative.
     """
-    if seed is not None and (
-        isinstance(seed, (bool, np.bool_))
-        or not isinstance(seed, (int, np.integer))
-        or seed < 0
-    ):
-        raise ValueError("seed must be a non-negative integer or None")
+    seed = require_seed(seed)
     if seed is None:
         root = np.random.SeedSequence()
     else:

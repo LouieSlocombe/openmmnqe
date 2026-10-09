@@ -29,6 +29,14 @@ The spread of a ring polymer is the direct, visual measure of how quantum a
 nucleus is behaving. {func}`~openmmnqe.reporters.track_rpmd_atom_expansion`
 attaches the reporter for one target atom without constructing it directly:
 
+The reporter examples below share the same flexible peptide setup. They keep
+their bead counts, reporter options and run lengths in their own functions:
+
+```{literalinclude} ../../examples/rpmd.py
+:pyobject: _flexible_peptide_rpmd
+:language: python
+```
+
 ```{literalinclude} ../../examples/rpmd.py
 :pyobject: run_rpmd_quantum_spread_reporter
 :language: python
