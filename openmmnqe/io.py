@@ -65,6 +65,8 @@ from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 from reactiontools import format_pdb_atom_name
 
+from ._structures import _subset_modeller
+
 
 def remove_directory(directory: str) -> None:
     """
@@ -624,22 +626,12 @@ def save_pdb_selection(input_pdb_path: str | os.PathLike[str],
     produces an empty PDB.
     """
     pdb = app.PDBFile(os.fspath(input_pdb_path))
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    keep_indices = set(atom_indices)
-    atoms_to_delete = []
-    all_atoms = list(modeller.topology.atoms())
-
-    for atom in all_atoms:
-        if atom.index not in keep_indices:
-            atoms_to_delete.append(atom)
-
-    num_deleted = len(atoms_to_delete)
-    if num_deleted == len(all_atoms):
+    modeller = _subset_modeller(pdb.topology, pdb.positions, atom_indices)
+    num_selected = modeller.topology.getNumAtoms()
+    if num_selected == 0:
         print("Warning: Your selection is empty! The output PDB will be empty.")
 
-    modeller.delete(atoms_to_delete)
-
-    print(f"Writing selection ({len(all_atoms) - num_deleted} atoms) to {output_pdb_path}...")
+    print(f"Writing selection ({num_selected} atoms) to {output_pdb_path}...")
     with open(output_pdb_path, 'w') as f:
         app.PDBFile.writeFile(modeller.topology, modeller.positions, f)
 
@@ -654,10 +646,7 @@ def remove_file_pattern(pattern: str) -> None:
         The glob pattern to match files (e.g. ``*.txt`` for all text files).
     """
     for path in glob.glob(pattern):
-        try:
-            os.remove(path)
-        except FileNotFoundError:
-            pass
+        remove_file(path)
 
 
 def remove_file(file_path: str | os.PathLike[str]) -> None:
@@ -838,13 +827,8 @@ def save_only_index_atoms(modeller: Modeller, idx_list: Iterable[int],
         Path to write to. Default is ``'index_atoms.pdb'``, which is the
         name the PLUMED inputs in :mod:`reactiontools.tools_cv` reference.
     """
-    modeller_new = app.Modeller(modeller.topology, modeller.positions)
-    keep_indices = frozenset(idx_list)
-    atoms_to_delete = [
-        atom
-        for atom in modeller_new.topology.atoms()
-        if atom.index not in keep_indices
-    ]
-    modeller_new.delete(atoms_to_delete)
+    modeller_new = _subset_modeller(
+        modeller.topology, modeller.positions, idx_list,
+    )
     with open(file_idx, 'w') as f:
         app.PDBFile.writeFile(modeller_new.topology, modeller_new.positions, f)

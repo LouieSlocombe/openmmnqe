@@ -271,11 +271,13 @@ def test_friction_reporter_writes_one_representative_per_type(
 def test_friction_reporter_rejects_a_spectrum_of_the_wrong_length(
     tmp_path: Path,
 ) -> None:
-    integrator = _Integrator(spectra={0: [1.0, 1.0], 2: [1.0, 1.0]})
+    # Fail on the second type, after the first spectrum has been collected.
+    integrator = _Integrator(spectra={0: [1.0] * 8, 2: [1.0, 1.0]})
     with nqe.QTBFrictionReporter(tmp_path / "friction.log", 5,
                                  integrator) as reporter:
         with pytest.raises(ValueError, match="but the log was opened for 8"):
             reporter.report(_simulation(integrator, 5), _State(0.005))
+    assert len((tmp_path / "friction.log").read_text().splitlines()) == 1
 
 
 def test_friction_reporter_close_is_idempotent(tmp_path: Path) -> None:
