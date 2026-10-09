@@ -62,6 +62,7 @@ from ._validation import (
     require_integer,
     require_positive_finite_scalar_in_unit,
     require_seed,
+    require_unique_atom_indices,
     require_whole_steps,
 )
 from ._validation import (
@@ -1063,15 +1064,7 @@ def _resolve_trajectory_options(
     )
     atom_indices = options.atom_indices
     if atom_indices is not None:
-        indices = [
-            require_integer(index, name=f"atom_indices[{position}]", minimum=0)
-            for position, index in enumerate(atom_indices)
-        ]
-        if not indices:
-            raise ValueError("atom_indices must not be empty")
-        if len(set(indices)) != len(indices):
-            raise ValueError("atom_indices contains duplicate indices")
-        atom_indices = indices
+        atom_indices = require_unique_atom_indices(atom_indices)
 
     return options._replace(interval=interval, atom_indices=atom_indices)
 

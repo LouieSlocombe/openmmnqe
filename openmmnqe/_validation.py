@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from numbers import Integral, Real
 from typing import Any, cast
 
@@ -35,6 +36,23 @@ def require_integer(
             requirement = f"an integer greater than or equal to {minimum}"
         raise ValueError(f"{name} must be {requirement}")
     return result
+
+
+def require_unique_atom_indices(atom_indices: Iterable[object]) -> list[int]:
+    """Require a nonempty, unique atom selection without changing its order.
+
+    Trajectory and velocity archives share this policy. Observable selections
+    may repeat atoms and intentionally use their own validation instead.
+    """
+    indices = [
+        require_integer(index, name=f"atom_indices[{position}]", minimum=0)
+        for position, index in enumerate(atom_indices)
+    ]
+    if not indices:
+        raise ValueError("atom_indices must not be empty")
+    if len(set(indices)) != len(indices):
+        raise ValueError("atom_indices contains duplicate indices")
+    return indices
 
 
 def require_scalar_in_unit(

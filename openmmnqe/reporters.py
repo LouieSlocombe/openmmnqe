@@ -75,6 +75,7 @@ from ._validation import (
     require_discard_fraction,
     require_integer,
     require_positive_finite_scalar_in_unit,
+    require_unique_atom_indices,
 )
 from .tools import (
     _minimum_image_displacements,
@@ -3284,19 +3285,7 @@ class _VelocityArchiveBase:
         )
         self._atom_indices: list[int] | None = None
         if atom_indices is not None:
-            indices = [
-                require_integer(
-                    index,
-                    name=f"atom_indices[{position}]",
-                    minimum=0,
-                )
-                for position, index in enumerate(atom_indices)
-            ]
-            if not indices:
-                raise ValueError("atom_indices must not be empty")
-            if len(set(indices)) != len(indices):
-                raise ValueError("atom_indices contains duplicate indices")
-            self._atom_indices = indices
+            self._atom_indices = require_unique_atom_indices(atom_indices)
         self._file = os.fspath(file)
         self._times_ps: list[float] = []
         self._frames: list[npt.NDArray[np.float64]] = []
