@@ -34,6 +34,14 @@ surface much later as a template error at `createSystem`, so it is checked
 immediately; and `forcefield_xml` is `None` when the base files already matched
 every residue, which `ForceField()` will not accept.
 
+The shared loader reads that same PDB without changing its topology and loads
+the generated templates after the base force field:
+
+```{literalinclude} ../../openmmnqe/_setup.py
+:pyobject: load_parameterized_structure
+:language: python
+```
+
 Repair the structure *before* this, with {func}`~openmmnqe.io.fix_pdb` —
 forcefill decides what needs parameters by asking what the base force field
 cannot match, and a protein missing its hydrogens matches nothing. But nothing
@@ -41,6 +49,14 @@ may edit the topology *between* the repair and `createSystem`: the templates
 describe the residues exactly as the input PDB spells them.
 
 ## The equilibration sequence
+
+The classical peptide examples share this preparation; centering remains an
+explicit choice in each workflow:
+
+```{literalinclude} ../../examples/workflows.py
+:pyobject: _solvated_peptide
+:language: python
+```
 
 ```{literalinclude} ../../examples/workflows.py
 :pyobject: run_eq_workflow

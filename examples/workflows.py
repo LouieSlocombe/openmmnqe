@@ -16,6 +16,7 @@ from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+from openmmnqe._setup import load_parameterized_structure
 
 BASE_FORCEFIELD = ("amber14-all.xml", "amber14/tip3pfb.xml")
 
@@ -61,28 +62,26 @@ def ligand_forcefield(input_pdb: str,
     )
     if result.skipped:
         raise RuntimeError(f"forcefill skipped residues: {result.skipped}")
-    extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
-    pdb = app.PDBFile(input_pdb)
-    return (
-        app.Modeller(pdb.topology, pdb.positions),
-        app.ForceField(*base_forcefield, *extra),
+    return load_parameterized_structure(
+        input_pdb, base_forcefield, result.forcefield_xml,
     )
+
+
+def _solvated_peptide() -> tuple[app.Modeller, app.ForceField]:
+    """Prepare the standard peptide in a 1.5 nm TIP3P cubic solvent box."""
+    pdb = app.PDBFile("tests/data/pdb/input.pdb")
+    forcefield = app.ForceField("amber14-all.xml", "amber14/tip3p.xml")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    modeller.deleteWater()
+    modeller.addHydrogens()
+    modeller.addSolvent(forcefield, padding=1.5 * unit.nanometer, boxShape="cube")
+    return modeller, forcefield
 
 
 def run_openmm_relaxation() -> None:
     """Minimise a solvated peptide with the staged, restrained relaxation."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
+    modeller, forcefield = _solvated_peptide()
 
     nqe.run_openmm_relaxation(modeller, forcefield)
     nqe.remove_file('minimized.pdb')
@@ -91,17 +90,7 @@ def run_openmm_relaxation() -> None:
 def run_openmm_heating() -> None:
     """Heat a solvated peptide to its target temperature under restraints."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
+    modeller, forcefield = _solvated_peptide()
     nqe.center_in_box(modeller)
 
     nqe.run_openmm_heating(modeller, forcefield)
@@ -111,17 +100,7 @@ def run_openmm_heating() -> None:
 def run_openmm_heating_deuterate() -> None:
     """Heat the same system with every hydrogen replaced by deuterium."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
+    modeller, forcefield = _solvated_peptide()
     nqe.center_in_box(modeller)
 
     nqe.run_openmm_heating(modeller, forcefield, deuterate=True)
@@ -131,17 +110,7 @@ def run_openmm_heating_deuterate() -> None:
 def run_openmm_npt() -> None:
     """Equilibrate a solvated peptide at constant pressure."""
     print(flush=True)
-    pdb = app.PDBFile("tests/data/pdb/input.pdb")
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
+    modeller, forcefield = _solvated_peptide()
     nqe.center_in_box(modeller)
 
     nqe.run_openmm_npt(modeller, forcefield)
@@ -151,17 +120,7 @@ def run_openmm_npt() -> None:
 def run_eq_workflow() -> None:
     """Run the full classical equilibration: relax, heat, then NPT."""
     print(flush=True)
-    forcefield = app.ForceField('amber14-all.xml', 'amber14/tip3p.xml')
-    pdb = app.PDBFile("tests/data/pdb/input.pdb")
-    modeller = app.Modeller(pdb.topology, pdb.positions)
-    modeller.deleteWater()
-    modeller.addHydrogens()
-
-    padding = 1.5
-    box_shape = 'cube'
-    modeller.addSolvent(forcefield,
-                        padding=padding * unit.nanometer,
-                        boxShape=box_shape)
+    modeller, forcefield = _solvated_peptide()
     nqe.center_in_box(modeller)
 
     nqe.run_openmm_relaxation(modeller, forcefield)

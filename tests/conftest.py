@@ -15,6 +15,8 @@ import openmm.unit as unit
 import pytest
 from openmm import Vec3, openmm
 
+from openmmnqe._setup import load_parameterized_structure
+
 TEST_DATA = Path(__file__).resolve().parent / "data"
 
 #: The force fields a ligand system is built on top of, unless a test says
@@ -114,11 +116,8 @@ def ligand_forcefield(tmp_path: Path) -> Callable[..., tuple[app.Modeller, app.F
         # check, so without this the failure surfaces at createSystem instead
         # of here, where the reason is still to hand.
         assert not result.skipped, f"forcefill skipped residues: {result.skipped}"
-        # None when the base force field already covered everything, and
-        # ForceField() will not take it.
-        extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
-        pdb = app.PDBFile(str(input_pdb))
-        return (app.Modeller(pdb.topology, pdb.positions),
-                app.ForceField(*base_forcefield, *extra))
+        return load_parameterized_structure(
+            input_pdb, base_forcefield, result.forcefield_xml,
+        )
 
     return _build

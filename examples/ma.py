@@ -18,6 +18,7 @@ from mace.calculators.foundations_models import mace_off
 from openmmml import MLPotential
 
 import openmmnqe as nqe
+from openmmnqe._setup import load_parameterized_structure
 
 if __name__ == "__main__":
     print(flush=True)
@@ -47,15 +48,10 @@ if __name__ == "__main__":
     # not take a None.
     if result.skipped:
         raise RuntimeError(f"forcefill skipped residues: {result.skipped}")
-    extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
     print(f"Parameterised: {result.parameterized}", flush=True)
-
-    # Built from the same file forcefill read, with nothing in between: the
-    # templates describe those residues exactly as this file spells them, so an
-    # edit here (adding hydrogens, deleting water) stops them matching.
-    pdb_data = app.PDBFile(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    forcefield = app.ForceField(*forcefield_names, *extra)
+    modeller, forcefield = load_parameterized_structure(
+        input_pdb, forcefield_names, result.forcefield_xml,
+    )
 
     padding = 1.5
     box_shape = 'cube'
