@@ -57,10 +57,12 @@ from openmm import app, openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
 
+from ._structures import _subset_modeller
 from ._validation import (
     require_integer,
     require_positive_finite_scalar_in_unit,
     require_seed,
+    require_whole_steps,
 )
 from ._validation import (
     require_rpmd_n_beads as _validate_rpmd_n_beads,
@@ -92,6 +94,7 @@ from .tools import (
 
 _RPMD_RESTART_KIND = "openmmnqe-rpmd-restart"
 _RPMD_RESTART_VERSION = 2
+_DEFAULT_BACKBONE_NAMES = ('CA', 'C', 'N', 'P', 'O3')
 
 
 def _validate_ml_indices(ml_idx: Iterable[int], n_atoms: int) -> list[int]:
@@ -726,6 +729,32 @@ def _maybe_deuterate(modeller: app.Modeller, system: openmm.System,
         deuterate_system(modeller, system, option=deuterate_option)
 
 
+def _make_backbone_restraint(
+    topology: app.Topology,
+    positions: unit.Quantity | Sequence[Any] | Mapping[int, Any],
+    backbone_names: Sequence[str] | None,
+    coefficient: unit.Quantity | float,
+) -> openmm.CustomExternalForce:
+    """Build the stages' quadratic position restraint without attaching it.
+
+    Coordinate quantities are converted by OpenMM; bare coordinates are in
+    nanometres. The caller chooses the initial coefficient and when to change
+    the shared global parameter ``k``. There is deliberately no factor of 1/2.
+    """
+    if backbone_names is None:
+        backbone_names = _DEFAULT_BACKBONE_NAMES
+    restraint = openmm.CustomExternalForce(
+        "k * periodicdistance(x, y, z, x0, y0, z0)^2"
+    )
+    restraint.addGlobalParameter("k", coefficient)
+    for parameter in ("x0", "y0", "z0"):
+        restraint.addPerParticleParameter(parameter)
+    for atom in topology.atoms():
+        if atom.name in backbone_names:
+            restraint.addParticle(atom.index, positions[atom.index])
+    return restraint
+
+
 def _validate_barostat_frequency(
     system: openmm.System,
     barostat_freq: int | None,
@@ -1137,15 +1166,21 @@ def _write_trajectory_topology(simulation: app.Simulation, output_prefix: str,
         topology.setPeriodicBoxVectors(box_vectors)
     positions = simulation.context.getState(getPositions=True).getPositions()
     if options.atom_indices is not None:
-        modeller = app.Modeller(topology, positions)
-        keep = frozenset(options.atom_indices)
-        modeller.delete([
-            atom for atom in modeller.topology.atoms()
-            if atom.index not in keep
-        ])
+        modeller = _subset_modeller(topology, positions, options.atom_indices)
         topology, positions = modeller.topology, modeller.positions
     with open(f'{output_prefix}_topology.pdb', 'w') as f:
         app.PDBFile.writeFile(topology, positions, f)
+
+
+def _add_context_trajectory(simulation: app.Simulation, output_prefix: str,
+                            options: TrajectoryOptions) -> None:
+    """Attach the selected Context trajectory and write its companion topology."""
+    if options.format != "none":
+        suffix = _TRAJECTORY_SUFFIX[options.format]
+        simulation.reporters.append(_make_trajectory_reporter(
+            f'{output_prefix}_steps{suffix}', options,
+        ))
+        _write_trajectory_topology(simulation, output_prefix, options)
 
 
 def _add_standard_reporters(simulation: app.Simulation, output_prefix: str,
@@ -1194,13 +1229,7 @@ def _add_standard_reporters(simulation: app.Simulation, output_prefix: str,
         *velocity_record_interval*, which would otherwise silently record
         nothing.
     """
-    if trajectory.format != "none":
-        suffix = _TRAJECTORY_SUFFIX[trajectory.format]
-        simulation.reporters.append(_make_trajectory_reporter(
-            f'{output_prefix}_steps{suffix}',
-            trajectory,
-        ))
-        _write_trajectory_topology(simulation, output_prefix, trajectory)
+    _add_context_trajectory(simulation, output_prefix, trajectory)
     simulation.reporters.append(app.StateDataReporter(sys.stdout,
                                                       n_report,
                                                       step=True,
@@ -1492,12 +1521,10 @@ def _validate_adqtb_segment(segment_length: unit.Quantity,
     length = require_positive_finite_scalar_in_unit(
         segment_length, unit.picosecond, name="segment_length",
     )
-    steps = int(round(length / step_size))
-    if steps < 1 or abs(steps * step_size - length) > 1e-9:
-        raise ValueError(
-            f"segment_length must be a whole number of time steps, but "
-            f"{length} ps is not a multiple of {step_size} ps"
-        )
+    steps = require_whole_steps(
+        length, step_size,
+        message="segment_length must be a whole number of time steps",
+    )
     remainder = steps
     for factor in _ADQTB_SEGMENT_FACTORS:
         while remainder % factor == 0:
@@ -1716,13 +1743,7 @@ def _add_adqtb_reporters(simulation: app.Simulation, output_prefix: str,
         If *velocity_atom_indices* is given without
         *velocity_record_interval*.
     """
-    if trajectory.format != "none":
-        suffix = _TRAJECTORY_SUFFIX[trajectory.format]
-        simulation.reporters.append(_make_trajectory_reporter(
-            f'{output_prefix}_steps{suffix}',
-            trajectory,
-        ))
-        _write_trajectory_topology(simulation, output_prefix, trajectory)
+    _add_context_trajectory(simulation, output_prefix, trajectory)
     _add_adqtb_progress_reporters(simulation, output_prefix, n_report)
     if checkpoint_interval is not None:
         simulation.reporters.append(
@@ -2395,29 +2416,25 @@ def run_openmm_relaxation(
         structure written here; it is accepted so that one seed can be handed
         to every stage of a workflow alike. Default is None.
     """
-    if backbone_names is None:
-        backbone_names = ['CA', 'C', 'N', 'P', 'O3']
-
     thermostat_seed, = _derive_seeds(seed, "thermostat")
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
     current_positions = modeller.positions
-    restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
-    restraint.addGlobalParameter("k", 0.0)
-    restraint.addPerParticleParameter("x0")
-    restraint.addPerParticleParameter("y0")
-    restraint.addPerParticleParameter("z0")
-
-    atom_indices = []
+    # Preserve this stage's historical component extraction: unlike the MD
+    # stages it passes bare reference coordinates, even for non-nm inputs.
+    if backbone_names is None:
+        backbone_names = list(_DEFAULT_BACKBONE_NAMES)
+    reference_positions = {}
     for atom in modeller.topology.atoms():
         if atom.name in backbone_names:
             pos = current_positions[atom.index]
-            restraint.addParticle(atom.index, [pos.x, pos.y, pos.z])
-            atom_indices.append(atom.index)
-
+            reference_positions[atom.index] = [pos.x, pos.y, pos.z]
+    restraint = _make_backbone_restraint(
+        modeller.topology, reference_positions, backbone_names, 0.0,
+    )
     system.addForce(restraint)
-    print(f"Restraints applied to {len(atom_indices)} backbone atoms.", flush=True)
+    print(f"Restraints applied to {restraint.getNumParticles()} backbone atoms.", flush=True)
     integrator = openmm.LangevinMiddleIntegrator(temperature,
                                                  gamma,
                                                  time_step)
@@ -2626,24 +2643,16 @@ def run_openmm_heating(
     target_temp = target_temp_kelvin * unit.kelvin
     temp_step = temp_step_kelvin * unit.kelvin
 
-    if backbone_names is None:
-        backbone_names = ['CA', 'C', 'N', 'P', 'O3']
-
     system, platform = _build_system(modeller, forcefield, platform_name,
                                      potential, ml_idx, calculator)
 
     _maybe_deuterate(modeller, system, deuterate, deuterate_option)
 
     print("Applying backbone restraints for heating...", flush=True)
-    restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
-    restraint.addGlobalParameter("k", k1 * unit.kilojoules_per_mole / (unit.nanometer ** 2))
-    restraint.addPerParticleParameter("x0")
-    restraint.addPerParticleParameter("y0")
-    restraint.addPerParticleParameter("z0")
-
-    for atom in modeller.topology.atoms():
-        if atom.name in backbone_names:
-            restraint.addParticle(atom.index, modeller.positions[atom.index])
+    restraint = _make_backbone_restraint(
+        modeller.topology, modeller.positions, backbone_names,
+        k1 * unit.kilojoules_per_mole / unit.nanometer**2,
+    )
     system.addForce(restraint)
 
     current_temp = 0 * unit.kelvin
@@ -2788,9 +2797,6 @@ def run_openmm_npt(
         None, which records every atom.
     """
     traj_options = _resolve_trajectory_options(trajectory, n_report)
-    if backbone_names is None:
-        backbone_names = ['CA', 'C', 'N', 'P', 'O3']
-
     thermostat_seed, velocity_seed, barostat_seed = _derive_seeds(
         seed, "thermostat", "velocities", "barostat"
     )
@@ -2805,15 +2811,10 @@ def run_openmm_npt(
         _seed_random_stream(barostat, barostat_seed)
         system.addForce(barostat)
 
-    restraint = openmm.CustomExternalForce("k * periodicdistance(x, y, z, x0, y0, z0)^2")
-    restraint.addGlobalParameter("k", k * unit.kilojoules_per_mole / (unit.nanometer ** 2))
-    restraint.addPerParticleParameter("x0")
-    restraint.addPerParticleParameter("y0")
-    restraint.addPerParticleParameter("z0")
-
-    for atom in modeller.topology.atoms():
-        if atom.name in backbone_names:
-            restraint.addParticle(atom.index, modeller.positions[atom.index])
+    restraint = _make_backbone_restraint(
+        modeller.topology, modeller.positions, backbone_names,
+        k * unit.kilojoules_per_mole / unit.nanometer**2,
+    )
     system.addForce(restraint)
 
     integrator = openmm.LangevinMiddleIntegrator(temperature,

@@ -75,6 +75,22 @@ def require_positive_finite_scalar_in_unit(
     return result
 
 
+def require_whole_steps(duration_ps: float, step_size_ps: float, *,
+                        message: str) -> int:
+    """Convert a duration to steps using the shared absolute 1e-9 ps tolerance.
+
+    Callers retain their input-domain checks and contextual error wording.
+    This does not impose the FFT-factor restriction of an adQTB driver.
+    """
+    steps = int(round(duration_ps / step_size_ps))
+    if steps < 1 or abs(steps * step_size_ps - duration_ps) > 1e-9:
+        raise ValueError(
+            f"{message}, but {duration_ps} ps is not a multiple of "
+            f"{step_size_ps} ps"
+        )
+    return steps
+
+
 def require_seed(seed: object) -> int | None:
     """Validate a NumPy/OpenMM master seed without changing stream derivation.
 

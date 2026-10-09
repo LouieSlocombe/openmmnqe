@@ -72,6 +72,9 @@ class _ExternalForce:
     def addParticle(self, index: int, parameters: list[Any]) -> None:
         self.particles.append((index, parameters))
 
+    def getNumParticles(self) -> int:
+        return len(self.particles)
+
 
 class _Barostat:
     def __init__(self, kind: str, args: tuple[Any, ...]) -> None:

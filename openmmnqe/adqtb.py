@@ -54,7 +54,7 @@ from scipy import constants
 
 from ._logs import _read_reporter_log
 from ._reporting import _TabularReporter
-from ._validation import require_integer
+from ._validation import require_integer, require_whole_steps
 
 # Friction columns are named ``Gamma_<label>_<bin>``.  The label may itself
 # contain underscores and digits, so the bin is matched greedily from the
@@ -178,13 +178,10 @@ def _segment_steps(integrator: Any) -> int:
     segment_length = integrator.getSegmentLength().value_in_unit(
         unit.picosecond
     )
-    steps = int(round(segment_length / step_size))
-    if steps < 1 or abs(steps * step_size - segment_length) > 1e-9:
-        raise ValueError(
-            "segment length must be a whole number of steps, but "
-            f"{segment_length} ps is not a multiple of {step_size} ps"
-        )
-    return steps
+    return require_whole_steps(
+        segment_length, step_size,
+        message="segment length must be a whole number of steps",
+    )
 
 
 def _num_frequencies(segment_steps: int) -> int:
