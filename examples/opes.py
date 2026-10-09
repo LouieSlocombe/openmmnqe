@@ -6,9 +6,10 @@ import os
 
 import openmm.app as app
 import openmm.unit as unit
-import torch
 from openmm import openmm
 from openmmplumed import PlumedForce
+
+import openmmnqe as nqe
 
 
 def main() -> None:
@@ -42,7 +43,7 @@ def main() -> None:
         1.0 / unit.picosecond,
         1.0 * unit.femtosecond,
     )
-    platform_name = "CUDA" if torch.cuda.is_available() else "CPU"
+    platform_name = nqe.check_platform()
     platform = openmm.Platform.getPlatformByName(platform_name)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
     simulation.context.setPositions(modeller.positions)

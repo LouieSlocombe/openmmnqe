@@ -176,3 +176,43 @@ def test_reporter_examples_keep_their_beads_observables_and_cadence(
         assert options["metric"] == "mean"
         assert options["atom_indices"] == [0, 1]
         assert options["distance_pairs"] == [(0, 1)]
+
+
+@pytest.mark.parametrize("torch_cuda", [True, False])
+def test_opes_selects_openmms_platform_when_torch_disagrees(monkeypatch, torch_cuda):
+    import torch
+
+    example = _example("opes")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: torch_cuda)
+    platform_name = "CPU" if torch_cuda else "CUDA"
+    monkeypatch.setattr(example.openmm.Platform, "getNumPlatforms", lambda: 1)
+    monkeypatch.setattr(example.openmm.Platform, "getPlatform", lambda index: SimpleNamespace(
+        getName=lambda: platform_name,
+    ))
+    selected = []
+
+    class PlatformSelected(Exception):
+        pass
+
+    def get_platform(name):
+        selected.append(name)
+        raise PlatformSelected
+
+    monkeypatch.setattr(example.openmm.Platform, "getPlatformByName", get_platform)
+    modeller = SimpleNamespace(
+        topology=object(), positions=object(), deleteWater=lambda: None,
+        addHydrogens=lambda: None, addSolvent=lambda *args, **kwargs: None,
+    )
+    system = SimpleNamespace(addForce=lambda force: None)
+    monkeypatch.setattr(example.app, "PDBFile", lambda path: modeller)
+    monkeypatch.setattr(example.app, "Modeller", lambda *args: modeller)
+    monkeypatch.setattr(example.app, "ForceField", lambda *args: SimpleNamespace(
+        createSystem=lambda *args, **kwargs: system,
+    ))
+    monkeypatch.setattr(example, "PlumedForce", lambda script: object())
+    monkeypatch.setattr(example.openmm, "LangevinMiddleIntegrator", lambda *args: object())
+
+    with pytest.raises(PlatformSelected):
+        example.main()
+
+    assert selected == [platform_name]
