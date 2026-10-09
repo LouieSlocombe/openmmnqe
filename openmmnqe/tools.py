@@ -26,7 +26,12 @@ import openmm.unit as unit
 from openmm import app, openmm
 from scipy import constants
 
-from ._validation import require_integer, require_positive_finite_scalar_in_unit
+from ._validation import (
+    require_integer,
+    require_positive_finite_scalar_in_unit,
+    require_rpmd_n_beads,
+    require_seed,
+)
 
 WorkflowDeuterationOption = Literal[
     "all",
@@ -108,12 +113,7 @@ def _sample_maxwell_boltzmann_velocities(system: openmm.System,
         name="temperature",
     )
 
-    masses_amu = np.asarray([
-        system.getParticleMass(index).value_in_unit(unit.dalton)
-        for index in range(system.getNumParticles())
-    ])
-    if not np.isfinite(masses_amu).all() or np.any(masses_amu < 0):
-        raise ValueError("particle masses must be finite and non-negative")
+    masses_amu = _particle_masses_dalton(system, name="particle masses")
 
     # OpenMM's RPMD Hamiltonian thermalizes each bead with n_copies*k_B*T
     # (``nkT`` in its PILE implementation).  Therefore a bead velocity has
@@ -175,24 +175,10 @@ def sample_rpmd_velocities(system: openmm.System,
         integer, the temperature is not finite and positive, or a particle
         mass is not finite and non-negative.
     """
-    if (
-        isinstance(n_beads, (bool, np.bool_))
-        or not isinstance(n_beads, (int, np.integer))
-        or n_beads <= 0
-    ):
-        raise ValueError("n_beads must be a positive integer")
-    n_beads = int(n_beads)
-    if (
-        seed is not None
-        and (
-            isinstance(seed, (bool, np.bool_))
-            or not isinstance(seed, (int, np.integer))
-            or seed < 0
-        )
-    ):
-        raise ValueError("seed must be a non-negative integer or None")
+    n_beads = require_rpmd_n_beads(n_beads)
+    seed = require_seed(seed)
 
-    rng = np.random.default_rng(None if seed is None else int(seed))
+    rng = np.random.default_rng(seed)
     return _sample_maxwell_boltzmann_velocities(
         system,
         temperature,
@@ -315,7 +301,9 @@ def write_multimodel_pdb(topology: app.Topology, positions: unit.Quantity,
     app.PDBFile.writeModel(topology, positions, fh, modelIndex=model_index)
 
 
-def _particle_masses_dalton(system: openmm.System) -> np.ndarray:
+def _particle_masses_dalton(
+    system: openmm.System, *, name: str = "RPMD System particle masses",
+) -> np.ndarray:
     """
     Return ordered particle masses as finite, non-negative floats.
 
@@ -339,7 +327,7 @@ def _particle_masses_dalton(system: openmm.System) -> np.ndarray:
         for index in range(system.getNumParticles())
     ], dtype=np.float64)
     if not np.isfinite(masses).all() or np.any(masses < 0.0):
-        raise ValueError("RPMD System particle masses must be finite and non-negative")
+        raise ValueError(f"{name} must be finite and non-negative")
     return masses
 
 
@@ -804,24 +792,8 @@ def init_beads(modeller: app.Modeller, simulation: app.Simulation,
         an integer for reproducible initialization. Default is None for
         entropy-based seeding.
     """
-    if (
-        isinstance(n_beads, (bool, np.bool_))
-        or not isinstance(n_beads, (int, np.integer))
-        or n_beads <= 0
-    ):
-        raise ValueError("n_beads must be a positive integer")
-    n_beads = int(n_beads)
-    if (
-        seed is not None
-        and (
-            isinstance(seed, (bool, np.bool_))
-            or not isinstance(seed, (int, np.integer))
-            or seed < 0
-        )
-    ):
-        raise ValueError("seed must be a non-negative integer or None")
-    if seed is not None:
-        seed = int(seed)
+    n_beads = require_rpmd_n_beads(n_beads)
+    seed = require_seed(seed)
     if not np.isfinite(scale_factor) or scale_factor < 0:
         raise ValueError("scale_factor must be finite and non-negative")
 
@@ -879,12 +851,7 @@ def init_beads(modeller: app.Modeller, simulation: app.Simulation,
             f"({integrator_temperature_k} K)"
         )
 
-    masses_amu = np.asarray([
-        system.getParticleMass(index).value_in_unit(unit.dalton)
-        for index in range(n_atoms)
-    ])
-    if not np.isfinite(masses_amu).all() or np.any(masses_amu < 0):
-        raise ValueError("particle masses must be finite and non-negative")
+    masses_amu = _particle_masses_dalton(system, name="particle masses")
     rng = np.random.default_rng(seed)
     displacements = _sample_free_ring_polymer_displacements(
         masses_amu,

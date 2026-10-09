@@ -57,7 +57,14 @@ from openmm import app, openmm
 from openmmml import MLPotential
 from openmmplumed import PlumedForce
 
-from ._validation import require_integer, require_positive_finite_scalar_in_unit
+from ._validation import (
+    require_integer,
+    require_positive_finite_scalar_in_unit,
+    require_seed,
+)
+from ._validation import (
+    require_rpmd_n_beads as _validate_rpmd_n_beads,
+)
 from .adqtb import QTBFrictionReporter
 from .reporters import (
     _TRAJECTORY_FORMATS,
@@ -85,34 +92,6 @@ from .tools import (
 
 _RPMD_RESTART_KIND = "openmmnqe-rpmd-restart"
 _RPMD_RESTART_VERSION = 2
-
-
-def _validate_rpmd_n_beads(n_beads: int) -> int:
-    """
-    Require an RPMD bead count to be a positive, non-boolean integer.
-
-    Parameters
-    ----------
-    n_beads : int
-        Bead count to check.
-
-    Returns
-    -------
-    int
-        The bead count as a plain int.
-
-    Raises
-    ------
-    ValueError
-        If *n_beads* is a bool, not an integer, or not positive.
-    """
-    if (
-        isinstance(n_beads, (bool, np.bool_))
-        or not isinstance(n_beads, (int, np.integer))
-        or n_beads <= 0
-    ):
-        raise ValueError("n_beads must be a positive integer")
-    return int(n_beads)
 
 
 def _validate_ml_indices(ml_idx: Iterable[int], n_atoms: int) -> list[int]:
@@ -218,14 +197,9 @@ def _derive_seeds(seed: int | None, *streams: str) -> tuple[int | None, ...]:
     for name in streams:
         if name not in _SEED_STREAMS:
             raise KeyError(f"unknown seed stream {name!r}")
+    seed = require_seed(seed)
     if seed is None:
         return tuple(None for _ in streams)
-    if (
-        isinstance(seed, (bool, np.bool_))
-        or not isinstance(seed, (int, np.integer))
-        or seed < 0
-    ):
-        raise ValueError("seed must be a non-negative integer or None")
 
     # Spawning the whole registry rather than only what was asked for is what
     # ties a stream's value to its index, so two stages given the same master

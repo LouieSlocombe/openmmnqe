@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
-from numbers import Real
 
 import numpy as np
 
-from ._validation import require_integer
+from ._validation import require_discard_fraction, require_integer
 
 
 def _read_reporter_log(file: str | os.PathLike[str],
@@ -184,11 +183,7 @@ def _block_averaged_columns(file: str | os.PathLike[str],
         If *blocks* is not an integer.
     """
     blocks = require_integer(blocks, name="blocks", minimum=2)
-    if isinstance(discard, bool) or not isinstance(discard, Real):
-        raise ValueError("discard must be a number in [0, 1)")
-    discard = float(discard)
-    if not np.isfinite(discard) or not 0.0 <= discard < 1.0:
-        raise ValueError("discard must be a number in [0, 1)")
+    discard = require_discard_fraction(discard)
 
     header, values = _read_reporter_log(file, description)
     retained = values[int(discard * len(values)):]

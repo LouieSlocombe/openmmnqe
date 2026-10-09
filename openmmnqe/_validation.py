@@ -73,3 +73,41 @@ def require_positive_finite_scalar_in_unit(
     if not math.isfinite(result) or result <= 0:
         raise ValueError(f"{name} must be finite and positive")
     return result
+
+
+def require_seed(seed: object) -> int | None:
+    """Validate a NumPy/OpenMM master seed without changing stream derivation.
+
+    These entry points historically raise ValueError for all invalid seeds;
+    require_integer has a different type/error contract.
+    """
+    if seed is None:
+        return None
+    if (
+        isinstance(seed, (bool, np.bool_))
+        or not isinstance(seed, (int, np.integer))
+        or seed < 0
+    ):
+        raise ValueError("seed must be a non-negative integer or None")
+    return int(seed)
+
+
+def require_rpmd_n_beads(n_beads: object) -> int:
+    """Return a positive bead count, preserving the RPMD ValueError contract."""
+    if (
+        isinstance(n_beads, (bool, np.bool_))
+        or not isinstance(n_beads, (int, np.integer))
+        or n_beads <= 0
+    ):
+        raise ValueError("n_beads must be a positive integer")
+    return int(n_beads)
+
+
+def require_discard_fraction(discard: object) -> float:
+    """Validate a log's leading discard fraction without choosing a row policy."""
+    if isinstance(discard, bool) or not isinstance(discard, Real):
+        raise ValueError("discard must be a number in [0, 1)")
+    result = float(discard)
+    if not np.isfinite(result) or not 0.0 <= result < 1.0:
+        raise ValueError("discard must be a number in [0, 1)")
+    return result
