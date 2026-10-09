@@ -77,3 +77,18 @@ build_py_plumed() {
 
     cd "${work_dir}"
 }
+
+# check_plumed_installation <python_executable>
+# Verifies OPES, py-plumed's kernel loading, and the OpenMM plugin with the
+# caller's environment interpreter. Return at the first failure even when
+# the caller invokes this function in a conditional (which disables errexit).
+check_plumed_installation() {
+    local python_executable="$1"
+
+    plumed --no-mpi config -q module opes || return
+    echo "PLUMED opes module: OK"
+    "${python_executable}" -c "import plumed; plumed.Plumed()" || return
+    echo "py-plumed kernel load: OK"
+    "${python_executable}" -c "from openmmplumed import PlumedForce" || return
+    echo "openmm-plumed: OK"
+}

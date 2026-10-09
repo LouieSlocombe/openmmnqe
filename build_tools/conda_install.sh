@@ -30,7 +30,7 @@ WORK_DIR="${SCRIPT_DIR}/sources"
 # Alongside the repository, so the checkouts survive the wipe WORK_DIR gets.
 SRC_DIR="${SRC_DIR:-$(dirname "${REPO_DIR}")}"
 
-# Pulls in build_plumed() and build_py_plumed(), with the PLUMED versions they pin.
+# Shared PLUMED build and smoke-check functions, with the versions they pin.
 source "${SCRIPT_DIR}/build_plumed.sh"
 # Pulls in install_editable_repos() and check_editable_repos(), with the sibling
 # packages they clone.
@@ -61,12 +61,7 @@ install_editable_repos "${SRC_DIR}"
 
 echo "=== Verifying Installation ==="
 cd "${REPO_DIR}"
-plumed --no-mpi config -q module opes
-echo "PLUMED opes module: OK"
-python -c "import plumed; plumed.Plumed()"
-echo "py-plumed kernel load: OK"
-python -c "from openmmplumed import PlumedForce"
-echo "openmm-plumed: OK"
+check_plumed_installation python
 check_editable_repos "${SRC_DIR}"
 echo "editable dependencies: OK"
 python -c "import openmmnqe"
