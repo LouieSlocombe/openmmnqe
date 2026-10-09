@@ -77,6 +77,7 @@ from ._validation import (
     require_positive_finite_scalar_in_unit,
 )
 from .tools import (
+    _minimum_image_displacements,
     _particle_masses_dalton,
     _ring_spring_energy,
     _topology_molecule_tree,
@@ -292,10 +293,7 @@ def _simulation_bead_coordinates(simulation: app.Simulation,
         elif periodic:
             assert reference is not None and box is not None
             displacement = positions - reference
-            for axis in (2, 1, 0):
-                displacement -= box[axis] * np.round(
-                    displacement[:, axis:axis + 1] / box[axis][axis]
-                )
+            _minimum_image_displacements(displacement, box)
             positions = reference + displacement
         coordinates.append(positions)
 
@@ -522,12 +520,7 @@ def _calculate_report_observables(simulation: app.Simulation,
         for first, second in distance_pairs
     ])
     if box is not None:
-        # OpenMM stores box vectors in reduced form. Remove whole c, b, then a
-        # vectors to obtain the minimum image of each centroid displacement.
-        for axis in (2, 1, 0):
-            deltas -= box[axis] * np.round(
-                deltas[:, axis:axis + 1] / box[axis][axis]
-            )
+        _minimum_image_displacements(deltas, box)
     distances = np.linalg.norm(deltas, axis=1) * unit.nanometer
     return spreads, distances
 

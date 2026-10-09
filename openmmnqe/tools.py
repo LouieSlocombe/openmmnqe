@@ -311,6 +311,8 @@ def _particle_masses_dalton(
     ----------
     system : openmm.System
         System whose particles are read, in index order.
+    name : str, optional
+        Particle-mass label used in validation errors.
 
     Returns
     -------
@@ -485,6 +487,20 @@ def _topology_molecule_tree(topology: app.Topology) -> _MoleculeTree:
     )
 
 
+def _minimum_image_displacements(displacements: np.ndarray, box: np.ndarray) -> None:
+    """Image an owned (N, 3) displacement array in place in a reduced box.
+
+    Both arrays use the same length unit. Keep the c, b, a subtraction order
+    and NumPy's nearest-even half-box rounding; callers retain responsibility
+    for coordinate collection, molecule connectivity and array ownership.
+    The box is never modified and the displacement dtype is preserved.
+    """
+    for axis in (2, 1, 0):
+        displacements -= box[axis] * np.round(
+            displacements[:, axis:axis + 1] / box[axis][axis]
+        )
+
+
 def _unwrap_by_bonds(positions_nm: npt.NDArray[np.float64],
                      box_vectors_nm: npt.NDArray[np.float64],
                      tree: _MoleculeTree,
@@ -521,13 +537,7 @@ def _unwrap_by_bonds(positions_nm: npt.NDArray[np.float64],
     for level in tree.levels:
         parents = tree.parent[level]
         displacement = positions[level] - positions[parents]
-        # OpenMM box vectors are in reduced form, so removing whole c, b then
-        # a vectors gives the minimum image -- the convention
-        # _centroid_of_beads already uses.
-        for axis in (2, 1, 0):
-            displacement -= box[axis] * np.round(
-                displacement[:, axis:axis + 1] / box[axis][axis]
-            )
+        _minimum_image_displacements(displacement, box)
         positions[level] = positions[parents] + displacement
 
     return positions
@@ -621,12 +631,7 @@ def _centroid_of_beads(bead_positions_nm: npt.NDArray[np.float64],
         pos = positions[bead]
         if box_vectors_nm is not None:
             disp = pos - ref
-            # OpenMM box vectors are in reduced form. Remove whole c, b, then
-            # a vectors to obtain the minimum image of each displacement.
-            for axis in (2, 1, 0):
-                disp -= box[axis] * np.round(
-                    disp[:, axis:axis + 1] / box[axis][axis]
-                )
+            _minimum_image_displacements(disp, box)
             pos = ref + disp
         sum_pos += pos
 
