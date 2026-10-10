@@ -2844,3 +2844,191 @@ def test_velocity_archives_share_one_schema(tmp_path: Path) -> None:
         for key in a.files:
             assert a[key].shape == b[key].shape, key
             assert a[key].dtype == b[key].dtype, key
+
+
+# ---------------------------------------------------------------------------
+# Finalisation under failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "reporter_type",
+    [
+        reporters._TrajectoryWriter,
+        RPMDBeadReporter,
+        RPMDCentroidReporter,
+        reporters.VelocityArchiveReporter,
+        reporters.RPMDVelocityReporter,
+    ],
+)
+def test_output_reporters_swallow_errors_raised_while_finalizing_in_del(
+    reporter_type: type,
+) -> None:
+    reporter = reporter_type.__new__(reporter_type)
+
+    def refuse() -> None:
+        raise OSError("disk gone")
+
+    reporter.close = refuse
+    reporter.__del__()
+
+
+def test_bead_reporter_closes_earlier_beads_when_a_later_one_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    opened: list[Any] = []
+    real_writer = reporters._TrajectoryWriter
+
+    def flaky(file_name: Any, topology: Any, **kwargs: Any) -> Any:
+        if opened:
+            raise OSError("second bead refused")
+        writer = real_writer(file_name, topology, **kwargs)
+        opened.append(writer)
+        return writer
+
+    monkeypatch.setattr(reporters, "_TrajectoryWriter", flaky)
+
+    with pytest.raises(OSError, match="second bead refused"):
+        RPMDBeadReporter(
+            file_base_name=str(tmp_path / "beads"),
+            reportInterval=1,
+            num_beads=2,
+            topology=_two_atom_topology(),
+        )
+
+    assert len(opened) == 1
+    assert opened[0]._closed is True
+
+
+def test_bead_reporter_close_raises_the_first_writer_error_after_closing_the_rest(
+    tmp_path: Path,
+) -> None:
+    reporter = RPMDBeadReporter(
+        file_base_name=str(tmp_path / "beads"),
+        reportInterval=1,
+        num_beads=3,
+        topology=_two_atom_topology(),
+    )
+    first, second, third = reporter._writers
+    order: list[str] = []
+
+    def failing(name: str) -> Callable[[], None]:
+        def close() -> None:
+            order.append(name)
+            raise OSError(name)
+
+        return close
+
+    first.close = failing("first")
+    second.close = failing("second")
+    real_third_close = third.close
+    third.close = lambda: (order.append("third"), real_third_close())
+
+    with pytest.raises(OSError, match="^first$"):
+        reporter.close()
+
+    assert order == ["first", "second", "third"]
+    assert third._closed is True
+    reporter.close()  # already closed: nothing is retried, nothing raised
+    reporter.__del__()
+    for writer in (first, second):
+        del writer.close
+        writer.close()
+
+
+def test_thermodynamic_values_reuse_precomputed_bead_states() -> None:
+    simulation = _hand_built_simulation()
+    integrator = simulation.integrator
+    masses = np.array([1.0])
+
+    states = reporters._bead_thermodynamic_states(integrator)
+    reads_before = len(integrator.calls)
+    fresh = reporters._rpmd_thermodynamic_values(integrator, 300.0, 3, masses)
+    reads_after_fresh = len(integrator.calls)
+    reused = reporters._rpmd_thermodynamic_values(
+        integrator, 300.0, 3, masses, states=states,
+    )
+
+    assert reused == fresh
+    assert reads_after_fresh == reads_before + 2
+    assert len(integrator.calls) == reads_after_fresh
+
+
+def test_energy_conservation_treats_an_exactly_flat_energy_as_conserved(
+    tmp_path: Path,
+) -> None:
+    steps = [0, 1, 2, 3]
+    times = [0.0, 0.001, 0.002, 0.003]
+    # All-zero energies fit a slope and intercept of exactly zero, so the
+    # fluctuation is exactly zero and the ratio has to be defined by hand.
+    flat = _write_energy_log(tmp_path / "flat.log", steps, times, [0.0] * 4)
+
+    verdict = rpmd_energy_conservation(flat, temperature=300.0)
+
+    assert verdict.fluctuation == 0.0
+    assert verdict.drift_ratio == 0.0
+    assert verdict.conserved
+
+    with pytest.raises(ValueError, match="tolerance must be a positive, finite number"):
+        rpmd_energy_conservation(flat, temperature=300.0, tolerance="0.1")
+
+    broken = _write_energy_log(
+        tmp_path / "nan.log", steps, times, [2.0, float("nan"), 2.0, 2.0],
+    )
+    with pytest.raises(ValueError, match="E_ring column contains non-finite values"):
+        rpmd_energy_conservation(broken, temperature=300.0)
+
+
+def test_plot_rpmd_thermodynamics_and_kinetic_can_show_without_saving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    shown = []
+    monkeypatch.setattr(matplotlib.pyplot, "show", lambda: shown.append(True))
+    thermo = _write_thermodynamic_log(tmp_path / "thermo.log", rows=8)
+    kinetic = _write_kinetic_log(tmp_path / "kinetic.log", rows=8)
+
+    figure, _ = plot_rpmd_thermodynamics(thermo, show=True)
+    matplotlib.pyplot.close(figure)
+    figure, _ = plot_rpmd_kinetic_decomposition(kinetic, temperature=300.0, show=True)
+    matplotlib.pyplot.close(figure)
+
+    assert shown == [True, True]
+    assert list(tmp_path.glob("*.png")) == []
+
+
+def test_velocity_archive_base_leaves_sampling_to_subclasses(tmp_path: Path) -> None:
+    base = reporters._VelocityArchiveBase(tmp_path / "base.npz", 1)
+
+    with pytest.raises(NotImplementedError):
+        base._sample(SimpleNamespace(), None)
+
+
+def test_velocity_archive_rejects_non_finite_values(tmp_path: Path) -> None:
+    path = tmp_path / "nan.npz"
+    np.savez(
+        path,
+        times_ps=np.arange(3.0) * 0.001,
+        velocities_nm_per_ps=np.full((3, 1, 3), np.nan),
+        atom_indices=np.array([0]),
+        masses_dalton=np.array([1.0]),
+    )
+
+    with pytest.raises(ValueError, match="non-finite"):
+        reporters.velocity_autocorrelation(path)
+
+
+def test_vibrational_spectrum_window_can_be_disabled(tmp_path: Path) -> None:
+    archive = tmp_path / "cosine.npz"
+    _write_cosine_archive(
+        archive, n_frames=256, dt=0.001, angular_frequency=50.0, mass=1.0,
+    )
+
+    frequencies, tapered = reporters.vibrational_spectrum(archive)
+    frequencies_plain, plain = reporters.vibrational_spectrum(archive, window="none")
+
+    np.testing.assert_array_equal(frequencies, frequencies_plain)
+    assert np.isfinite(plain).all()
+    assert not np.allclose(tapered, plain)
+    assert abs(int(np.argmax(tapered)) - int(np.argmax(plain))) <= 1

@@ -908,3 +908,65 @@ def test_friction_log_with_unequal_type_widths_is_rejected(
     )
     with pytest.raises(ValueError, match="different numbers of frequency"):
         nqe.adqtb_friction_spectra(log)
+
+
+def test_adqtb_friction_labels_named_types_and_falls_back_for_the_rest() -> None:
+    integrator = _Integrator(particle_types={0: 0, 1: 0, 2: 1})
+
+    spectra = nqe.adqtb_friction(_simulation(integrator, 0), type_names={0: "H"})
+
+    assert set(spectra) == {"H", "T1"}
+    np.testing.assert_allclose(spectra["H"], 1.0)
+    np.testing.assert_allclose(spectra["T1"], 3.0)
+    # One representative particle per type, the lowest index of each.
+    assert integrator.reads == [0, 2]
+
+    unnamed = nqe.adqtb_friction(_simulation(integrator, 0))
+
+    assert set(unnamed) == {"T0", "T1"}
+
+
+def test_frequencies_need_positive_steps_and_a_positive_step_size(tmp_path: Path) -> None:
+    header = "Step\tTime(ps)\tGamma_H_0000\tGamma_H_0001\n"
+    stalled = tmp_path / "stalled.log"
+    stalled.write_text(header + "0\t0.000000\t1.0\t1.0\n")
+    backwards = tmp_path / "backwards.log"
+    backwards.write_text(header + "5\t-0.005000\t1.0\t1.0\n")
+
+    with pytest.raises(ValueError, match="positive steps and times"):
+        nqe.adqtb_frequencies(stalled)
+    with pytest.raises(ValueError, match="positive step size"):
+        nqe.adqtb_frequencies(backwards)
+
+
+def test_adapted_frequency_limit_ignores_blocks_that_never_moved() -> None:
+    frequencies = np.arange(8.0)
+    flat = np.ones((3, 8))
+    adapted = np.ones((3, 8))
+    adapted[1:, :2] = 1.5
+
+    assert adqtb._adapted_frequency_limit([flat], 1.0, frequencies) == 7.0
+    assert adqtb._adapted_frequency_limit([adapted], 1.0, frequencies) == 2.0
+    assert adqtb._adapted_frequency_limit([flat, adapted], 1.0, frequencies) == 2.0
+
+
+def test_adqtb_plots_can_show_without_saving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    shown = []
+    monkeypatch.setattr(plt, "show", lambda: shown.append(True))
+    log = _plot_log(tmp_path)
+
+    figure, _ = nqe.plot_adqtb_friction_spectra(log, show=True)
+    plt.close(figure)
+    figure, axes = nqe.plot_adqtb_fdt_residual(log, show=True, max_frequency=3.0)
+    spectrum_axis = axes[0]
+    plt.close(figure)
+
+    assert shown == [True, True]
+    assert spectrum_axis.get_xlim()[1] == pytest.approx(3.0)
+    assert list(tmp_path.glob("*.png")) == []

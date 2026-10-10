@@ -1447,3 +1447,71 @@ def test_rpmd_prod_velocity_recording_threads_through_to_the_reporters(
     (_, kwargs) = runtime.calls.rpmd_reporters[0]
     assert kwargs["velocity_record_interval"] == 50
     assert kwargs["velocity_atom_indices"] == [1]
+
+
+class _GroupedBias:
+    """A PLUMED bias stand-in that only knows its force group."""
+
+    def __init__(self, group: int = 0) -> None:
+        self._group = group
+        self.force_groups: list[int] = []
+
+    def setForceGroup(self, group: int) -> None:
+        self.force_groups.append(group)
+        self._group = group
+
+    def getForceGroup(self) -> int:
+        return self._group
+
+
+def test_contracted_rpmd_leaves_the_plumed_bias_to_the_centroid_contraction(
+    monkeypatch: pytest.MonkeyPatch,
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    runtime = workflow_runtime
+    monkeypatch.setattr(nqe_openmm, "PlumedForce", _GroupedBias)
+    bias = _GroupedBias()
+    runtime.system.forces = [bias]
+    monkeypatch.setattr(nqe_openmm, "_load_plumed", lambda system, path: bias)
+
+    nqe_openmm.run_openmm_rpmd_contracted(
+        runtime.modeller,
+        forcefield=object(),
+        checkpoint_file="ready.chk",
+        output_prefix="contracted",
+        barostat_freq=None,
+        steps=0,
+        plumed_script_path="bias.dat",
+        centroid_bias=True,
+    )
+
+    # The force-group pass skips the bias; the contraction step then gives it
+    # the first group that neither a force nor the default contractions use.
+    assert bias.force_groups == [3]
+    assert runtime.calls.integrators[0].args[-1] == {1: 8, 2: 1, 3: 1}
+
+
+def test_rpmd_production_contracts_a_plumed_bias_onto_the_centroid(
+    monkeypatch: pytest.MonkeyPatch,
+    workflow_runtime: SimpleNamespace,
+) -> None:
+    runtime = workflow_runtime
+    bias = _GroupedBias()
+    runtime.system.forces = [bias]
+    monkeypatch.setattr(nqe_openmm, "_load_plumed", lambda system, path: bias)
+
+    nqe_openmm.run_openmm_rpmd_prod(
+        runtime.modeller,
+        forcefield=object(),
+        checkpoint_file="ready.chk",
+        output_prefix="prod",
+        barostat_freq=None,
+        steps=0,
+        plumed_script_path="bias.dat",
+        centroid_bias=True,
+    )
+
+    integrator = runtime.calls.integrators[0]
+    assert bias.force_groups == [1]
+    assert len(integrator.args) == 5
+    assert integrator.args[-1] == {1: 1}

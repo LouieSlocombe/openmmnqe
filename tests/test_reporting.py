@@ -94,3 +94,17 @@ def test_tabular_rows_are_flushed_and_not_partially_written_on_format_error(
         with pytest.raises(ValueError):
             reporter._write_row(8, [1.0, "unformattable"])
         assert path.read_text() == "Step\tValue\n7\t1.234568\n"
+
+
+def test_text_reporters_swallow_close_errors_during_del(tmp_path: Path) -> None:
+    reporter = reporting._TabularReporter(tmp_path / "log.tsv", "Step\tValue")
+    handle = reporter._out
+
+    def refuse() -> None:
+        raise OSError("flush failed")
+
+    reporter._out = SimpleNamespace(closed=False, close=refuse)
+    reporter.__del__()
+    with pytest.raises(OSError, match="flush failed"):
+        reporter.close()
+    handle.close()

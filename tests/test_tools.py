@@ -1146,3 +1146,164 @@ def test_check_platform_prefers_cuda(monkeypatch: pytest.MonkeyPatch, available:
     monkeypatch.setattr(nqe_tools.openmm, "Platform", FakePlatform)
 
     assert nqe.check_platform() == expected
+
+
+def test_maxwell_boltzmann_sampler_rejects_a_non_positive_copy_count() -> None:
+    with pytest.raises(ValueError, match="n_copies must be positive"):
+        nqe_tools._sample_maxwell_boltzmann_velocities(
+            _System(masses=[1.0]), 300.0, 0, np.random.default_rng(0),
+        )
+
+
+@pytest.mark.parametrize("scale_factor", [-0.5, np.nan, np.inf])
+def test_init_beads_rejects_an_unphysical_scale_factor(scale_factor: float) -> None:
+    simulation = SimpleNamespace(system=_System(masses=[1.0]), integrator=_Integrator())
+
+    with pytest.raises(ValueError, match="scale_factor must be finite and non-negative"):
+        nqe.init_beads(
+            _single_atom_modeller(), simulation, n_beads=2, scale_factor=scale_factor,
+        )
+
+
+def test_init_beads_rejects_a_bead_count_the_integrator_disagrees_with() -> None:
+    integrator = _Integrator()
+    integrator.getNumCopies = lambda: 3  # type: ignore[attr-defined]
+    simulation = SimpleNamespace(system=_System(masses=[1.0]), integrator=integrator)
+
+    with pytest.raises(ValueError, match="n_beads=2 does not match RPMDIntegrator copies=3"):
+        nqe.init_beads(_single_atom_modeller(), simulation, n_beads=2)
+
+
+def test_init_beads_rejects_positions_that_do_not_match_the_system() -> None:
+    modeller = SimpleNamespace(positions=np.zeros((2, 3)) * unit.nanometer)
+    simulation = SimpleNamespace(system=_System(masses=[1.0]), integrator=_Integrator())
+
+    with pytest.raises(ValueError, match=r"positions must have shape \(1, 3\), got \(2, 3\)"):
+        nqe.init_beads(modeller, simulation, n_beads=2)
+
+
+def test_init_beads_reads_bare_positions_and_a_bare_integrator_temperature() -> None:
+    # Positions without units are nanometres; an integrator handing back a
+    # plain number is read as kelvin.
+    modeller = SimpleNamespace(positions=np.array([[0.1, 0.2, 0.3]]))
+    integrator = _Integrator(temperature=300.0)
+    simulation = SimpleNamespace(system=_System(masses=[1.0]), integrator=integrator)
+
+    nqe.init_beads(modeller, simulation, n_beads=2, seed=7)
+
+    centroid = np.mean(
+        [integrator.positions[bead].value_in_unit(unit.nanometer) for bead in range(2)],
+        axis=0,
+    )
+    np.testing.assert_allclose(centroid, [[0.1, 0.2, 0.3]])
+    assert set(integrator.velocities) == {0, 1}
+
+
+def test_init_beads_rejects_a_non_positive_integrator_temperature() -> None:
+    simulation = SimpleNamespace(
+        system=_System(masses=[1.0]),
+        integrator=_Integrator(temperature=0.0 * unit.kelvin),
+    )
+
+    with pytest.raises(ValueError, match="RPMDIntegrator temperature must be finite and positive"):
+        nqe.init_beads(_single_atom_modeller(), simulation, n_beads=2)
+
+
+def test_step_rpmd_requires_an_rpmd_integrator() -> None:
+    with pytest.raises(TypeError, match="simulation must use an RPMDIntegrator"):
+        nqe.step_rpmd(SimpleNamespace(integrator=SimpleNamespace()), 3)
+
+
+def test_step_rpmd_refuses_a_step_count_that_moved_by_the_wrong_amount() -> None:
+    class _OvercountingIntegrator:
+        def __init__(self, simulation: Any) -> None:
+            self._simulation = simulation
+
+        def getNumCopies(self) -> int:
+            return 2
+
+        def step(self, count: int) -> None:
+            self._simulation.currentStep += count + 1
+
+    class _Simulation:
+        currentStep = 0
+
+        def __init__(self) -> None:
+            self.integrator = _OvercountingIntegrator(self)
+
+        def step(self, count: int) -> None:
+            self.integrator.step(count)
+
+    simulation = _Simulation()
+    native_step = simulation.integrator.step
+
+    with pytest.raises(
+        RuntimeError,
+        match="changed the Context step count from 0 to 4 while advancing 3 steps",
+    ):
+        nqe.step_rpmd(simulation, 3)
+
+    assert simulation.integrator.step == native_step
+
+
+def test_deuterate_system_warns_when_a_component_option_matches_nothing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    modeller = _single_atom_modeller()  # one LIG residue, no water anywhere
+    system = openmm.System()
+    system.addParticle(1.008 * unit.dalton)
+
+    nqe.deuterate_system(modeller, system, option="water")
+
+    assert "No residues matching option 'water'" in capsys.readouterr().out
+    assert system.getParticleMass(0).value_in_unit(unit.dalton) == pytest.approx(1.008)
+
+
+def test_get_atoms_in_residue_reports_an_index_outside_the_chain(
+    data_dir: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = data_dir / "pdb" / "gc.pdb"
+
+    assert nqe.get_atoms_in_residue(source, 5, chain_id="B") is None
+
+    printed = capsys.readouterr().out
+    assert "out of bounds for Chain B" in printed
+    assert "Chain B contains 1 residues" in printed
+
+
+def test_set_adqtb_particle_types_copes_with_element_like_objects() -> None:
+    class _NamelessElement:
+        atomic_number = "not a number"
+
+        def __str__(self) -> str:
+            return "Q"
+
+    integrator = _Integrator()
+    elements = [
+        app.Element.getBySymbol("O"),
+        SimpleNamespace(symbol="Zz", atomic_number=7.0),
+        _NamelessElement(),
+        None,
+    ]
+
+    mapping = nqe.set_adqtb_particle_types_by_element(
+        integrator, particle_elements=elements,
+    )
+
+    # Lightest first; the two without a usable atomic number sort last, by name.
+    assert mapping == {"Zz": 0, "O": 1, "Q": 2, "X": 3}
+    assert integrator.particle_types == {0: 1, 1: 0, 2: 2, 3: 3}
+
+
+@pytest.mark.parametrize(
+    ("pick", "kwargs", "message"),
+    [
+        (" :CA", {}, "malformed"),
+        ("ALA12:CA", {"chain_id": "Z"}, "in chain 'Z'"),
+    ],
+)
+def test_atom_indices_from_vmd_picks_names_blank_residues_and_absent_chains(
+    pick: str, kwargs: dict[str, Any], message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        nqe.atom_indices_from_vmd_picks(_ambiguous_modeller(), [pick], **kwargs)

@@ -739,3 +739,187 @@ def test_recrossing_driver_rejects_snapshots_from_another_system() -> None:
 
     with pytest.raises(ValueError, match="n_beads=3"):
         _shoot(paths, prefix="mismatch", n_beads=3, seed=1)
+
+# --------------------------------------------------------------------------
+# Validation helpers and log bookkeeping
+
+
+@pytest.mark.parametrize("value", [True, np.bool_(False), "0.5", None])
+def test_finite_number_validation_rejects_booleans_and_non_numbers(value: Any) -> None:
+    with pytest.raises(ValueError, match="s_dagger must be a finite number"):
+        nqe_rates._require_finite_number(value, name="s_dagger")
+    # The public entry points check this before touching any file.
+    with pytest.raises(ValueError, match="s_dagger must be a finite number"):
+        nqe.transmission_coefficient("absent.log", s_dagger=value)
+
+
+def test_finite_number_validation_accepts_numpy_scalars() -> None:
+    assert nqe_rates._require_finite_number(np.float32(0.25), name="x") == pytest.approx(0.25)
+    assert nqe_rates._require_finite_number(np.int64(3), name="x") == 3.0
+
+
+def test_child_seed_streams_without_a_seed_are_entropy_based() -> None:
+    first = nqe_rates._spawn_child_sequences(None, 2, 3)
+    second = nqe_rates._spawn_child_sequences(None, 2, 3)
+
+    assert [len(row) for row in first] == [3, 3]
+    assert first[0][0].generate_state(1)[0] != second[0][0].generate_state(1)[0]
+
+
+def test_recrossing_log_completeness_requires_a_parseable_matching_finished_log() -> None:
+    columns = nqe_rates._recrossing_columns(record_energy=False)
+    path = "done_00000.log"
+
+    assert not nqe_rates._recrossing_log_complete(path, columns, 2, 5)
+
+    Path(path).write_text("garbage\n")
+    assert not nqe_rates._recrossing_log_complete(path, columns, 2, 5)
+
+    _write_recrossing_log(path, 0, [(0, 1.0, [0.1, 0.1])])
+    assert nqe_rates._recrossing_log_complete(path, columns, 2, 5)
+    with_energy = nqe_rates._recrossing_columns(record_energy=True)
+    assert not nqe_rates._recrossing_log_complete(path, with_energy, 2, 5)
+    assert not nqe_rates._recrossing_log_complete(path, columns, 3, 5)
+    assert not nqe_rates._recrossing_log_complete(path, columns, 2, 10)
+
+
+def test_bead_state_arrays_return_the_box_of_a_periodic_system() -> None:
+    system = openmm.System()
+    system.addParticle(39.948 * unit.dalton)
+    system.setDefaultPeriodicBoxVectors(
+        Vec3(2.0, 0.0, 0.0), Vec3(0.0, 3.0, 0.0), Vec3(0.0, 0.0, 4.0),
+    )
+    integrator = openmm.RPMDIntegrator(
+        2, 300.0 * unit.kelvin, 1.0 / unit.picosecond, 0.1 * unit.femtosecond,
+    )
+    simulation = app.Simulation(
+        _double_well_topology(), system, integrator,
+        openmm.Platform.getPlatformByName("Reference"),
+    )
+    for bead in range(2):
+        integrator.setPositions(
+            bead, np.array([[0.1 * (bead + 1), 0.0, 0.0]]) * unit.nanometer,
+        )
+        integrator.setVelocities(
+            bead, np.array([[float(bead), 0.0, 0.0]]) * unit.nanometer / unit.picosecond,
+        )
+
+    positions, velocities, box = nqe_rates._bead_state_arrays(
+        simulation, 2, periodic=True, with_velocities=True,
+    )
+
+    assert positions.shape == (2, 1, 3)
+    assert velocities is not None
+    np.testing.assert_allclose(positions[:, 0, 0], [0.1, 0.2])
+    np.testing.assert_allclose(velocities[:, 0, 0], [0.0, 1.0])
+    np.testing.assert_allclose(box, np.diag([2.0, 3.0, 4.0]))
+
+    positions, velocities, box = nqe_rates._bead_state_arrays(
+        simulation, 2, periodic=False, with_velocities=False,
+    )
+
+    assert positions.shape == (2, 1, 3)
+    assert velocities is None
+    assert box is None
+
+
+def test_cv_of_beads_averages_over_beads_in_bead_mean_mode() -> None:
+    positions = np.array([[[0.1, 0.0, 0.0]], [[0.3, 0.0, 0.0]]])
+
+    def squared_x(positions_nm: np.ndarray) -> float:
+        return float(positions_nm[0, 0] ** 2)
+
+    # A quadratic separates the two: the centroid gives 0.2**2, the bead mean
+    # gives the mean of 0.1**2 and 0.3**2.
+    assert nqe_rates._cv_of_beads(
+        squared_x, "centroid", positions, None, 0, 0, 0,
+    ) == pytest.approx(0.04)
+    assert nqe_rates._cv_of_beads(
+        squared_x, "bead-mean", positions, None, 0, 0, 0,
+    ) == pytest.approx(0.05)
+
+
+def test_transmission_coefficient_needs_two_records_in_the_plateau_window() -> None:
+    _write_recrossing_log("w_00000.log", 0, [(0, 1.0, [0.1] * 4)])
+    _write_recrossing_log("w_00001.log", 1, [(0, 1.0, [0.1] * 4)])
+
+    with pytest.raises(ValueError, match="plateau window holds fewer than two records"):
+        nqe.transmission_coefficient(
+            ["w_00000.log", "w_00001.log"], s_dagger=0.0, blocks=2,
+            plateau_fraction=0.1,
+        )
+
+
+def test_plot_transmission_coefficient_can_show_without_saving(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plt = pytest.importorskip("matplotlib.pyplot")
+    shown = []
+    monkeypatch.setattr(plt, "show", lambda: shown.append(True))
+    _write_recrossing_log("s_00000.log", 0, [(0, 1.0, [0.1, 0.1, 0.1, 0.1])])
+    _write_recrossing_log("s_00001.log", 1, [(0, 1.0, [0.1, 0.1, 0.1, 0.1])])
+
+    figure, axis = nqe.plot_transmission_coefficient(
+        ["s_00000.log", "s_00001.log"], s_dagger=0.0, blocks=2,
+        plateau_fraction=0.5, show=True,
+    )
+    plt.close(figure)
+
+    assert shown == [True]
+    assert list(Path.cwd().glob("*.png")) == []
+
+
+def test_rpmd_rate_is_symmetric_under_mirroring_the_reaction_coordinate() -> None:
+    # A reactant well on the far side of the dividing surface takes the other
+    # branch of the check that nothing between well and surface out-tops it,
+    # and must give exactly the same rate.
+    grid, surface = _harmonic_surface(5000.0, -0.1, 20.0)
+    mirrored_grid, mirrored_surface = -grid[::-1], surface[::-1]
+    kwargs: dict[str, Any] = {
+        "temperature": 300.0, "forward_flux": 2.0, "transmission_stderr": 0.1,
+    }
+
+    forward = nqe.rpmd_rate(
+        0.5, grid, surface, s_dagger=0.02, reactant_window=(-0.185, -0.015), **kwargs,
+    )
+    backward = nqe.rpmd_rate(
+        0.5, mirrored_grid, mirrored_surface, s_dagger=-0.02,
+        reactant_window=(0.015, 0.185), **kwargs,
+    )
+
+    assert backward.rate == pytest.approx(forward.rate)
+    assert backward.qtst_rate == pytest.approx(forward.qtst_rate)
+    assert backward.rate_stderr == pytest.approx(forward.rate_stderr)
+    assert backward.dividing_surface_probability == pytest.approx(
+        forward.dividing_surface_probability,
+    )
+
+
+def test_rpmd_rate_rejects_a_degenerate_or_non_finite_grid_and_a_bad_window() -> None:
+    grid, surface = _harmonic_surface(5000.0, -0.1, 20.0)
+    kwargs: dict[str, Any] = {
+        "temperature": 300.0,
+        "s_dagger": 0.02,
+        "reactant_window": (-0.185, -0.015),
+        "forward_flux": 1.0,
+    }
+
+    with pytest.raises(ValueError, match="1-D grid of at least two values"):
+        nqe.rpmd_rate(1.0, [0.0], [0.0], **kwargs)
+    with pytest.raises(ValueError, match="1-D grid of at least two values"):
+        nqe.rpmd_rate(1.0, grid.reshape(-1, 1), surface.reshape(-1, 1), **kwargs)
+    holed = grid.copy()
+    holed[10] = np.nan
+    with pytest.raises(ValueError, match="cv_grid contains non-finite values"):
+        nqe.rpmd_rate(1.0, holed, surface, **kwargs)
+    for window in (5, (1.0, 2.0, 3.0)):
+        with pytest.raises(ValueError, match=r"reactant_window must be a \(low, high\) pair"):
+            nqe.rpmd_rate(
+                1.0, grid, surface, temperature=300.0, s_dagger=0.02,
+                reactant_window=window, forward_flux=1.0,
+            )
+    with pytest.raises(ValueError, match="s_dagger must be a finite number"):
+        nqe.rpmd_rate(
+            1.0, grid, surface, temperature=300.0, s_dagger=True,
+            reactant_window=(-0.185, -0.015), forward_flux=1.0,
+        )

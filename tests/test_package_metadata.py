@@ -6,6 +6,8 @@ import tomllib
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import pytest
+
 import openmmnqe
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -160,3 +162,27 @@ def test_docs_requirements_match_docs_extra() -> None:
         if line.strip() and not line.lstrip().startswith("#")
     ]
     assert requirements == list(extra)
+
+
+def test_runtime_version_falls_back_to_the_project_version_without_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Importing from an unpacked source tree has no installed distribution,
+    # so __init__ carries a literal fallback that must track pyproject.toml.
+    import importlib
+    import importlib.metadata
+
+    expected = _project_metadata()["version"]
+
+    def missing(name: str) -> str:
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    try:
+        reloaded = importlib.reload(openmmnqe)
+        assert reloaded.__version__ == expected
+    finally:
+        monkeypatch.undo()
+        importlib.reload(openmmnqe)
+
+    assert openmmnqe.__version__ == expected

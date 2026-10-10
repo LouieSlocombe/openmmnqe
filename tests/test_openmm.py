@@ -1359,3 +1359,417 @@ def test_production_flushes_its_velocity_archive_when_the_run_fails(
 
     with np.load("crashed_velocities.npz") as archive:
         assert archive["times_ps"].size == 2
+
+
+# ---------------------------------------------------------------------------
+# Small stage helpers
+# ---------------------------------------------------------------------------
+
+
+def test_validate_rpmd_contractions_normalises_a_valid_mapping() -> None:
+    normalized = nqe_openmm._validate_rpmd_contractions(
+        {np.int64(1): np.int64(4), 2: 1, 0: 8}, n_beads=8,
+    )
+
+    assert normalized == {1: 4, 2: 1, 0: 8}
+    assert all(
+        type(group) is int and type(count) is int
+        for group, count in normalized.items()
+    )
+    # An explicit empty mapping asks for no contraction at all, which is not
+    # the same request as None, the default pair.
+    assert nqe_openmm._validate_rpmd_contractions({}, n_beads=8) == {}
+    assert nqe_openmm._validate_rpmd_contractions(None, n_beads=8) == {1: 8, 2: 1}
+
+
+@pytest.mark.parametrize("temperature", [0.0, -5.0, np.nan, np.inf])
+def test_rpmd_temperature_must_be_positive_and_finite(temperature: float) -> None:
+    integrator = SimpleNamespace(getTemperature=lambda: temperature * unit.kelvin)
+
+    with pytest.raises(ValueError, match="temperature must be positive and finite"):
+        nqe_openmm._rpmd_temperature_kelvin(integrator)
+
+
+def test_free_force_group_counts_reciprocal_space_and_reserved_groups() -> None:
+    system = openmm.System()
+    nonbonded = openmm.NonbondedForce()
+    nonbonded.setForceGroup(0)
+    nonbonded.setReciprocalSpaceForceGroup(1)
+    system.addForce(nonbonded)
+
+    assert nqe_openmm._free_force_group(system) == 2
+    assert nqe_openmm._free_force_group(system, reserved=[2, 3]) == 4
+    with pytest.raises(RuntimeError, match="all 32 force groups are in use"):
+        nqe_openmm._free_force_group(system, reserved=range(32))
+
+
+@pytest.mark.parametrize(
+    ("text", "inline"),
+    [
+        ("FLUSH STRIDE 100", True),  # spaced keywords, no "=" and no extension
+        ("ENDPLUMED", True),  # a bare upper-case keyword
+        ("plumed", False),  # a bare lower-case name is a file
+        ("Plumed", False),
+    ],
+)
+def test_inline_plumed_detection_falls_back_to_spacing_and_case(
+    text: str, inline: bool,
+) -> None:
+    assert nqe_openmm._is_inline_plumed_input(text) is inline
+
+
+def test_velocity_archive_reporter_needs_an_interval_for_its_atoms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        nqe_openmm,
+        "VelocityArchiveReporter",
+        lambda **kwargs: ("velocities", kwargs),
+    )
+    simulation = SimpleNamespace(reporters=[])
+
+    with pytest.raises(ValueError, match="velocity_atom_indices require velocity_record_interval"):
+        nqe_openmm._add_velocity_archive_reporter(simulation, "run", None, [0, 1])
+    assert simulation.reporters == []
+
+    nqe_openmm._add_velocity_archive_reporter(simulation, "run", 5, [0, 1])
+
+    assert simulation.reporters == [(
+        "velocities",
+        {"file": "run_velocities.npz", "reportInterval": 5, "atom_indices": [0, 1]},
+    )]
+
+
+def _stub_rpmd_reporters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace every RPMD reporter class with a tuple-returning stand-in."""
+    for name, label in (
+        ("RPMDQuantumSpreadReporter", "spread"),
+        ("RPMDCentroidReporter", "centroid"),
+        ("RPMDBeadReporter", "beads"),
+        ("RPMDThermodynamicReporter", "thermo"),
+        ("RPMDVelocityReporter", "velocities"),
+    ):
+        monkeypatch.setattr(
+            nqe_openmm, name, lambda _label=label, **kwargs: (_label, kwargs),
+        )
+
+
+def test_add_rpmd_reporters_can_skip_the_trajectory_and_archive_velocities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_rpmd_reporters(monkeypatch)
+    topology_writes = []
+    monkeypatch.setattr(
+        nqe_openmm, "_write_trajectory_topology", lambda *args: topology_writes.append(args),
+    )
+    simulation = SimpleNamespace(reporters=[])
+    topology = SimpleNamespace(getNumAtoms=lambda: 2)
+
+    nqe_openmm._add_rpmd_reporters(
+        simulation,
+        topology,
+        output_prefix="rpmd",
+        n_report=10,
+        n_beads=4,
+        atoms_to_watch=None,
+        trajectory=nqe_openmm.TrajectoryOptions("none", 10),
+        velocity_record_interval=5,
+        velocity_atom_indices=[1],
+    )
+
+    assert [reporter[0] for reporter in simulation.reporters] == ["thermo", "velocities"]
+    assert topology_writes == []
+    assert simulation.reporters[1][1] == {
+        "file": "rpmd_velocities.npz",
+        "reportInterval": 5,
+        "atom_indices": [1],
+    }
+
+
+def test_add_rpmd_reporters_rejects_velocity_atoms_without_an_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_rpmd_reporters(monkeypatch)
+    simulation = SimpleNamespace(reporters=[])
+    topology = SimpleNamespace(getNumAtoms=lambda: 2)
+
+    with pytest.raises(ValueError, match="velocity_atom_indices require velocity_record_interval"):
+        nqe_openmm._add_rpmd_reporters(
+            simulation,
+            topology,
+            output_prefix="rpmd",
+            n_report=10,
+            n_beads=4,
+            atoms_to_watch=None,
+            trajectory=nqe_openmm.TrajectoryOptions("none", 10),
+            velocity_atom_indices=[1],
+        )
+
+
+def test_adqtb_particle_labels_need_one_atom_per_particle_and_mark_unknown_elements() -> None:
+    hydrogen = app.Element.getBySymbol("H")
+    topology = app.Topology()
+    residue = topology.addResidue("MIX", topology.addChain())
+    topology.addAtom("H", hydrogen, residue)
+    topology.addAtom("DP", None, residue)  # a Drude-like particle with no element
+    system = openmm.System()
+    system.addParticle(hydrogen.mass)
+
+    with pytest.raises(ValueError, match="pass particle_types explicitly"):
+        nqe_openmm._adqtb_particle_labels(topology, system)
+
+    system.addParticle(0.0 * unit.dalton)
+
+    assert nqe_openmm._adqtb_particle_labels(topology, system) == ["H", "X"]
+
+
+def test_add_adqtb_reporters_without_checkpoint_or_friction_log_adds_only_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(nqe_openmm.app, "StateDataReporter", lambda *args, **kwargs: "progress")
+    monkeypatch.setattr(
+        nqe_openmm.app,
+        "CheckpointReporter",
+        lambda *args: pytest.fail("no checkpoint reporter was requested"),
+    )
+    simulation = SimpleNamespace(
+        reporters=[], integrator=SimpleNamespace(getParticleTypes=lambda: {}),
+    )
+
+    nqe_openmm._add_adqtb_reporters(
+        simulation,
+        "run",
+        25,
+        segment_steps=5,
+        type_names=None,
+        friction_log=False,
+        checkpoint_interval=None,
+        trajectory=nqe_openmm.TrajectoryOptions("none", 25),
+    )
+
+    assert simulation.reporters == ["progress", "progress"]
+
+
+def test_close_output_reporters_keeps_closing_after_the_first_failure() -> None:
+    closed = []
+
+    def failing(name: str) -> SimpleNamespace:
+        def close() -> None:
+            closed.append(name)
+            raise RuntimeError(name)
+
+        return SimpleNamespace(close=close)
+
+    simulation = SimpleNamespace(reporters=[failing("first"), failing("second")])
+
+    with pytest.raises(RuntimeError, match="^first$"):
+        nqe_openmm._close_output_reporters(simulation, suppress_errors=False)
+
+    assert closed == ["first", "second"]
+
+
+# ---------------------------------------------------------------------------
+# RPMD restart: refusing to save or load what cannot be trusted
+# ---------------------------------------------------------------------------
+
+
+def test_rpmd_save_rejects_a_bead_count_the_integrator_disagrees_with(tmp_path: Path) -> None:
+    simulation = _make_rpmd_restart_simulation()
+
+    with pytest.raises(ValueError, match="n_beads=3 does not match RPMDIntegrator copies=2"):
+        nqe_openmm._save_rpmd_restart(simulation, tmp_path / "x.chk", n_beads=3)
+
+    assert not (tmp_path / "x.chk").exists()
+
+
+def test_rpmd_save_rejects_a_topology_that_does_not_match_the_system(tmp_path: Path) -> None:
+    simulation = _make_rpmd_restart_simulation()
+    residue = next(simulation.topology.residues())
+    simulation.topology.addAtom("Extra", app.Element.getBySymbol("Ar"), residue)
+
+    with pytest.raises(ValueError, match="Topology atom count does not match"):
+        nqe_openmm._save_rpmd_restart(simulation, tmp_path / "x.chk", n_beads=2)
+
+
+def _fake_rpmd_simulation(positions: Any, velocities: Any) -> SimpleNamespace:
+    """One bead of one argon whose state arrays are whatever the test says."""
+    topology = app.Topology()
+    residue = topology.addResidue("AR", topology.addChain())
+    topology.addAtom("Ar", app.Element.getBySymbol("Ar"), residue)
+    system = openmm.System()
+    system.addParticle(39.9 * unit.dalton)
+    state = SimpleNamespace(
+        getPositions=lambda asNumpy=False: np.asarray(positions, dtype=float) * unit.nanometer,
+        getVelocities=lambda asNumpy=False: (
+            np.asarray(velocities, dtype=float) * unit.nanometer / unit.picosecond
+        ),
+        getPeriodicBoxVectors=lambda asNumpy=False: np.eye(3) * unit.nanometer,
+        getTime=lambda: 0.0 * unit.picosecond,
+    )
+    integrator = SimpleNamespace(
+        getNumCopies=lambda: 1,
+        getTemperature=lambda: 300.0 * unit.kelvin,
+        getState=lambda bead, **kwargs: state,
+    )
+    return SimpleNamespace(
+        topology=topology, system=system, integrator=integrator, currentStep=0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("positions", "velocities", "message"),
+    [
+        ([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], [[0.0, 0.0, 0.0]], "position shape"),
+        ([[0.0, 0.0, 0.0]], [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]], "velocity shape"),
+        ([[np.nan, 0.0, 0.0]], [[0.0, 0.0, 0.0]], "bead positions are not finite"),
+        ([[0.0, 0.0, 0.0]], [[np.inf, 0.0, 0.0]], "bead velocities are not finite"),
+    ],
+)
+def test_rpmd_save_rejects_malformed_bead_states(
+    tmp_path: Path, positions: Any, velocities: Any, message: str,
+) -> None:
+    simulation = _fake_rpmd_simulation(positions, velocities)
+
+    with pytest.raises(ValueError, match=message):
+        nqe_openmm._save_rpmd_restart(simulation, tmp_path / "x.chk", n_beads=1)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_rpmd_save_removes_its_temporary_file_when_writing_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    simulation = _make_rpmd_restart_simulation()
+
+    def fail(*args: Any, **kwargs: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(nqe_openmm.np, "savez", fail)
+
+    with pytest.raises(OSError, match="disk full"):
+        nqe_openmm._save_rpmd_restart(simulation, tmp_path / "x.chk", n_beads=2)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_rpmd_restart_rejects_an_archive_that_is_not_npz(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "plain.npy"
+    np.save(checkpoint, np.zeros(3))
+
+    with pytest.raises(ValueError, match="not an NPZ archive"):
+        nqe_openmm._read_rpmd_restart(checkpoint)
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        (
+            {"kind": np.asarray(nqe_openmm._RPMD_RESTART_KIND)},
+            "missing fields: format_version",
+        ),
+        (
+            {
+                "kind": np.asarray("something-else"),
+                "format_version": np.asarray(nqe_openmm._RPMD_RESTART_VERSION, dtype=np.int64),
+            },
+            "not an openmmnqe RPMD restart",
+        ),
+        (
+            {
+                "kind": np.asarray(nqe_openmm._RPMD_RESTART_KIND),
+                "format_version": np.asarray(nqe_openmm._RPMD_RESTART_VERSION + 1, dtype=np.int64),
+            },
+            f"Unsupported RPMD restart version {nqe_openmm._RPMD_RESTART_VERSION + 1}",
+        ),
+        (
+            {
+                "kind": np.asarray(nqe_openmm._RPMD_RESTART_KIND),
+                "format_version": np.asarray(nqe_openmm._RPMD_RESTART_VERSION, dtype=np.int64),
+            },
+            "missing fields: box_vectors_nm, num_beads, num_particles",
+        ),
+    ],
+)
+def test_rpmd_restart_rejects_header_schema_violations(
+    tmp_path: Path, fields: dict[str, np.ndarray], message: str,
+) -> None:
+    checkpoint = tmp_path / "bad.chk"
+    with checkpoint.open("wb") as handle:
+        np.savez(handle, **fields)
+
+    with pytest.raises(ValueError, match=message):
+        nqe_openmm._read_rpmd_restart(checkpoint)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("num_particles", np.asarray(-1, dtype=np.int64), "num_particles cannot be negative"),
+        ("step_count", np.asarray(-1, dtype=np.int64), "step count cannot be negative"),
+        ("topology_signature_sha256", np.asarray("Z" * 64), "64 lowercase hexadecimal"),
+        ("topology_signature_sha256", np.asarray("abc"), "64 lowercase hexadecimal"),
+    ],
+)
+def test_rpmd_restart_rejects_out_of_domain_metadata(
+    tmp_path: Path, field: str, value: np.ndarray, message: str,
+) -> None:
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+    _replace_test_restart_fields(checkpoint, **{field: value})
+
+    with pytest.raises(ValueError, match=message):
+        nqe_openmm._read_rpmd_restart(checkpoint)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "num_particles",
+            np.asarray(2, dtype=np.int64),
+            "contains 2 particles, but the current System contains 1",
+        ),
+        ("particle_masses_dalton", np.asarray([39.9, 39.9]), "particle masses have shape"),
+        ("particle_masses_dalton", np.asarray([np.nan]), "masses contain non-finite"),
+        ("particle_masses_dalton", np.asarray([-39.9]), "masses cannot be negative"),
+        ("temperature_kelvin", np.asarray(np.nan), "temperature is not finite"),
+        ("positions_nm", np.zeros((2, 2, 3)), "positions have shape"),
+        ("velocities_nm_per_ps", np.zeros((2, 2, 3)), "velocities have shape"),
+        ("box_vectors_nm", np.zeros((2, 3)), "box has shape"),
+        ("periodic", np.asarray(False), "periodicity does not match"),
+        ("positions_nm", np.full((2, 1, 3), np.nan), "positions_nm contains non-finite"),
+        ("time_ps", np.asarray(np.nan), "time is not finite"),
+    ],
+)
+def test_rpmd_load_refuses_a_restart_that_disagrees_with_the_simulation(
+    tmp_path: Path, field: str, value: np.ndarray, message: str,
+) -> None:
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+    _replace_test_restart_fields(checkpoint, **{field: value})
+    restored = _make_rpmd_restart_simulation()
+
+    with pytest.raises(ValueError, match=message):
+        nqe_openmm._load_rpmd_restart(restored, checkpoint, n_beads=2)
+
+
+def test_rpmd_load_rejects_an_integrator_with_a_different_copy_count(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+    restored = _make_rpmd_restart_simulation(num_beads=3)
+
+    with pytest.raises(ValueError, match="n_beads=2 does not match RPMDIntegrator copies=3"):
+        nqe_openmm._load_rpmd_restart(restored, checkpoint, n_beads=2)
+
+
+def test_rpmd_load_rejects_a_current_topology_that_does_not_match_its_system(
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "rpmd_ready.chk"
+    _write_test_rpmd_restart(checkpoint)
+    restored = _make_rpmd_restart_simulation()
+    residue = next(restored.topology.residues())
+    restored.topology.addAtom("Extra", app.Element.getBySymbol("Ar"), residue)
+
+    with pytest.raises(ValueError, match="Current Topology atom count does not match"):
+        nqe_openmm._load_rpmd_restart(restored, checkpoint, n_beads=2)

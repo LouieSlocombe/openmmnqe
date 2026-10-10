@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -567,3 +568,280 @@ def test_selection_writers_share_topology_order_and_ignore_absent_indices(
     assert np.array_equal(
         modeller.positions.value_in_unit(unit.nanometer), original_positions,
     )
+
+
+def test_xyz_to_sdf_ignores_trailing_blank_lines(tmp_path: Path) -> None:
+    source = tmp_path / "trailing.xyz"
+    source.write_text(
+        "3\nwater\nO 0 0 0\nH 0.9572 0 0\nH -0.24 0.927 0\n\n\n   \n"
+    )
+
+    count = nqe.xyz_to_sdf(source, tmp_path / "trailing.sdf")
+    molecules = list(Chem.SDMolSupplier(str(tmp_path / "trailing.sdf"), removeHs=False))
+
+    assert count == 1
+    assert molecules[0].GetNumAtoms() == 3
+    assert molecules[0].GetNumBonds() == 2
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [
+        ("1\n", "Unexpected EOF after atom count"),
+        ("1\ncomment\nH 0 0\n", "Bad XYZ atom line"),
+        (
+            "1\nfirst\nH 0 0 0\nnot-a-count\nsecond\nH 0 0 0\n",
+            "Expected atom count at line 4",
+        ),
+    ],
+)
+def test_xyz_to_sdf_names_the_malformed_frame(
+    tmp_path: Path, contents: str, message: str,
+) -> None:
+    source = tmp_path / "bad.xyz"
+    source.write_text(contents)
+
+    with pytest.raises(ValueError, match=message):
+        nqe.xyz_to_sdf(source, tmp_path / "bad.sdf")
+
+
+def test_xyz_to_sdf_kekulizes_aromatic_bonds_on_request(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The MOL block always carries Kekule bond orders, so the written file
+    # cannot show the difference; the SMILES the conversion prints can.
+    def printed_smiles(**kwargs: Any) -> str:
+        nqe.xyz_to_sdf(data_dir / "GC.xyz", tmp_path / "gc.sdf", **kwargs)
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("SMI:")]
+        assert len(lines) == 1
+        return lines[0].removeprefix("SMI:")
+
+    aromatic = printed_smiles()
+    kekulized = printed_smiles(kekulize=True)
+
+    assert ":" in aromatic
+    assert ":" not in kekulized
+    assert "=" in kekulized
+
+
+def test_xyz_to_sdf_tolerates_a_molecule_that_cannot_be_kekulized(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path, tmp_path: Path,
+) -> None:
+    def refuse(molecule: Chem.Mol, clearAromaticFlags: bool = False) -> None:
+        raise Chem.KekulizeException("no Kekule structure")
+
+    monkeypatch.setattr(nqe_io.Chem, "Kekulize", refuse)
+
+    count = nqe.xyz_to_sdf(data_dir / "GC.xyz", tmp_path / "gc.sdf", kekulize=True)
+
+    assert count == 1
+    assert (tmp_path / "gc.sdf").stat().st_size > 0
+
+
+def test_xyz_to_sdf_falls_back_to_partial_sanitisation(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path, tmp_path: Path,
+) -> None:
+    full_sanitize = nqe_io.Chem.SanitizeMol
+    calls: list[Any] = []
+
+    def sanitize(molecule: Chem.Mol, **kwargs: Any) -> Any:
+        calls.append(kwargs.get("sanitizeOps"))
+        if not kwargs:
+            raise Chem.AtomValenceException("valence rejected")
+        return full_sanitize(molecule, **kwargs)
+
+    monkeypatch.setattr(nqe_io.Chem, "SanitizeMol", sanitize)
+
+    count = nqe.xyz_to_sdf(data_dir / "GC.xyz", tmp_path / "gc.sdf")
+
+    assert count == 1
+    expected_partial = (
+        Chem.SanitizeFlags.SANITIZE_FINDRADICALS
+        | Chem.SanitizeFlags.SANITIZE_SETAROMATICITY
+        | Chem.SanitizeFlags.SANITIZE_SYMMRINGS
+    )
+    assert calls == [None, expected_partial]
+
+
+def _write_three_residue_pdb(path: Path) -> None:
+    """Two waters and an ammonia, so one relabel can hit twice and miss once."""
+    path.write_text(
+        "HETATM    1  O   HOH     1       0.000   0.000   0.000  1.00  0.00           O  \n"
+        "HETATM    2  O   HOH     2       3.000   0.000   0.000  1.00  0.00           O  \n"
+        "HETATM    3  N   AMM     3       6.000   0.000   0.000  1.00  0.00           N  \n"
+        "END\n"
+    )
+
+
+def test_relabel_residues_counts_repeats_and_leaves_other_names_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "three.pdb"
+    _write_three_residue_pdb(source)
+    output = tmp_path / "relabelled.pdb"
+
+    returned = nqe.relabel_residues_in_pdb(source, {"HOH": "LIG"}, output)
+
+    assert [residue.name for residue in returned.topology.residues()] == ["LIG", "LIG", "AMM"]
+    assert [
+        residue.name for residue in app.PDBFile(str(output)).topology.residues()
+    ] == ["LIG", "LIG", "AMM"]
+    assert "Relabeled 2 residues from 'HOH' to 'LIG'" in capsys.readouterr().out
+
+
+def test_relabel_residues_reports_when_nothing_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "three.pdb"
+    _write_three_residue_pdb(source)
+    output = tmp_path / "unchanged.pdb"
+
+    nqe.relabel_residues_in_pdb(source, {"ZZZ": "YYY"}, output)
+
+    assert [
+        residue.name for residue in app.PDBFile(str(output)).topology.residues()
+    ] == ["HOH", "HOH", "AMM"]
+    assert "No residues found matching the relabel map" in capsys.readouterr().out
+
+
+def test_remove_residues_writes_the_structure_unchanged_when_nothing_matches(
+    data_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    output = tmp_path / "unchanged.pdb"
+
+    nqe.remove_residues_in_pdb(data_dir / "pdb" / "malformed.pdb", output, "ZZZ")
+
+    residues = [residue.name for residue in app.PDBFile(str(output)).topology.residues()]
+    assert residues == ["HOH", "AMM"]
+    assert "No matching residues found to delete" in capsys.readouterr().out
+
+
+def test_convert_sdfs_to_pdb_rejects_no_inputs_or_a_missing_file(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "combined.pdb"
+
+    with pytest.raises(ValueError, match="No SDF input files"):
+        nqe.convert_sdfs_to_pdb([], output)
+    with pytest.raises(FileNotFoundError):
+        nqe.convert_sdfs_to_pdb(tmp_path / "absent.sdf", output)
+
+    assert not output.exists()
+
+
+def test_convert_sdfs_to_pdb_explains_a_supplier_that_cannot_open_the_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    source = tmp_path / "unreadable.sdf"
+    source.write_text("")
+    output = tmp_path / "combined.pdb"
+
+    def refuse(path: str, **kwargs: Any) -> None:
+        raise OSError("Invalid input file")
+
+    monkeypatch.setattr(nqe_io.Chem, "SDMolSupplier", refuse)
+
+    with pytest.raises(ValueError, match="empty or malformed"):
+        nqe.convert_sdfs_to_pdb(source, output)
+
+    assert not output.exists()
+
+
+def test_convert_sdfs_to_pdb_rejects_a_file_with_no_records(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    source = tmp_path / "blank.sdf"
+    source.write_text("")
+    output = tmp_path / "combined.pdb"
+    monkeypatch.setattr(nqe_io.Chem, "SDMolSupplier", lambda path, **kwargs: iter(()))
+
+    with pytest.raises(ValueError, match="no molecule records"):
+        nqe.convert_sdfs_to_pdb(source, output)
+
+    assert not output.exists()
+
+
+def test_convert_sdfs_to_pdb_places_a_molecule_without_coordinates_at_the_origin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "flat.sdf"
+    source.write_text("")
+    output = tmp_path / "combined.pdb"
+    flat = Chem.AddHs(Chem.MolFromSmiles("O"))
+    assert flat.GetNumConformers() == 0
+    monkeypatch.setattr(nqe_io.Chem, "SDMolSupplier", lambda path, **kwargs: iter([flat]))
+
+    nqe.convert_sdfs_to_pdb(source, output)
+
+    written = app.PDBFile(str(output))
+    assert written.topology.getNumAtoms() == 3
+    assert written.topology.getNumBonds() == 2
+    assert np.array_equal(
+        written.getPositions(asNumpy=True).value_in_unit(unit.nanometer),
+        np.zeros((3, 3)),
+    )
+    assert "has no 3D coordinates" in capsys.readouterr().out
+
+
+class _Vec3Like:
+    """Attribute and index access like Vec3, but opaque to numpy.
+
+    Without ``__len__`` numpy cannot size it, so ``np.asarray`` fails and
+    ``center_in_box`` has to take its attribute-access fallback.
+    """
+
+    def __init__(self, x: float, y: float, z: float) -> None:
+        self.x, self.y, self.z = x, y, z
+
+    def __getitem__(self, index: int) -> float:
+        return (self.x, self.y, self.z)[index]
+
+
+def test_center_in_box_falls_back_to_attribute_access_for_odd_positions() -> None:
+    topology = app.Topology()
+    topology.setUnitCellDimensions(unit.Quantity((4.0, 4.0, 4.0), unit.nanometer))
+    points = [_Vec3Like(0.0, 0.0, 0.0), _Vec3Like(2.0, 2.0, 2.0)]
+    with pytest.raises(ValueError):
+        np.asarray(points, dtype=float)
+    modeller = SimpleNamespace(
+        topology=topology,
+        positions=SimpleNamespace(value_in_unit=lambda target: list(points)),
+    )
+
+    nqe.center_in_box(modeller)
+
+    centred = modeller.positions.value_in_unit(unit.nanometer)
+    assert np.allclose(centred, [[1.0, 1.0, 1.0], [3.0, 3.0, 3.0]])
+
+
+def test_center_in_box_leaves_a_topology_without_box_support_alone() -> None:
+    original = SimpleNamespace(
+        value_in_unit=lambda target: [[0.0, 0.0, 0.0], [2.0, 2.0, 2.0]],
+    )
+    modeller = SimpleNamespace(topology=SimpleNamespace(), positions=original)
+
+    nqe.center_in_box(modeller)
+
+    assert modeller.positions is original
+
+
+def test_fix_pdb_atom_labels_derives_the_element_from_the_name_when_absent(
+    tmp_path: Path,
+) -> None:
+    # No element column: records trimmed short of column 77.
+    source = tmp_path / "no_elements.pdb"
+    source.write_text(
+        "ATOM      9  CA  LIG A   1       0.000   0.000   0.000  1.00  0.00\n"
+        "ATOM      8  HB1 LIG A   1       1.000   0.000   0.000  1.00  0.00\n"
+        "ATOM      7  1   LIG A   1       2.000   0.000   0.000  1.00  0.00\n"
+        "END\n"
+    )
+    output = tmp_path / "fixed.pdb"
+
+    nqe.fix_pdb_atom_labels(source, output)
+    records = [
+        line for line in output.read_text().splitlines() if line.startswith("ATOM  ")
+    ]
+
+    assert [int(line[6:11]) for line in records] == [1, 2, 3]
+    assert [line[12:16] for line in records] == ["CA1 ", "HB1 ", " X1 "]
