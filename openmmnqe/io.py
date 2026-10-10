@@ -54,7 +54,7 @@ import re
 import shutil
 import string
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TextIO
+from typing import Any, TextIO
 
 import numpy as np
 import openmm.unit as unit
@@ -689,6 +689,19 @@ def move_pdb_to_origin(input_pdb: str | os.PathLike[str],
         PDBFile.writeFile(pdb.topology, new_positions, f)
 
 
+def _coordinate(position: Any, name: str, index: int) -> float:
+    """Read one coordinate by attribute, or by index when there is none.
+
+    The attribute is looked up first on its own: a ``getattr`` default of
+    ``position[index]`` would be evaluated eagerly and fail on an object
+    that has the attribute but cannot be indexed.
+    """
+    value = getattr(position, name, None)
+    if value is None:
+        value = position[index]
+    return float(value)
+
+
 def center_in_box(modeller: Modeller) -> None:
     """
     Shift a system so its centroid sits at the centre of its periodic box.
@@ -713,10 +726,15 @@ def center_in_box(modeller: Modeller) -> None:
         if pos_nm.ndim != 2 or pos_nm.shape[1] != 3:
             raise ValueError
     except Exception:
-        # Fallback for position sequences that don't convert directly, e.g. Vec3 objects.
-        pos_nm = np.array([[getattr(p, 'x', p[0]),
-                            getattr(p, 'y', p[1]),
-                            getattr(p, 'z', p[2])] for p in pos_list], dtype=float)
+        # Fallback for position sequences numpy cannot coerce: read one
+        # coordinate at a time, by attribute or, failing that, by index.
+        pos_nm = np.array(
+            [
+                [_coordinate(p, "x", 0), _coordinate(p, "y", 1), _coordinate(p, "z", 2)]
+                for p in pos_list
+            ],
+            dtype=float,
+        )
 
     centroid = pos_nm.mean(axis=0)
     box_center = None

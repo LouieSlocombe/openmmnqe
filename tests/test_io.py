@@ -787,7 +787,7 @@ class _Vec3Like:
     """Attribute and index access like Vec3, but opaque to numpy.
 
     Without ``__len__`` numpy cannot size it, so ``np.asarray`` fails and
-    ``center_in_box`` has to take its attribute-access fallback.
+    ``center_in_box`` has to take its coordinate-by-coordinate fallback.
     """
 
     def __init__(self, x: float, y: float, z: float) -> None:
@@ -797,11 +797,34 @@ class _Vec3Like:
         return (self.x, self.y, self.z)[index]
 
 
-def test_center_in_box_falls_back_to_attribute_access_for_odd_positions() -> None:
+class _AttributePoint:
+    """Only ``.x``, ``.y`` and ``.z``: indexing it raises."""
+
+    def __init__(self, x: float, y: float, z: float) -> None:
+        self.x, self.y, self.z = x, y, z
+
+
+class _IndexPoint:
+    """Only ``__getitem__``, and no ``__len__`` for numpy to size it by."""
+
+    def __init__(self, x: float, y: float, z: float) -> None:
+        self._values = (x, y, z)
+
+    def __getitem__(self, index: int) -> float:
+        return self._values[index]
+
+
+@pytest.mark.parametrize(
+    "point_type", [_Vec3Like, _AttributePoint, _IndexPoint],
+    ids=["attributes and index", "attributes only", "index only"],
+)
+def test_center_in_box_falls_back_to_reading_odd_positions_one_coordinate_at_a_time(
+    point_type: type,
+) -> None:
     topology = app.Topology()
     topology.setUnitCellDimensions(unit.Quantity((4.0, 4.0, 4.0), unit.nanometer))
-    points = [_Vec3Like(0.0, 0.0, 0.0), _Vec3Like(2.0, 2.0, 2.0)]
-    with pytest.raises(ValueError):
+    points = [point_type(0.0, 0.0, 0.0), point_type(2.0, 2.0, 2.0)]
+    with pytest.raises((TypeError, ValueError)):
         np.asarray(points, dtype=float)
     modeller = SimpleNamespace(
         topology=topology,
