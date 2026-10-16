@@ -68,7 +68,7 @@ def test_backbone_restraint_matches_periodic_quadratic_energy_and_force(
 
 
 @pytest.mark.parametrize("selection", [None, [], ["UNMATCHED"]])
-def test_relaxation_preserves_reference_access_and_legacy_units(
+def test_relaxation_preserves_reference_access_and_bare_units(
     monkeypatch: pytest.MonkeyPatch, selection: list[str] | None,
 ) -> None:
     topology = _topology()
@@ -92,8 +92,8 @@ def test_relaxation_preserves_reference_access_and_legacy_units(
     stages.run_openmm_relaxation(modeller, object(), backbone_names=selection)
 
     restraint = system.getForce(0)
-    # Historically relaxation strips the quantity before passing coordinates
-    # to OpenMM; this consolidation must not silently fix that separate issue.
+    # Relaxation strips the quantity before passing coordinates to OpenMM, so
+    # the restraint sees the input's own numbers rather than nanometres.
     if selection is None:
         assert restraint.getParticleParameters(0)[1] == (1.0, 2.0, 3.0)
         assert restraint.getParticleParameters(1)[1] == (7.0, 8.0, 9.0)

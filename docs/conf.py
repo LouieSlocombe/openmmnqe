@@ -22,8 +22,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Import openmmnqe from the checkout: nothing installs the package, and the
 # checkout must win over any openmmnqe already in the ambient environment.
-# ``build/lib/openmmnqe`` (a stale setuptools copy) is never reachable, because
-# the repository root, not ``build/lib``, is what goes on the path.
 sys.path.insert(0, str(_REPO_ROOT))
 
 with (_REPO_ROOT / "pyproject.toml").open("rb") as _pyproject:
@@ -86,8 +84,6 @@ extensions = [
 source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 root_doc = "index"
 
-# Relative to this directory. The repository-root ``build/`` tree is not
-# reachable from here at all, so it needs no pattern.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 

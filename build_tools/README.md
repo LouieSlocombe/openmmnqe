@@ -84,25 +84,15 @@ Set `SRC_DIR` to keep them elsewhere. A checkout that is already there is used e
 as it is — the installer never pulls, resets or removes one, so uncommitted work is safe
 across a rebuild. Only a missing one is cloned.
 
-`geodesic_interpolate` and `sella` used to be cloned here as well, because
-`reactiontools` declared them. It carries both itself as of its 1.0.0, as
-`reactiontools.tools_geodesic` and `reactiontools.tools_sella`, so a checkout of either
-would now only add a copy that nothing imports.
-
-The editable installs still run **after** `pip install -e ..`: pip resolves both
-releases from PyPI on the way to installing `openmmnqe`, and the editable installs then
-take their place. Only the cost of that order changed with the releases — while the two
-were declared as `name @ git+...`, pip re-cloned them over an editable install that was
-already there, and this was the only order that worked at all. Every installer finishes
-by checking each one imports from its checkout rather than from `site-packages`.
+The editable installs run **after** `pip install -e ..`: pip resolves both releases
+from PyPI on the way to installing `openmmnqe`, and the editable installs then take
+their place. Every installer finishes by checking each one imports from its checkout
+rather than from `site-packages`.
 
 `environment_ci.yml` is the exception: a GitHub runner has only this repository checked
 out, so CI installs `forcefill==1.0.0` and `reactiontools==1.0.0` from PyPI — the floors
-`pyproject.toml` declares, tested the way OpenMM 8.6.1 and OpenMM-ML 1.8 are. The `git+`
-entries they replace tracked each repository's default branch, which made a failure here
-the signal that a sibling had moved; a sibling release now arrives deliberately instead,
-by raising the floor and this pin together. Within a checkout, `pip show forcefill`
-against its `pyproject.toml` still tells a stale editable install from a current one.
+`pyproject.toml` declares, tested the way OpenMM 8.6.1 and OpenMM-ML 1.8 are. A sibling
+release reaches this project by raising the floor and that pin together.
 
 CI pins OpenMM to 8.6.1 and OpenMM-ML to 1.8 to test the minimum supported
 releases and builds PLUMED and its bindings with the same shared build functions

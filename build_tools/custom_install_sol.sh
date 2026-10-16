@@ -78,7 +78,7 @@ echo "=== Installing openmmnqe (editable) ==="
 clone_repo "ssh://git@github.com/LouieSlocombe/openmmnqe.git" "${SRC_DIR}/${ENV_NAME}"
 pip3 install -e "${SRC_DIR}/${ENV_NAME}"
 
-# After openmmnqe, which drags its own copies of these in from git.
+# After openmmnqe, whose install pulls both releases in from PyPI.
 install_editable_repos "${SRC_DIR}"
 
 echo "=== Verifying Installation ==="

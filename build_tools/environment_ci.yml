@@ -45,10 +45,8 @@ dependencies:
   - pip:
       - torch-dftd
       # Pinned to the floors pyproject.toml declares, so CI tests the oldest
-      # supported release of each the way it already does for OpenMM. Both were
-      # `git+https://...` entries tracking a default branch until 1.0.0, which
-      # made CI here the integration signal that a sibling had moved; now a
-      # sibling release reaches this project by raising the floor in
-      # pyproject.toml and the pin here together.
+      # supported release of each the way it already does for OpenMM. A sibling
+      # release reaches this project by raising the floor in pyproject.toml and
+      # the pin here together.
       - forcefill==1.0.0
       - reactiontools==1.0.0

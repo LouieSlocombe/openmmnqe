@@ -2414,8 +2414,8 @@ def run_openmm_relaxation(
                                      potential, ml_idx, calculator)
 
     current_positions = modeller.positions
-    # Preserve this stage's historical component extraction: unlike the MD
-    # stages it passes bare reference coordinates, even for non-nm inputs.
+    # Unlike the MD stages, this one passes bare reference coordinates, even
+    # for non-nm inputs.
     if backbone_names is None:
         backbone_names = list(_DEFAULT_BACKBONE_NAMES)
     reference_positions = {}

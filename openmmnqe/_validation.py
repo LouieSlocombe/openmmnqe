@@ -112,7 +112,7 @@ def require_whole_steps(duration_ps: float, step_size_ps: float, *,
 def require_seed(seed: object) -> int | None:
     """Validate a NumPy/OpenMM master seed without changing stream derivation.
 
-    These entry points historically raise ValueError for all invalid seeds;
+    Seed arguments raise ValueError for every invalid value, where
     require_integer has a different type/error contract.
     """
     if seed is None:

@@ -351,10 +351,9 @@ def _ring_spring_energy(bead_positions_nm: npt.NDArray[np.float64],
     with the bead index taken modulo ``P``.  Massless particles drop out on
     their own, so virtual sites and frozen atoms need no masking.
 
-    Before OpenMM 8.6.1, ``RPMDIntegrator.getTotalEnergy()`` could deadlock
-    on CUDA or OpenCL when a ``PythonForce`` worker needed the GIL held by
-    the caller. OpenMM 8.6.1 disables that worker-thread path. Reconstructing
-    the ring energy still lets the reporters reuse their existing bead pass.
+    Reconstructing the ring energy from bead positions lets the reporters
+    reuse their existing bead pass instead of asking
+    ``RPMDIntegrator.getTotalEnergy()`` for a second one.
 
     Parameters
     ----------

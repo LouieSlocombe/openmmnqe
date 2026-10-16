@@ -56,7 +56,7 @@ build_py_plumed "${WORK_DIR}"
 echo "=== Installing openmmnqe (editable) ==="
 pip install -e "${REPO_DIR}"
 
-# After openmmnqe, which drags its own copies of these in from git.
+# After openmmnqe, whose install pulls both releases in from PyPI.
 install_editable_repos "${SRC_DIR}"
 
 echo "=== Verifying Installation ==="

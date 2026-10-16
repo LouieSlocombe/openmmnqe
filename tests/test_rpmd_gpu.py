@@ -1,18 +1,12 @@
 """
 GPU-only guards for the RPMD reporters on a mixed ML/MM System.
 
-The historical bug covered here occurred before OpenMM 8.6.1 on GPU platforms.
 ``MLPotential.createMixedSystem`` attaches the ML model as an
-``openmm.PythonForce``, so every force evaluation re-enters Python. CUDA and
-OpenCL used to evaluate it on a worker thread, while
-``RPMDIntegrator.getTotalEnergy()`` held the GIL. The worker could not enter
-the callback, so a run hung when a report fell due. OpenMM 8.6.1 disables the
-worker-thread path for ``PythonForce``; these tests still guard GPU reporting.
-
-Each case runs in a subprocess under a timeout, so a regression fails the
-suite instead of hanging it.  ``tests/test_reporters.py`` carries the
-platform-independent half of the guard: a test double whose
-``getTotalEnergy`` raises.
+``openmm.PythonForce``, so every force evaluation re-enters Python from the
+platform's own threads. Each case runs in a subprocess under a timeout, so a
+report path that blocks on the GIL fails the suite instead of hanging it.
+``tests/test_reporters.py`` carries the platform-independent half of the
+guard: a test double whose ``getTotalEnergy`` raises.
 """
 
 from __future__ import annotations
@@ -189,8 +183,7 @@ def _run(tmp_path: Path, body: str) -> None:
 def test_thermodynamic_reporter_reports_on_a_python_force_system(
     tmp_path: Path,
 ) -> None:
-    # The bug as reported: one report falling due on a mixed ML/MM system was
-    # enough to stop a run dead.
+    # One report falling due on a mixed ML/MM system must not stop the run.
     _run(tmp_path, """
         simulation = build()
         step_rpmd(simulation, 5)

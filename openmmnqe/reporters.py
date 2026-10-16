@@ -1720,12 +1720,10 @@ def _rpmd_ring_energies(integrator: openmm.RPMDIntegrator,
     """
     Ring-polymer Hamiltonian and its spring term, without ``getTotalEnergy``.
 
-    Before OpenMM 8.6.1, ``RPMDIntegrator.getTotalEnergy()`` could deadlock
-    on CUDA or OpenCL when a ``PythonForce`` worker needed the GIL held by
-    the caller. OpenMM 8.6.1 disables that worker-thread path. These energies
-    still reuse the states collected in the thermodynamic bead pass: the bead
-    kinetic and potential energies OpenMM reports per copy, plus the springs
-    linking neighbouring copies.
+    These energies reuse the states collected in the thermodynamic bead pass:
+    the bead kinetic and potential energies OpenMM reports per copy, plus the
+    springs linking neighbouring copies. ``RPMDIntegrator.getTotalEnergy()``
+    would cost a second pass over the beads for the same numbers.
 
     Parameters
     ----------
@@ -1914,13 +1912,11 @@ def rpmd_thermodynamics(simulation: app.Simulation, *,
     the thermostat has taken hold, the first covering all ``P`` copies and the
     second the centroid mode alone.
 
-    ``energy_ring`` is reconstructed rather than read from
-    ``RPMDIntegrator.getTotalEnergy()``, which agrees with it to within one
-    part in a million. Before OpenMM 8.6.1, that method could deadlock on
-    CUDA or OpenCL when a ``PythonForce`` worker needed the GIL held by the
-    caller. The reconstruction still reuses the states read for the other
-    observables. It assumes that OpenMM links neighbouring copies with springs of
-    angular frequency ``P k_B T / hbar`` -- which
+    ``energy_ring`` is reconstructed from the states read for the other
+    observables rather than read from ``RPMDIntegrator.getTotalEnergy()``,
+    which agrees with it to within one part in a million. The reconstruction
+    assumes that OpenMM links neighbouring copies with springs of angular
+    frequency ``P k_B T / hbar`` -- which
     ``test_reported_ring_energy_matches_openmm_get_total_energy`` pins
     against OpenMM itself.
 

@@ -8,12 +8,6 @@
 
 # name=url pairs, in install order. The name is both the directory the repo is
 # cloned into and the module the install is checked against.
-#
-# geodesic_interpolate and sella used to follow reactiontools here, because it
-# declared both as `name @ git+...` dependencies and pip re-fetched them over
-# any editable install. reactiontools carries the code itself as of its 1.0.0,
-# in reactiontools.tools_geodesic and reactiontools.tools_sella, so cloning
-# either would now install a copy that nothing imports.
 EDITABLE_REPOS=(
     "forcefill=https://github.com/LouieSlocombe/forcefill.git"
     "reactiontools=https://github.com/LouieSlocombe/reactiontools.git"
@@ -39,13 +33,9 @@ clone_repo() {
 }
 
 # install_editable_repos <src_dir>
-# Clones each sibling package into <src_dir> and installs it editable. It still
-# runs *after* openmmnqe itself, as it always has: pip resolves both releases
-# from PyPI on the way to installing openmmnqe, and the editable installs then
-# take their place. Only the cost of that changed with the releases -- while the
-# two were `name @ git+...` requirements, pip re-cloned them even when an
-# editable install was already there, and this order was the only one that
-# worked.
+# Clones each sibling package into <src_dir> and installs it editable. It runs
+# *after* openmmnqe itself: pip resolves both releases from PyPI on the way to
+# installing openmmnqe, and the editable installs then take their place.
 install_editable_repos() {
     local src_dir="$1"
     local entry name url
