@@ -123,13 +123,15 @@ Or run it directly from an interactive session:
 interactive -t 60 -p htc -c 12 --mem=128G -G a100:1
 ```
 
-Once installed, `sub_sol_run.sh` runs a single simulation script inside that environment:
+Once installed, `sub_sol_run.sh` runs one simulation script inside that environment, from
+the directory the job is submitted in. Submit from the repository root so the examples can
+find their inputs under `tests/data/`:
 
 ```bash
-sbatch sub_sol_run.sh 1_minimise.py
+sbatch build_tools/sub_sol_run.sh examples/workflows.py gc_pt_solvated
 ```
 
-It defaults to `gc.py` if no script is given. For multi-stage runs, chain the stages
+Without arguments it runs exactly that workflow. For multi-stage runs, chain the stages
 together in one job with a `run.sh` that calls each script in turn.
 
 ## Source build
@@ -182,5 +184,7 @@ environment without OpenMM.
 
 ## Next steps
 
-Worked examples live in `examples/`: `gc.py` (guanine-cytosine) and `ma.py`
-(malonaldehyde) each run a single-file proton-transfer workflow end to end.
+Worked examples live in `examples/`. `python examples/workflows.py --help` lists the
+proton-transfer workflows; `gc_pt_solvated` (guanine-cytosine) and
+`malonaldehyde_pathmsd` each run one end to end, from parameterisation to the
+free-energy surface.

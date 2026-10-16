@@ -11,16 +11,21 @@
 #SBATCH -e run.out
 #SBATCH --export=NONE
 
-# Runs a single simulation script in the openmmnqe environment:
-#   sbatch sub_sol_run.sh [script.py]
+# Runs one simulation script in the openmmnqe environment, from the directory
+# the job was submitted in. Submit from the repository root, so the examples
+# can find their inputs under tests/data/:
+#   sbatch build_tools/sub_sol_run.sh examples/workflows.py gc_pt_solvated
+# Without arguments it runs exactly that workflow.
 
 set -eo pipefail
 
 ENV_NAME="openmmnqe"
-PY_SCRIPT="${1:-gc.py}"
+if [ "$#" -eq 0 ]; then
+    set -- examples/workflows.py gc_pt_solvated
+fi
 
 module load cuda-13.0.1-gcc-13.2.0
 module load mamba/latest
 source activate "${ENV_NAME}"
 
-python3 "${PY_SCRIPT}" >> py.out 2>&1
+python3 "$@" >> py.out 2>&1

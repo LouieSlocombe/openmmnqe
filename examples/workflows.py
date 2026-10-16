@@ -734,10 +734,10 @@ def run_fad_pt_solvated() -> None:
 
 
 def run_gc_pt_solvated() -> None:
-    """Guanine-cytosine double proton transfer, on the same two-proton CV."""
+    """Guanine-cytosine double proton transfer, with OPES on the same two-proton CV."""
     print(flush=True)
     temperature = 300.0 * unit.kelvin
-    steps_prod = 40_000
+    steps_prod = 50_000
 
     input_pdb = 'tests/data/pdb/gc.pdb'
     potential = MLPotential('mace-off23-small')  # mace-off23-large mace-off23-small
@@ -770,8 +770,9 @@ def run_gc_pt_solvated() -> None:
                                                            idx2,
                                                            temperature,
                                                            wall=1.0,
-                                                           height=20.0,
-                                                           bias=10.0)
+                                                           height=40.0,
+                                                           bias=10.0,
+                                                           f_opes=True)
 
     plumed_script_path = "plumed.dat"
     with open(plumed_script_path, 'w') as f:
@@ -787,15 +788,17 @@ def run_gc_pt_solvated() -> None:
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    rt.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", filename="fes", show=True)
 
-    rt.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", filename="colvar", show=True)
 
     nqe.remove_file_pattern('minimized*')
     nqe.remove_file_pattern('prod*')
 
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
+    nqe.remove_file('KERNELS')
+    nqe.remove_file('STATE')
     nqe.remove_file('fes.dat')
     nqe.remove_file('plumed.dat')
 
@@ -878,7 +881,11 @@ def run_gc_pt_quantum_solvated() -> None:
 
 
 def run_malonaldehyde_pathmsd() -> None:
-    """Bias malonaldehyde along a NEB reference path with PATHMSD rather than a bond CV."""
+    """Bias malonaldehyde along a NEB reference path with PATHMSD rather than a bond CV.
+
+    The path is built from the relaxed structure; heating and NPT then run
+    before the biased production, as for the other solvated transfers.
+    """
     print(flush=True)
     temperature = 300.0 * unit.kelvin
     steps_prod = 100_000
@@ -927,6 +934,22 @@ def run_malonaldehyde_pathmsd() -> None:
     rt.pdb_remove_ter_index("minimized.pdb", "minimized.pdb")
     pdb = app.PDBFile("minimized.pdb")
     modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_heating(modeller,
+                           forcefield,
+                           potential=potential,
+                           ml_idx=ml_atoms,
+                           target_temp=temperature)
+
+    pdb = app.PDBFile("equilibrate.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
+    nqe.run_openmm_npt(modeller,
+                       forcefield,
+                       potential=potential,
+                       ml_idx=ml_atoms,
+                       temperature=temperature)
+
+    pdb = app.PDBFile("npt_equilibrate.pdb")
+    modeller = app.Modeller(pdb.topology, pdb.positions)
     plumed_input, sum_hills_input = rt.plumed_input_neb_path(temperature,
                                                              grid_min=0.0,
                                                              grid_max=6.0,
@@ -947,11 +970,13 @@ def run_malonaldehyde_pathmsd() -> None:
                         ml_idx=ml_atoms)
 
     os.system(sum_hills_input)
-    rt.plot_plumed_fes("fes.dat", show=True)
+    rt.plot_plumed_fes("fes.dat", filename="fes", show=True)
 
-    rt.plot_plumed_colvar("COLVAR", show=True)
+    rt.plot_plumed_colvar("COLVAR", filename="colvar", show=True)
 
     nqe.remove_file_pattern('minimized*')
+    nqe.remove_file_pattern('equilibrate*')
+    nqe.remove_file_pattern('npt_equilibrate*')
     nqe.remove_file('COLVAR')
     nqe.remove_file('HILLS')
     nqe.remove_file('KERNELS')
