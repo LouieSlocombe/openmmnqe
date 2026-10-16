@@ -4,15 +4,21 @@
 % for the code path you actually ran: a plain MM production run needs far less
 % than an RPMD + OPES + PATHMSD study on a MACE-OFF potential.
 %
-%   openmmnqe/openmm.py    simulation stages, integrators, barostats, ML/MM
-%   openmmnqe/plumed.py    collective variables and enhanced sampling
-%   openmmnqe/opes/        FES reconstruction from OPES states / reweighting
-%   openmmnqe/path.py      reference paths for path collective variables
-%   openmmnqe/io.py        system preparation and ligand parameterisation
-%   openmmnqe/tools.py     setup utilities (isotope substitution, bead init)
+%   openmmnqe/openmm.py     simulation stages, integrators, barostats, ML/MM,
+%                           PLUMED biasing and steered MD
+%   openmmnqe/reporters.py  ring-polymer reporters and estimators
+%   openmmnqe/rates.py      recrossing trajectories and rate constants
+%   openmmnqe/adqtb.py      adQTB verification
+%   openmmnqe/isotopes.py   equilibrium isotope effects
+%   openmmnqe/walkers.py    independent OPES walkers
+%   openmmnqe/io.py         system preparation
+%   openmmnqe/tools.py      setup utilities (isotope substitution, bead init)
 %
-% Reaction paths (NEB, transition states, IRC), ORCA and free-energy-surface
-% plotting live in reactiontools -- see its CITATIONS.bib for those.
+% Reaction paths (NEB, transition states, IRC), the collective variables, ORCA
+% and free-energy-surface plotting live in reactiontools -- see its
+% CITATIONS.bib for those. Ligand parameterisation runs through forcefill,
+% which carries no citation file, so the GAFF, AM1-BCC and SMIRNOFF references
+% it relies on stay here.
 
 
 % =====================================================================
@@ -436,7 +442,8 @@
 
 
 % =====================================================================
-% Force fields and system preparation (openmmnqe/io.py)
+% Force fields, ligand parameterisation (via forcefill) and system
+% preparation (openmmnqe/io.py)
 % =====================================================================
 
 @article{maier2015ff14sb,
@@ -508,7 +515,7 @@
   pages   = {1157--1174},
   year    = {2004},
   doi     = {10.1002/jcc.20035},
-  note    = {GAFF; \texttt{prepare\_ligand\_ff} defaults to \texttt{gaff-2.11}}
+  note    = {GAFF2, the backend \texttt{forcefill.build\_forcefield\_xml} parameterises ligands with}
 }
 
 @article{jakalian2000fast,
@@ -520,7 +527,7 @@
   pages   = {132--146},
   year    = {2000},
   doi     = {10.1002/(SICI)1096-987X(20000130)21:2<132::AID-JCC5>3.0.CO;2-P},
-  note    = {\texttt{pc\_method='am1bcc'}}
+  note    = {AM1-BCC partial charges, forcefill's default}
 }
 
 @article{jakalian2002fast,
@@ -543,21 +550,21 @@
   pages   = {490--519},
   year    = {1996},
   doi     = {10.1002/(SICI)1096-987X(199604)17:5/6<490::AID-JCC1>3.0.CO;2-P},
-  note    = {Default \texttt{pc\_method='mmff94'} in \texttt{prepare\_ligand\_ff}}
+  note    = {MMFF94, used by forcefill's ligand preparation}
 }
 
 @misc{openmmforcefields,
   author       = {Chodera, John D. and Rodr{\'i}guez-Guerra, Jaime and Wang, Yuanqing and Eastman, Peter and others},
   title        = {{openmmforcefields}: Additional Force Fields for {OpenMM}},
   howpublished = {\url{https://github.com/openmm/openmmforcefields}},
-  note         = {Software; provides \texttt{GAFFTemplateGenerator}}
+  note         = {Software; forcefill's SMIRNOFF template generator}
 }
 
 @misc{openfftoolkit,
   author       = {Wagner, Jeffrey and Thompson, Matthew W. and Dotson, David L. and Mitchell, Josh A. and others},
   title        = {The {Open} {Force} {Field} Toolkit},
   howpublished = {\url{https://github.com/openforcefield/openff-toolkit}},
-  note         = {Software; \texttt{openff.toolkit.Molecule} and partial-charge assignment}
+  note         = {Software; forcefill's molecule handling and partial-charge assignment}
 }
 
 @misc{pdbfixer,
@@ -576,7 +583,8 @@
 
 
 % =====================================================================
-% Enhanced sampling: PLUMED (openmmnqe/plumed.py)
+% Enhanced sampling: PLUMED (the PlumedForce every biased stage attaches;
+% the collective variables come from reactiontools)
 % =====================================================================
 
 @article{tribello2014plumed2,
@@ -663,7 +671,7 @@
   author       = {Invernizzi, Michele},
   title        = {{OPES} Post-Processing Scripts},
   howpublished = {\url{https://github.com/invemichele/opes}},
-  note         = {Origin of \texttt{openmmnqe/opes/FES\_from\_State.py}, \texttt{FES\_from\_Reweighting.py} and \texttt{State\_from\_Kernels.py}}
+  note         = {Origin of the FES reconstruction scripts behind \texttt{reactiontools.run\_opes\_reweighting}, which \texttt{openmmnqe.walkers} combines walkers through}
 }
 
 @article{branduardi2007atob,
@@ -687,7 +695,7 @@
   pages   = {238302},
   year    = {2003},
   doi     = {10.1103/PhysRevLett.90.238302},
-  note    = {Coordination-number CVs for bond making/breaking, as used by the proton-transfer CVs here}
+  note    = {Coordination-number CVs for bond making/breaking, behind the reactiontools proton-transfer CVs these stages bias along}
 }
 
 @article{torrie1977nonphysical,
@@ -711,12 +719,12 @@
   pages   = {736--742},
   year    = {2015},
   doi     = {10.1021/jp504920s},
-  note    = {Reweighting scheme behind \texttt{FES\_from\_Reweighting.py}}
+  note    = {Reweighting scheme behind \texttt{reactiontools.run\_opes\_reweighting}}
 }
 
 
 % =====================================================================
-% Steered MD and reference paths (openmmnqe/path.py, run_openmm_steered)
+% Steered MD (run_openmm_steered)
 % =====================================================================
 
 @article{grubmuller1996ligand,
@@ -757,9 +765,6 @@
 
 % =====================================================================
 % Supporting libraries
-%
-% Reaction paths, ORCA and free-energy-surface plotting moved to
-% reactiontools; cite from that repository's CITATIONS.bib instead.
 % =====================================================================
 
 @article{larsen2017ase,
@@ -771,7 +776,7 @@
   pages   = {273002},
   year    = {2017},
   doi     = {10.1088/1361-648X/aa680e},
-  note    = {ASE; structure I/O and neighbour lists in \texttt{io.py}}
+  note    = {ASE; the calculators the examples hand to the stages as potentials}
 }
 
 @article{mcgibbon2015mdtraj,
@@ -783,27 +788,7 @@
   pages   = {1528--1532},
   year    = {2015},
   doi     = {10.1016/j.bpj.2015.08.015},
-  note    = {Trajectory loading, superposition and MSD in \texttt{path.py} and \texttt{plumed.estimate\_path\_lambda}}
-}
-
-@article{michaudagrawal2011mdanalysis,
-  author  = {Michaud-Agrawal, Naveen and Denning, Elizabeth J. and Woolf, Thomas B. and Beckstein, Oliver},
-  title   = {{MDAnalysis}: A toolkit for the analysis of molecular dynamics simulations},
-  journal = {Journal of Computational Chemistry},
-  volume  = {32},
-  number  = {10},
-  pages   = {2319--2327},
-  year    = {2011},
-  doi     = {10.1002/jcc.21787}
-}
-
-@inproceedings{gowers2016mdanalysis,
-  author    = {Gowers, Richard J. and Linke, Max and Barnoud, Jonathan and Reddy, Tyler J. E. and Melo, Manuel N. and Seyler, Sean L. and Domanski, Jan and Dotson, David L. and Buchoux, S{\'e}bastien and Kenney, Ian M. and Beckstein, Oliver},
-  title     = {{MDAnalysis}: A {Python} Package for the Rapid Analysis of Molecular Dynamics Simulations},
-  booktitle = {Proceedings of the 15th Python in Science Conference},
-  pages     = {98--105},
-  year      = {2016},
-  doi       = {10.25080/Majora-629e541a-00e}
+  note    = {The HDF5 trajectory reporter behind \texttt{trajectory='h5'}}
 }
 
 @article{harris2020numpy,
@@ -824,7 +809,7 @@
   pages   = {261--272},
   year    = {2020},
   doi     = {10.1038/s41592-019-0686-2},
-  note    = {Physical constants and cubic-spline path resampling}
+  note    = {Physical constants (\texttt{scipy.constants})}
 }
 
 @article{hunter2007matplotlib,
@@ -836,23 +821,4 @@
   pages   = {90--95},
   year    = {2007},
   doi     = {10.1109/MCSE.2007.55}
-}
-
-@inproceedings{mckinney2010pandas,
-  author    = {McKinney, Wes},
-  title     = {Data Structures for Statistical Computing in {Python}},
-  booktitle = {Proceedings of the 9th Python in Science Conference},
-  pages     = {56--61},
-  year      = {2010},
-  doi       = {10.25080/Majora-92bf1922-00a}
-}
-
-@article{pedregosa2011scikitlearn,
-  author  = {Pedregosa, Fabian and Varoquaux, Ga{\"e}l and Gramfort, Alexandre and Michel, Vincent and Thirion, Bertrand and Grisel, Olivier and Blondel, Mathieu and Prettenhofer, Peter and Weiss, Ron and Dubourg, Vincent and Vanderplas, Jake and Passos, Alexandre and Cournapeau, David and Brucher, Matthieu and Perrot, Matthieu and Duchesnay, {\'E}douard},
-  title   = {Scikit-learn: Machine Learning in {Python}},
-  journal = {Journal of Machine Learning Research},
-  volume  = {12},
-  pages   = {2825--2830},
-  year    = {2011},
-  note    = {PCA-based reaction-coordinate analysis in the test suite}
 }
