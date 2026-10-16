@@ -109,157 +109,25 @@ These examples can require a CUDA GPU, downloaded MACE models, PLUMED, ORCA,
 or AmberTools depending on the selected workflow. The focused regression
 suite remains under `tests/` and runs with `pytest`.
 
-## Bead expansion along a reaction coordinate
+## Documentation
 
-RPMD spread logs can include centroid atom-pair distances sampled on the same
-steps as a transferring atom's ring-polymer expansion. Use `"mean"` for the
-mean bead-centroid radius; the default `"rms"` preserves the package's earlier
-radius-of-gyration output.
+The guides at [openmmnqe.readthedocs.io](https://openmmnqe.readthedocs.io/en/latest/)
+cover each part of a run in depth, with their code pulled from the scripts in
+`examples/`:
 
-```python
-nqe.run_openmm_rpmd_prod(
-    modeller,
-    forcefield,
-    atoms_to_watch=[17],
-    expansion_metric="mean",
-    distance_pairs_to_watch=[(4, 17), (9, 17)],
-)
-
-# Direct expansion-versus-distance view.
-nqe.plot_rpmd_atom_expansion(
-    "rpmd_prod_spread.log",
-    distance_columns="Distance_Atom4-Atom17(nm)",
-    length_unit="angstrom",
-    filename="expansion-vs-donor-distance.png",
-)
-```
-
-To make a Figure-7-style diagnostic from a PLUMED `PATHMSD` run, print
-`path.sss` at the same stride as `n_report`, align it to the reporter rows with
-reactiontools, and normalise PLUMED's one-based path-image coordinate:
-
-```python
-import reactiontools as rt
-
-spread_log = "rpmd_prod_spread.log"
-with open(spread_log) as handle:
-    n_samples = sum(1 for _ in handle) - 1
-
-path_image = rt.cv_from_colvar(
-    "COLVAR",
-    n_frames=n_samples,
-    cv_name="path.sss",
-)
-normalised_path_progress = (path_image - 1.0) / (n_images - 1)
-
-figure, axes = nqe.plot_rpmd_atom_expansion(
-    spread_log,
-    path_progress=normalised_path_progress,
-    progress_bins=n_images,
-    length_unit="angstrom",
-    filename="expansion-along-path.png",
-)
-```
-
-Repeated path values are averaged automatically, and `progress_bins`
-forms conditional means for a continuous progress coordinate. Matplotlib is
-available through the `plot` optional dependency.
-
-## Trajectory formats
-
-Every stage writes a PDB trajectory by default, which is self-describing but
-large and slow. Pass `trajectory='dcd'` or `'xtc'` for anything long — a
-solvated production run especially — and the stage writes
-`<prefix>_topology.pdb` alongside, so the binary trajectory stays readable.
-`trajectory='h5'` needs `pip install openmmnqe[traj]` and is the only format
-that can carry velocities in the trajectory itself; `trajectory='none'` writes
-none at all. `velocity_record_interval` writes a `<prefix>_velocities.npz`
-archive on any stage, classical or ring-polymer, and
-`nqe.vibrational_spectrum` turns it into a vibrational density of states.
-
-The ring-polymer centroid and bead trajectories wrap molecules into the box
-against the *Topology*'s bonds rather than by asking OpenMM to do it, and
-honour `TrajectoryOptions.enforce_periodic_box` like the classical stages do.
-The distinction matters on a mixed ML/MM system: `createMixedSystem` deletes
-every bonded term inside the ML region, so a molecule modelled entirely by the
-ML potential is invisible to the molecule list OpenMM wraps by, and its atoms
-would be scattered across the box one at a time. A non-periodic System is now
-left alone rather than folded into OpenMM's default 2 nm box.
-
-## Ring-polymer thermodynamics
-
-Every RPMD stage writes `<prefix>_thermo.log` alongside its spread, centroid and
-bead outputs. An RPMD `Context` holds one copy of the system rather than the ring
-polymer, so its energy is not a bead average and its kinetic temperature is not
-the ring polymer's; the log is where the thermodynamics actually lives.
-
-The physical observables are the centroid-virial kinetic estimator `KE_cv`, the
-mean bead potential energy `PE_mean`, and their sum `E_quantum`. The rest are
-diagnostics: `E_ring` is the ring-polymer Hamiltonian, worth watching for drift
-rather than for physics, and `T_ring` and `T_centroid` should both settle at the
-integrator's setpoint.
-
-```python
-nqe.run_openmm_rpmd_prod(modeller, forcefield, n_report=1000)
-
-averages = nqe.rpmd_thermodynamic_averages("rpmd_prod_thermo.log", discard=0.1)
-energy, error = averages["E_quantum(kJ/mol)"]
-print(f"quantum internal energy {energy:.2f} +/- {error:.2f} kJ/mol")
-
-nqe.plot_rpmd_thermodynamics(
-    "rpmd_prod_thermo.log",
-    energy_columns=["KE_cv(kJ/mol)", "PE_mean(kJ/mol)", "E_quantum(kJ/mol)"],
-    filename="rpmd-thermodynamics.png",
-)
-```
-
-Errors come from block averaging, because consecutive samples down one
-trajectory are correlated and `std / sqrt(n)` would flatter them. Call
-`nqe.rpmd_thermodynamics(simulation)` to take the same set of readings once,
-outside any reporter.
-
-Each report reads every bead with its forces, costing about one RPMD step, so
-the default `n_report` of 1000 makes it a fraction of a percent. That holds on a
-mixed ML/MM system too: the centroid and bead trajectory reporters ask for
-positions alone, which OpenMM answers without running the ML model at all.
-
-Two caveats are worth knowing: `KE_cv` is biased for a system with constraints,
-because OpenMM's forces omit constraint forces -- the reporter warns, and the
-fix is to run the beads flexible -- and under ring-polymer contraction the
-estimators describe the full potential rather than the contracted one that
-drives the dynamics.
-
-`E_ring` and `E_spring` are reconstructed from the bead pass rather than read
-from `RPMDIntegrator.getTotalEnergy()`. That method agrees with the
-reconstruction to within one part in a million. Before OpenMM 8.6.1, that
-method could deadlock on CUDA or OpenCL when a `PythonForce` callback needed
-the GIL held by the reporting thread. OpenMM 8.6.1 disables that worker-thread
-path for `PythonForce`; the reconstruction still reuses the bead states read
-for the other observables. Reconstructing costs one assumption --
-that OpenMM links neighbouring copies with springs of frequency
-`P k_B T / hbar` -- which the test suite pins against OpenMM itself.
-
-`nqe.RPMDKineticDecompositionReporter` splits that same `KE_cv` over individual
-atoms, which is the diagnostic that says how quantum one particular proton is: a
-classical atom sits at `3kT/2`, 3.74 kJ/mol at 300 K, and a proton in a stiff
-bond several times above it. Because that per-atom energy is the exact
-derivative of the free energy with respect to log mass, integrating it over mass
-gives an equilibrium isotope effect from a couple of short runs at fictitious
-intermediate masses, rather than from differencing separate H and D
-trajectories -- `nqe.rpmd_mass_integration_nodes` plans the quadrature,
-`nqe.rpmd_isotope_free_energy` combines it, and `nqe.rpmd_fractionation_factor`
-compares two sites.
-
-A third caveat, fixed rather than documented: `getForces` reports a virtual
-site's own force as well as the shares it redistributes onto that site's
-parents, so only particles with mass enter the virial. Summing every row would
-count a TIP4P or Drude site twice.
-
-Heat capacity and pressure are deliberately absent. The centroid-virial heat
-capacity needs second derivatives OpenMM will not supply, and the
-`k_B beta^2 Var(E)` fluctuation formula that looks like a substitute is wrong
-for path integrals; a centroid-virial pressure needs the true virial, which
-forces alone do not give under periodic boundary conditions.
+- [Running a workflow](https://openmmnqe.readthedocs.io/en/latest/guides/workflow.html) —
+  the stage sequence, the arguments every stage shares, and seeding.
+- [Nuclear quantum effects](https://openmmnqe.readthedocs.io/en/latest/guides/nqe-methods.html) —
+  RPMD, adQTB and equilibrium isotope effects.
+- [Reporters and analysis](https://openmmnqe.readthedocs.io/en/latest/guides/reporters.html) —
+  bead spread, trajectory formats, velocity spectra and ring-polymer thermodynamics.
+- [Verifying an adQTB run](https://openmmnqe.readthedocs.io/en/latest/guides/adqtb-verification.html)
+- [Rate dynamics](https://openmmnqe.readthedocs.io/en/latest/guides/rate-dynamics.html) —
+  transmission coefficients and Bennett–Chandler rate constants.
+- [Enhanced sampling](https://openmmnqe.readthedocs.io/en/latest/guides/enhanced-sampling.html) —
+  OPES, steered paths and independent walkers.
+- [ML/MM potentials and QM/MM](https://openmmnqe.readthedocs.io/en/latest/guides/potentials.html)
+- [API reference](https://openmmnqe.readthedocs.io/en/latest/api/index.html)
 
 ## Installation
 

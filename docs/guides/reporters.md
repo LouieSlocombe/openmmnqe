@@ -47,6 +47,54 @@ either a centroid atom-pair distance or a supplied reference-path progress
 coordinate — so the expansion can be read against the reaction coordinate it
 matters for.
 
+The spread log can carry centroid atom-pair distances sampled on the same
+steps as the expansion, which gives the distance view directly.
+`expansion_metric` chooses between the root-mean-square bead-centroid radius
+(`"rms"`, the default) and the mean radius (`"mean"`):
+
+```python
+nqe.run_openmm_rpmd_prod(
+    modeller,
+    forcefield,
+    atoms_to_watch=[17],
+    expansion_metric="mean",
+    distance_pairs_to_watch=[(4, 17), (9, 17)],
+)
+
+nqe.plot_rpmd_atom_expansion(
+    "rpmd_prod_spread.log",
+    distance_columns="Distance_Atom4-Atom17(nm)",
+    length_unit="angstrom",
+    filename="expansion-vs-donor-distance.png",
+)
+```
+
+To read the expansion along a PLUMED `PATHMSD` path instead, print `path.sss`
+at the same stride as `n_report`, align it to the reporter rows with
+reactiontools, and normalise PLUMED's one-based path-image coordinate:
+
+```python
+import reactiontools as rt
+
+spread_log = "rpmd_prod_spread.log"
+with open(spread_log) as handle:
+    n_samples = sum(1 for _ in handle) - 1
+
+path_image = rt.cv_from_colvar("COLVAR", n_frames=n_samples, cv_name="path.sss")
+normalised_path_progress = (path_image - 1.0) / (n_images - 1)
+
+figure, axes = nqe.plot_rpmd_atom_expansion(
+    spread_log,
+    path_progress=normalised_path_progress,
+    progress_bins=n_images,
+    length_unit="angstrom",
+    filename="expansion-along-path.png",
+)
+```
+
+Repeated path values are averaged automatically, and `progress_bins` forms
+conditional means for a continuous progress coordinate.
+
 ## Bead and centroid trajectories
 
 ```{literalinclude} ../../examples/rpmd.py

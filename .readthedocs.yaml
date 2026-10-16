@@ -22,7 +22,6 @@ python:
   install:
     # Not `path: .` with extra_requirements -- that installs the project and
     # its dependencies, including openmmml and openmmplumed (not on PyPI).
-    # This file is kept identical to the [docs] extra in pyproject.toml.
     - requirements: docs/requirements.txt
 
 formats:

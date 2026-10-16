@@ -10,59 +10,13 @@ potentials (:mod:`openmmnqe.openmm`), RPMD reporters
 (:mod:`openmmnqe.walkers`) and assorted simulation-setup utilities
 (:mod:`openmmnqe.tools`).
 
-This package is the simulation itself, and it has two dependencies that are
-the rest of the workflow.
-
-Ligand parameters come from
-`forcefill <https://github.com/LouieSlocombe/forcefill>`_: it asks the base
-force field which residues it cannot match, parameterises those with GAFF and
-AM1-BCC, and writes an ffxml that loads underneath the standard files. The
-force field every ``run_openmm_*`` stage takes is built from that::
-
-    import forcefill as ff
-    import openmm.app as app
-
-    names = ("amber14-all.xml", "amber14/tip3pfb.xml")
-    result = ff.build_forcefield_xml(input_pdb, "ligands.xml", base_forcefield=names)
-    if result.skipped:
-        raise RuntimeError(f"forcefill skipped residues: {result.skipped}")
-    extra = [] if result.forcefield_xml is None else [result.forcefield_xml]
-
-    pdb_data = app.PDBFile(input_pdb)
-    modeller = app.Modeller(pdb_data.topology, pdb_data.positions)
-    forcefield = app.ForceField(*names, *extra)
-
-A skipped residue would otherwise surface later, as a template error at
-``createSystem``, and ``forcefield_xml`` is ``None`` when the base files
-already matched every residue, which ``ForceField()`` will not take.
-
-Nothing may edit the topology between those two blocks -- the templates
-describe the residues exactly as ``input_pdb`` spells them. A raw crystal
-structure is repaired first, with :func:`openmmnqe.io.fix_pdb`: forcefill
-decides what needs parameters by asking what the base force field cannot
-match, and a protein missing its hydrogens matches nothing.
-
-Everything upstream of the simulation -- building a reaction path with NEB,
-refining a transition state, running ORCA -- and everything alongside or
-downstream of it -- the PLUMED collective variables that bias a proton
-transfer, turning a steered trajectory into a reference path, and plotting the
-free-energy surface that comes out -- lives in
-`reactiontools <https://github.com/LouieSlocombe/reactiontools>`_::
-
-    import openmmnqe as nqe
-    import reactiontools as rt
-
-    product = rt.swap_bonding_configuration(reactant, 0, 8, 1)
-    neb_path = rt.quick_guess_path(reactant, product)
-    plumed_input, fes_command = rt.plumed_input_1pt(modeller, idx, temperature)
-    with open("plumed.dat", "w") as f:
-        f.write(plumed_input)
-    nqe.run_openmm_prod(modeller, forcefield, plumed_script_path="plumed.dat")
-    rt.plot_plumed_fes("fes.dat", filename="fes")
-
-The reactiontools builders take the ``openmm.app.Modeller`` and
-``openmm.unit.Quantity`` this package works in, so they can be called with what
-is already to hand.
+This package is the simulation itself. Ligand parameters come from
+`forcefill <https://github.com/LouieSlocombe/forcefill>`_, and everything
+reaction-side -- reaction paths, the PLUMED collective variables that bias
+them, ORCA, and free-energy plotting -- from
+`reactiontools <https://github.com/LouieSlocombe/reactiontools>`_. The README
+and the guides at https://openmmnqe.readthedocs.io show how the three fit
+together.
 """
 
 import os as _os
