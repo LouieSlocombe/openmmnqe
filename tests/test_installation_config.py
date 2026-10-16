@@ -160,11 +160,16 @@ def test_environment_differences_are_intentional() -> None:
     assert "nnpops" not in sol
 
     # The source-build recipe intentionally selects a different Python/MACE
-    # stack and pins openmmforcefields; it is not a copy of the primary env.
+    # stack; it is not a copy of the primary env.
     assert custom["python"] == "python=3.13"
     assert custom["pymace"] == "pymace=0.3.15"
-    assert custom["openmmforcefields"] == "openmmforcefields=0.15.1"
     for requirements in (main, ci, custom):
         assert requirements["ambertools"] == "ambertools"
         assert requirements["cython"] == "cython"
-    assert {"ambertools", "cython"}.issubset(sol)
+        # forcefill declares openmmforcefields>=0.16, so an exact conda pin
+        # below that floor would be replaced from PyPI on install.
+        assert requirements["openmmforcefields"] == "openmmforcefields"
+        # Nothing in this package or its siblings imports MDAnalysis.
+        assert "mdanalysis" not in requirements
+    assert {"ambertools", "cython", "openmmforcefields"}.issubset(sol)
+    assert "mdanalysis" not in sol

@@ -56,7 +56,6 @@ mamba install -c conda-forge -y \
     openmmforcefields \
     ambertools \
     pdbfixer \
-    mdanalysis \
     mdtraj \
     pandas \
     matplotlib \

@@ -14,13 +14,14 @@ dependencies:
   - ase=3.28.0
   - openmm=8.6.1
   - openmm-ml=1.8
-  - openmmforcefields=0.15.1
+  # forcefill depends on openmmforcefields>=0.16; an exact conda pin below that
+  # floor would only be replaced from PyPI when forcefill installs.
+  - openmmforcefields
   # forcefill's gaff backend runs the antechamber and parmchk2 executables, which
   # exist only as a conda package. openmmforcefields already depends on ambertools,
   # but a dependency that is relied on should be declared rather than inherited.
   - ambertools
   - pdbfixer
-  - mdanalysis
 
   # --- Build Tools ---
   - doxygen
