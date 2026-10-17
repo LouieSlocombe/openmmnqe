@@ -20,6 +20,7 @@ coverage.xml
 .env
 .venv/
 venv/
+CLAUDE.md
 
 # Sphinx
 docs/_build/
