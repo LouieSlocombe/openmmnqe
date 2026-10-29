@@ -28,8 +28,10 @@ Every stage takes the same shape: build the system, optionally deuterate it,
 attach a PLUMED bias and the reporters, run, then save its final structure.
 Classical stages initialize new velocities when started from that structure;
 the paired RPMD and adQTB stages additionally consume their equilibration
-restart, preserving the state their production integrator needs. RPMD restart
-files contain every bead rather than an ordinary single-Context checkpoint.
+restart, preserving the state their production integrator needs. RPMD
+production can also continue from a completed production run's restart.
+RPMD restart files contain every bead rather than an ordinary single-Context
+checkpoint.
 The shared arguments behave the same throughout -- *potential* with *ml_idx*
 runs an ML/MM mixed system and forces the CUDA platform,
 *plumed_script_path* attaches a bias, *output_prefix* names every file the
@@ -2296,7 +2298,7 @@ def _save_final_state(simulation: app.Simulation, output_prefix: str,
 def _load_checkpoint(simulation: app.Simulation, checkpoint_file: str,
                      n_beads: int | None = None) -> None:
     """
-    Load equilibration restart data into *simulation*.
+    Load restart data from a preceding stage into *simulation*.
 
     With *n_beads*, require the bead-aware openmmnqe RPMD format and restore
     every copy. Without it, delegate to OpenMM's ordinary Context checkpoint
@@ -3322,8 +3324,9 @@ def run_openmm_rpmd_contracted(
 
     Uses the ring-polymer contraction scheme to evaluate expensive force
     components (e.g. PME reciprocal space) on fewer bead copies, reducing
-    computational cost. A checkpoint from a prior RPMD equilibration is
-    required. An optional PLUMED bias and ML/MM mixed potential are supported.
+    computational cost. A checkpoint from a prior RPMD equilibration or
+    completed production run is required. An optional PLUMED bias and ML/MM
+    mixed potential are supported.
     With *apply_thermostat* set to False the run is microcanonical
     ring-polymer dynamics on the contracted forces.
 
@@ -3344,9 +3347,14 @@ def run_openmm_rpmd_contracted(
         mean force and feeds PLUMED one coordinate set per bead per step.
         Default is True; False reproduces a run made before this existed.
     checkpoint_file : str, optional
-        Path to the equilibration checkpoint. Default is ``'rpmd_ready.chk'``.
+        Path to a bead-aware restart from RPMD equilibration or a completed
+        production run (``<previous_output_prefix>.chk``). Restores every
+        bead's positions and velocities, box, time, and cumulative step
+        count. Default is ``'rpmd_ready.chk'``.
     output_prefix : str, optional
-        Prefix for output files. Default is ``'rpmd_prod_contracted'``.
+        Prefix for output files. Use a new prefix when continuing production:
+        existing trajectories and logs are overwritten, not appended.
+        Default is ``'rpmd_prod_contracted'``.
     n_beads : int, optional
         Number of ring-polymer beads. Default is 32.
     temperature : openmm.unit.Quantity, optional
@@ -3361,7 +3369,8 @@ def run_openmm_rpmd_contracted(
     timestep : openmm.unit.Quantity, optional
         Integration time step. Default is 0.5 fs.
     steps : int, optional
-        Total number of production steps. Default is 100000.
+        Additional production steps to run after loading *checkpoint_file*.
+        Default is 100000.
     n_report : int, optional
         Reporter interval in steps. Default is 1000.
     contractions : dict or None, optional
@@ -3583,8 +3592,8 @@ def run_openmm_rpmd_prod(
     """
     Run a full ring-polymer MD (RPMD) production simulation.
 
-    Loads a checkpoint from a prior RPMD equilibration and continues with a
-    production run using the ``RPMDIntegrator``. An optional PLUMED bias,
+    Loads a checkpoint from a prior RPMD equilibration or completed production
+    run and continues using the ``RPMDIntegrator``. An optional PLUMED bias,
     RPMD barostat, and ML/MM mixed potential are supported. With
     *apply_thermostat* set to False the run is microcanonical ring-polymer
     dynamics, the ensemble every RPMD time-correlation observable is defined
@@ -3609,9 +3618,14 @@ def run_openmm_rpmd_prod(
         mean force and feeds PLUMED one coordinate set per bead per step.
         Default is True; False reproduces a run made before this existed.
     checkpoint_file : str, optional
-        Path to the equilibration checkpoint. Default is ``'rpmd_ready.chk'``.
+        Path to a bead-aware restart from RPMD equilibration or a completed
+        production run (``<previous_output_prefix>.chk``). Restores every
+        bead's positions and velocities, box, time, and cumulative step
+        count. Default is ``'rpmd_ready.chk'``.
     output_prefix : str, optional
-        Prefix for output files. Default is ``'rpmd_prod'``.
+        Prefix for output files. Use a new prefix when continuing production:
+        existing trajectories and logs are overwritten, not appended.
+        Default is ``'rpmd_prod'``.
     n_beads : int, optional
         Number of ring-polymer beads. Default is 32.
     pressure : openmm.unit.Quantity, optional
@@ -3628,7 +3642,8 @@ def run_openmm_rpmd_prod(
     n_report : int, optional
         Reporter interval in steps. Default is 1000.
     steps : int, optional
-        Total number of production steps. Default is 500000.
+        Additional production steps to run after loading *checkpoint_file*.
+        Default is 500000.
     platform_name : str or None, optional
         OpenMM platform name. Default is None, which auto-detects via
         ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential

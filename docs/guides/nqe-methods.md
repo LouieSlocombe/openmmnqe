@@ -29,6 +29,53 @@ production stage. Ring-polymer contraction evaluates the expensive part of the
 force on fewer beads than the cheap part, which is what makes a large bead
 count affordable when only some interactions need the full ring.
 
+### Continuing a completed production run
+
+Both production drivers save every bead's positions and velocities to
+`<output_prefix>.chk` when they finish. Pass that file as `checkpoint_file`
+to continue production; there is no need to repeat equilibration:
+
+```python
+import openmm.app as app
+import openmm.unit as unit
+import openmmnqe as nqe
+
+# Recreate the same topology and force field used for the previous segment.
+# Its final centroid PDB supplies the topology; the .chk restores all beads.
+pdb = app.PDBFile("rpmd_prod_final.pdb")
+modeller = app.Modeller(pdb.topology, pdb.positions)
+nqe.run_openmm_rpmd_prod(
+    modeller,
+    forcefield,
+    checkpoint_file="rpmd_prod.chk",
+    output_prefix="rpmd_prod_2",
+    n_beads=32,
+    temperature=300 * unit.kelvin,
+    barostat_freq=None,  # Match the previous segment's ensemble.
+    steps=500_000,
+)
+```
+
+Here `steps` means **additional** steps. The saved time and step count carry
+forward, along with the periodic box. The same pattern works with
+{func}`~openmmnqe.openmm.run_openmm_rpmd_contracted`; retain the previous
+segment's contraction settings. A runnable equilibration → production →
+continuation example is available as
+`python examples/rpmd.py openmm_rpmd_prod --platform Reference`.
+
+Use a **new output prefix** for each segment: trajectories, logs, velocity
+archives, and numbered snapshots are written afresh. Keep the same ordered
+atoms, bead count, masses/deuteration, and temperature; the loader checks
+these. Also recreate the same forces, timestep, thermostat/barostat settings,
+and bias configuration, which the archive does not validate. When using
+`PreparedSystem`, build a fresh System if stage options modify it.
+
+These archives preserve the bead state, but do not contain thermostat or
+barostat random-generator state or external bias history. A stochastic
+continuation therefore does not reproduce an uninterrupted trajectory bit
+for bit, even with the same `seed`. A final centroid PDB alone is insufficient
+to restore the ring polymer.
+
 ### Working with beads directly
 
 {func}`~openmmnqe.tools.init_beads` seeds bead positions and velocities at the
