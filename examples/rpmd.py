@@ -528,7 +528,7 @@ def run_openmm_rpmd_equilibration() -> None:
 
 
 def run_openmm_rpmd_prod() -> None:
-    """Equilibrate, then run RPMD production from the restart it left behind."""
+    """Equilibrate, run production, then continue from its completed restart."""
     print(flush=True)
     n_beads = 2
     pdb = app.PDBFile("tests/data/pdb/input_aaa.pdb")
@@ -548,8 +548,24 @@ def run_openmm_rpmd_prod() -> None:
     nqe.run_openmm_rpmd_prod(modeller,
                              forcefield,
                              n_beads=n_beads,
+                             barostat_freq=None,
+                             n_report=10,
                              platform_name=device,
                              steps=100)
+
+    # A separate job can rebuild the topology from the final centroid PDB.
+    # The restart restores every bead and velocity, and carries time forward.
+    final_pdb = app.PDBFile("rpmd_prod_final.pdb")
+    continued_modeller = app.Modeller(final_pdb.topology, final_pdb.positions)
+    nqe.run_openmm_rpmd_prod(continued_modeller,
+                             forcefield,
+                             checkpoint_file="rpmd_prod.chk",
+                             output_prefix="rpmd_prod_2",
+                             n_beads=n_beads,
+                             barostat_freq=None,
+                             n_report=10,
+                             platform_name=device,
+                             steps=100)  # 100 additional production steps.
     nqe.remove_file_pattern('rpmd_ready*')
     nqe.remove_file_pattern('rpmd_prod*')
 
