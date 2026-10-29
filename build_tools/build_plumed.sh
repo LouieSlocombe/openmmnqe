@@ -23,8 +23,12 @@ build_plumed() {
     # LD_LIBRARY_PATH). --disable-python stops the top-level make from also
     # building the Python interface in-tree: it would bake the source-tree kernel
     # path into build artifacts that build_py_plumed's pip install then reuses,
-    # instead of the ${CONDA_PREFIX} kernel it bakes itself.
-    ./configure --prefix="${CONDA_PREFIX}" --enable-modules=opes --disable-python \
+    # instead of the ${CONDA_PREFIX} kernel it bakes itself. --disable-pycv is
+    # needed as well: PLUMED 2.10's configure keeps python_bin set when the pycv
+    # plugin's pybind11 and numpy are importable (they are, via the ML stack), and
+    # `make install` then builds the Cython wrapper on python_bin alone, ignoring
+    # --disable-python, and fails wherever cython is absent.
+    ./configure --prefix="${CONDA_PREFIX}" --enable-modules=opes --disable-python --disable-pycv \
         LDFLAGS="-L${CONDA_PREFIX}/lib -Wl,-rpath,${CONDA_PREFIX}/lib" \
         STATIC_LIBS="-Wl,-rpath-link,${CONDA_PREFIX}/lib"
     make -j"$(nproc)"
