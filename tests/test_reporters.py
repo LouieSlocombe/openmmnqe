@@ -1042,17 +1042,19 @@ def _constrained_simulation() -> SimpleNamespace:
     )
 
 
-def _rpmd_simulation(*, n_beads: int, mass: float,
-                     force_constant: float | None,
+def _rpmd_simulation(topology: app.Topology, masses: Sequence[float], *,
+                     n_beads: int, force_constant: float | None,
                      temperature: float = 300.0,
                      friction: float = 5.0) -> app.Simulation:
-    """Build a seeded one-particle RPMD simulation on the Reference platform."""
+    """Seed independent harmonic or free particles on the Reference platform."""
     system = openmm.System()
-    system.addParticle(mass * unit.dalton)
+    for mass in masses:
+        system.addParticle(mass * unit.dalton)
     if force_constant is not None:
         force = openmm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
         force.addGlobalParameter("k", force_constant)
-        force.addParticle(0, [])
+        for index in range(len(masses)):
+            force.addParticle(index, [])
         system.addForce(force)
 
     integrator = openmm.RPMDIntegrator(
@@ -1063,7 +1065,7 @@ def _rpmd_simulation(*, n_beads: int, mass: float,
     )
     integrator.setRandomNumberSeed(1234)
     simulation = app.Simulation(
-        _topology(),
+        topology,
         system,
         integrator,
         openmm.Platform.getPlatform("Reference"),
@@ -1072,15 +1074,30 @@ def _rpmd_simulation(*, n_beads: int, mass: float,
     for bead in range(n_beads):
         integrator.setPositions(
             bead,
-            generator.normal(0.0, 0.01, (1, 3)) * unit.nanometer,
+            generator.normal(0.0, 0.01, (len(masses), 3)) * unit.nanometer,
         )
     return simulation
+
+
+def _exact_harmonic_kinetic(mass: float, force_constant: float, *,
+                            n_beads: int, temperature: float) -> float:
+    """Exact ring-polymer kinetic energy of one 3D harmonic oscillator."""
+    omega = np.sqrt(force_constant / mass)
+    omega_p = n_beads * _BOLTZMANN * temperature / _HBAR
+    omega_k = 2.0 * omega_p * np.sin(np.pi * np.arange(n_beads) / n_beads)
+    beta = 1.0 / (_BOLTZMANN * temperature)
+    return float(
+        3.0 * (omega ** 2 / (2.0 * beta))
+        * np.sum(1.0 / (omega_k ** 2 + omega ** 2))
+    )
 
 
 def test_centroid_virial_estimator_is_exact_for_a_free_particle() -> None:
     # With no potential every force vanishes, so the virial term is identically
     # zero and the estimator collapses to the classical free-particle value.
-    simulation = _rpmd_simulation(n_beads=6, mass=39.9, force_constant=None)
+    simulation = _rpmd_simulation(
+        _topology(), [39.9], n_beads=6, force_constant=None,
+    )
     simulation.integrator.step(100)
 
     values = rpmd_thermodynamics(simulation)
@@ -1090,13 +1107,13 @@ def test_centroid_virial_estimator_is_exact_for_a_free_particle() -> None:
     ) == pytest.approx(1.5 * _BOLTZMANN * 300.0, rel=1e-12)
 
 
-def test_reported_spring_energy_matches_openmm_ring_polymer_convention() -> None:
+def test_reported_ring_energy_matches_openmm_get_total_energy() -> None:
     # Guards the one convention this module leans on: that getTotalEnergy()
     # is the bead energies plus springs of frequency omega_P = P k_B T / hbar.
     n_beads, mass, temperature = 8, 1.008, 300.0
     simulation = _rpmd_simulation(
+        _topology(), [mass],
         n_beads=n_beads,
-        mass=mass,
         force_constant=1000.0,
         temperature=temperature,
     )
@@ -1120,23 +1137,8 @@ def test_reported_spring_energy_matches_openmm_ring_polymer_convention() -> None
         unit.kilojoule_per_mole
     ) == pytest.approx(expected, rel=1e-5)
 
-
-def test_reported_ring_energy_matches_openmm_get_total_energy() -> None:
-    # The other half of the convention guard. The reporter reconstructs the
-    # ring Hamiltonian rather than calling RPMDIntegrator.getTotalEnergy(),
-    # which deadlocks on a mixed ML/MM System on CUDA or OpenCL. Reference
-    # can still answer, so it is the reference the reconstruction is pinned
-    # to -- in the direction that now matters.
-    simulation = _rpmd_simulation(
-        n_beads=8,
-        mass=1.008,
-        force_constant=1000.0,
-        temperature=300.0,
-    )
-    simulation.integrator.step(200)
-
-    values = rpmd_thermodynamics(simulation)
-
+    # Reference can evaluate the full Hamiltonian directly. This also pins
+    # the reporter's reconstruction used to avoid GPU PythonForce deadlocks.
     assert values["energy_ring"].value_in_unit(
         unit.kilojoule_per_mole
     ) == pytest.approx(
@@ -1152,8 +1154,8 @@ def test_thermodynamic_estimators_reproduce_the_exact_harmonic_ring_polymer() ->
     # Friction near the well frequency keeps the centroid mode from ringing,
     # which is what limits how fast the mean potential energy converges.
     simulation = _rpmd_simulation(
+        _topology(), [mass],
         n_beads=n_beads,
-        mass=mass,
         force_constant=force_constant,
         temperature=temperature,
         friction=30.0,
@@ -1180,12 +1182,8 @@ def test_thermodynamic_estimators_reproduce_the_exact_harmonic_ring_polymer() ->
     # sqrt(omega_k**2 + omega**2), each holding P/(2 beta) of energy, which
     # gives closed forms for both estimators.  They are equal by the virial
     # theorem, and tend to the exact quantum result as P grows.
-    omega = np.sqrt(force_constant / mass)
-    omega_p = n_beads * _BOLTZMANN * temperature / _HBAR
-    omega_k = 2.0 * omega_p * np.sin(np.pi * np.arange(n_beads) / n_beads)
-    beta = 1.0 / (_BOLTZMANN * temperature)
-    exact = 3.0 * (omega ** 2 / (2.0 * beta)) * np.sum(
-        1.0 / (omega_k ** 2 + omega ** 2)
+    exact = _exact_harmonic_kinetic(
+        mass, force_constant, n_beads=n_beads, temperature=temperature,
     )
 
     # Above the classical 3kT/2: the zero-point energy is the whole point.
@@ -1650,64 +1648,17 @@ def test_kinetic_decomposition_rejects_unphysical_temperatures(
         rpmd_kinetic_decomposition(simulation, temperature=temperature)
 
 
-def _two_mass_rpmd_simulation(*, n_beads: int, masses: Sequence[float],
-                              force_constant: float,
-                              temperature: float = 300.0,
-                              friction: float = 30.0) -> app.Simulation:
-    """Two non-interacting particles of different mass in one harmonic well."""
-    system = openmm.System()
-    force = openmm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
-    force.addGlobalParameter("k", force_constant)
-    for index, mass in enumerate(masses):
-        system.addParticle(mass * unit.dalton)
-        force.addParticle(index, [])
-    system.addForce(force)
-
-    integrator = openmm.RPMDIntegrator(
-        n_beads,
-        temperature * unit.kelvin,
-        friction / unit.picosecond,
-        0.0005 * unit.picoseconds,
-    )
-    integrator.setRandomNumberSeed(1234)
-    simulation = app.Simulation(
-        _two_atom_topology(),
-        system,
-        integrator,
-        openmm.Platform.getPlatform("Reference"),
-    )
-    generator = np.random.default_rng(5)
-    for bead in range(n_beads):
-        integrator.setPositions(
-            bead,
-            generator.normal(0.0, 0.01, (len(masses), 3)) * unit.nanometer,
-        )
-    return simulation
-
-
-def _exact_harmonic_kinetic(mass: float, force_constant: float, *,
-                            n_beads: int, temperature: float) -> float:
-    """Exact ring-polymer kinetic energy of one 3D harmonic oscillator."""
-    omega = np.sqrt(force_constant / mass)
-    omega_p = n_beads * _BOLTZMANN * temperature / _HBAR
-    omega_k = 2.0 * omega_p * np.sin(np.pi * np.arange(n_beads) / n_beads)
-    beta = 1.0 / (_BOLTZMANN * temperature)
-    return float(
-        3.0 * (omega ** 2 / (2.0 * beta))
-        * np.sum(1.0 / (omega_k ** 2 + omega ** 2))
-    )
-
-
 def test_per_atom_estimator_separates_two_masses_in_one_harmonic_well() -> None:
     # hbar*omega/kT is about 4 for the light particle, so both are clearly
     # quantum and the two are clearly apart.
     n_beads, force_constant, temperature = 8, 25_000.0, 300.0
     masses = (1.008, 2.014)
-    simulation = _two_mass_rpmd_simulation(
+    simulation = _rpmd_simulation(
+        _two_atom_topology(), masses,
         n_beads=n_beads,
-        masses=masses,
         force_constant=force_constant,
         temperature=temperature,
+        friction=30.0,
     )
     simulation.integrator.step(4_000)
 
@@ -2157,7 +2108,9 @@ def test_energy_conservation_input_validation(tmp_path: Path) -> None:
 # Velocity recording and correlation functions
 
 
-def _one_particle_nve_simulation(n_beads: int) -> app.Simulation:
+def _one_particle_nve_simulation(
+    n_beads: int, *, time_step: unit.Quantity = 2.0 * unit.femtoseconds,
+) -> app.Simulation:
     """One argon in a harmonic well under thermostat-off RPMD."""
     topology = app.Topology()
     residue = topology.addResidue("AR", topology.addChain())
@@ -2174,7 +2127,7 @@ def _one_particle_nve_simulation(n_beads: int) -> app.Simulation:
         n_beads,
         300.0 * unit.kelvin,
         1.0 / unit.picosecond,
-        2.0 * unit.femtoseconds,
+        time_step,
     )
     integrator.setApplyThermostat(False)
     simulation = app.Simulation(
@@ -2313,11 +2266,16 @@ def test_vibrational_spectrum_finds_a_real_harmonic_frequency(tmp_path: Path) ->
     # the spectral peak there.
     from openmmnqe import step_rpmd
 
-    simulation = _one_particle_nve_simulation(1)
+    # Keep the 40 ps observation window (and its frequency resolution), but
+    # sample this slow oscillator every 0.1 ps. With omega*dt < 0.04, a 20 fs
+    # integration step resolves its roughly 4 ps period accurately.
+    simulation = _one_particle_nve_simulation(
+        1, time_step=20.0 * unit.femtoseconds,
+    )
     output = tmp_path / "well.npz"
-    reporter = reporters.RPMDVelocityReporter(output, 10)
+    reporter = reporters.RPMDVelocityReporter(output, 5)
     simulation.reporters.append(reporter)
-    step_rpmd(simulation, 20_000)
+    step_rpmd(simulation, 2_000)
     reporter.close()
 
     frequencies, intensities = reporters.vibrational_spectrum(output)

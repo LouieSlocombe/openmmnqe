@@ -16,15 +16,18 @@ from openmm import Vec3, openmm
 import openmmnqe as nqe
 from openmmnqe import adqtb
 
+_TIME_STEP = 1.0 * unit.femtosecond
+_SEGMENT_LENGTH = 0.05 * unit.picosecond
+
 
 def _adapted_friction_from_checkpoint(modeller: app.Modeller, forcefield: Any, checkpoint: Path) -> np.ndarray:
     system = forcefield.createSystem(modeller.topology)
     integrator = openmm.QTBIntegrator(
         300.0 * unit.kelvin,
         1.0 / unit.picosecond,
-        1.0 * unit.femtosecond,
+        _TIME_STEP,
     )
-    integrator.setSegmentLength(0.5 * unit.picosecond)
+    integrator.setSegmentLength(_SEGMENT_LENGTH)
     integrator.setDefaultAdaptationRate(0.5)
     simulation = app.Simulation(
         modeller.topology,
@@ -48,9 +51,12 @@ def test_adqtb_production_loads_equilibrated_friction_before_stepping(
         modeller,
         forcefield,
         platform_name="CPU",
-        n_report=1000,
-        steps=1000,
+        time_step=_TIME_STEP,
+        segment_length=_SEGMENT_LENGTH,
+        n_report=100,
+        steps=100,
         output_prefix=str(ready),
+        seed=7,
     )
     equilibrated = _adapted_friction_from_checkpoint(
         modeller, forcefield, ready.with_suffix(".chk")
@@ -65,7 +71,9 @@ def test_adqtb_production_loads_equilibrated_friction_before_stepping(
         checkpoint_file=str(ready.with_suffix(".chk")),
         barostat_freq=None,
         platform_name="CPU",
-        n_report=1000,
+        time_step=_TIME_STEP,
+        segment_length=_SEGMENT_LENGTH,
+        n_report=100,
         steps=0,
         output_prefix=str(production),
     )
@@ -613,16 +621,16 @@ def water_system() -> tuple[app.Modeller, _WaterForceField]:
 
 
 def _run_equilibration(modeller: app.Modeller, forcefield: Any, prefix: Path,
-                       **kwargs: Any) -> None:
-    """Run a short adQTB equilibration with a segment of 50 steps."""
+                       *, steps: int = 100, **kwargs: Any) -> None:
+    """Run two 50-step segments, or more for spectrum/convergence checks."""
     nqe.run_openmm_adqtb_eq(
         modeller,
         forcefield,
-        segment_length=0.05 * unit.picosecond,
-        time_step=1.0 * unit.femtosecond,
+        segment_length=_SEGMENT_LENGTH,
+        time_step=_TIME_STEP,
         platform_name="CPU",
-        n_report=200,
-        steps=400,
+        n_report=100,
+        steps=steps,
         output_prefix=str(prefix),
         seed=7,
         **kwargs,
@@ -635,7 +643,7 @@ def test_adqtb_equilibration_logs_one_spectrum_per_element(
     modeller, forcefield = water_system
     prefix = tmp_path / "adqtb_ready"
 
-    _run_equilibration(modeller, forcefield, prefix)
+    _run_equilibration(modeller, forcefield, prefix, steps=400)
 
     log = prefix.parent / f"{prefix.name}_friction.log"
     spectra = nqe.adqtb_friction_spectra(log)
@@ -772,9 +780,9 @@ def test_live_friction_readback_matches_the_final_logged_row(
 
     system = forcefield.createSystem(modeller.topology)
     integrator = openmm.QTBIntegrator(
-        300.0 * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond,
+        300.0 * unit.kelvin, 1.0 / unit.picosecond, _TIME_STEP,
     )
-    integrator.setSegmentLength(0.05 * unit.picosecond)
+    integrator.setSegmentLength(_SEGMENT_LENGTH)
     type_to_label = nqe.set_adqtb_particle_types_by_element(
         integrator, topology=modeller.topology, system=system,
     )
@@ -802,9 +810,9 @@ def test_track_adqtb_friction_picks_the_segment_interval(
     modeller, forcefield = water_system
     system = forcefield.createSystem(modeller.topology)
     integrator = openmm.QTBIntegrator(
-        300.0 * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond,
+        300.0 * unit.kelvin, 1.0 / unit.picosecond, _TIME_STEP,
     )
-    integrator.setSegmentLength(0.05 * unit.picosecond)
+    integrator.setSegmentLength(_SEGMENT_LENGTH)
     nqe.set_adqtb_particle_types_by_element(
         integrator, topology=modeller.topology, system=system,
     )
@@ -827,9 +835,8 @@ def test_track_adqtb_friction_picks_the_segment_interval(
 
 
 def test_track_adqtb_friction_rejects_a_bad_segment_count(
-    tmp_path: Path, water_system: tuple[app.Modeller, Any],
+    tmp_path: Path,
 ) -> None:
-    modeller, forcefield = water_system
     simulation = SimpleNamespace(integrator=_Integrator(), reporters=[])
     with pytest.raises(TypeError, match="segments_per_report"):
         nqe.track_adqtb_friction(simulation, tmp_path / "friction.log",
