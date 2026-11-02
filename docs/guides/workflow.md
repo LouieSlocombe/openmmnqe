@@ -66,6 +66,40 @@ explicit choice in each workflow:
 `output_prefix` names every file a stage writes, so giving each stage its own
 prefix is what keeps the trajectories, logs and restart files apart.
 
+## Restarting classical production
+
+{func}`~openmmnqe.openmm.run_openmm_prod` writes an ordinary OpenMM checkpoint
+to `<output_prefix>.chk` every `10 * n_report` steps and at the end of the run.
+Pass it back as `checkpoint_file` to continue from the saved positions,
+velocities, box, simulation time, step count, and random generator state:
+
+```python
+nqe.run_openmm_prod(modeller, forcefield, steps=100_000,
+                    output_prefix="prod", seed=2024)
+nqe.run_openmm_prod(modeller, forcefield, checkpoint_file="prod.chk",
+                    steps=50_000, output_prefix="prod_continued", seed=2024)
+```
+
+`steps` is the number of **additional** steps: the second call finishes at
+step 150,000. Give each segment a new `output_prefix` to preserve the earlier
+outputs; logs and trajectories start new files while their step counts and
+times continue from the checkpoint. Without `checkpoint_file`, production
+still starts from the Modeller and initializes new velocities.
+
+Recreate the same System and integrator settings, including forces, masses,
+and barostat, on the same OpenMM platform and compatible hardware/OpenMM
+version. When using {class}`~openmmnqe.openmm.PreparedSystem`, rebuild the
+System for each call if the stage adds a barostat or bias or changes masses.
+The checkpoint supplies the coordinates, so the Modeller must supply the
+matching topology and atom order. Heating and NPT preparation stages have
+different restraint forces; use their final PDB to start production, then
+use production's own checkpoints for continuation. RPMD's bead archives are
+a different format and cannot be loaded here. For a PLUMED-biased run,
+restore the bias history through PLUMED's own restart setup as well.
+
+A missing or unloadable checkpoint raises an error before output reporters
+are opened, rather than silently starting a new trajectory.
+
 ## Shared arguments
 
 These behave the same across every stage:

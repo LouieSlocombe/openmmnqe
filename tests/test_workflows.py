@@ -524,6 +524,7 @@ def test_classical_production_wires_optional_features_and_periodic_checkpoint(
     assert runtime.calls.plumed == [(runtime.system, "bias.dat")]
     assert simulation.context.positions == [runtime.modeller.positions]
     assert _temperature_values(simulation.context.velocity_temperatures) == [300.0]
+    assert runtime.calls.checkpoints == []
     assert simulation.steps == [23]
     assert runtime.calls.standard_reporters == [
         (
@@ -537,6 +538,39 @@ def test_classical_production_wires_optional_features_and_periodic_checkpoint(
         )
     ]
     assert runtime.calls.saved == [((simulation, "prod"), {})]
+
+
+def test_classical_production_restart_keeps_checkpoint_state(
+    workflow_runtime: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = workflow_runtime
+
+    def load_checkpoint(simulation: _Simulation, checkpoint_file: str) -> None:
+        # No fresh-state initialization or output files may precede the load.
+        assert simulation.context.positions == []
+        assert simulation.context.velocity_temperatures == []
+        assert runtime.calls.standard_reporters == []
+        runtime.calls.checkpoints.append((simulation, checkpoint_file))
+
+    monkeypatch.setattr(nqe_openmm, "_load_checkpoint", load_checkpoint)
+
+    nqe_openmm.run_openmm_prod(
+        runtime.modeller,
+        forcefield=object(),
+        checkpoint_file="prod.chk",
+        steps=23,
+        output_prefix="continued",
+        seed=17,
+    )
+
+    simulation = runtime.calls.simulations[0]
+    assert runtime.calls.checkpoints == [(simulation, "prod.chk")]
+    assert simulation.context.positions == []
+    assert simulation.context.velocity_temperatures == []
+    assert simulation.steps == [23]
+    assert len(runtime.calls.standard_reporters) == 1
+    assert runtime.calls.saved == [((simulation, "continued"), {})]
 
 
 @pytest.mark.parametrize(

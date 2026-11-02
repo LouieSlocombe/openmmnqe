@@ -27,7 +27,9 @@ transmission-coefficient calculation on top of that.
 Every stage takes the same shape: build the system, optionally deuterate it,
 attach a PLUMED bias and the reporters, run, then save its final structure.
 Classical stages initialize new velocities when started from that structure;
-the paired RPMD and adQTB stages additionally consume their equilibration
+classical production can instead resume an ordinary OpenMM checkpoint with
+``checkpoint_file``, preserving its state and simulation clock.
+The paired RPMD and adQTB stages additionally consume their equilibration
 restart, preserving the state their production integrator needs. RPMD
 production can also continue from a completed production run's restart.
 RPMD restart files contain every bead rather than an ordinary single-Context
@@ -2861,13 +2863,15 @@ def run_openmm_prod(
         trajectory: TrajectoryFormat | TrajectoryOptions = 'pdb',
         velocity_record_interval: int | None = None,
         velocity_atom_indices: Sequence[int] | None = None,
+        checkpoint_file: str | None = None,
 ) -> None:
     """
     Run an NPT production MD simulation, optionally with PLUMED enhanced sampling.
 
     Sets up the system with a Langevin integrator and optional Monte Carlo
     barostat, loads an optional PLUMED bias script, and runs the production
-    trajectory.
+    trajectory. With *checkpoint_file*, continues from a compatible classical
+    production checkpoint instead of initializing new positions and velocities.
 
     Parameters
     ----------
@@ -2892,9 +2896,12 @@ def run_openmm_prod(
     n_report : int, optional
         Reporter interval in steps. Default is 1000.
     steps : int, optional
-        Total number of production MD steps. Default is 500000.
+        Number of production MD steps to run, additional to any steps restored
+        from *checkpoint_file*. Default is 500000.
     output_prefix : str, optional
         Prefix for output files (PDB, checkpoint, log). Default is ``'prod'``.
+        Use a new prefix when restarting to preserve the previous segment's
+        outputs; trajectories and logs are not appended.
     platform_name : str or None, optional
         OpenMM platform name. Default is None, which auto-detects via
         ``check_platform``. Forced to ``'CUDA'`` when a mixed/ML potential
@@ -2912,8 +2919,10 @@ def run_openmm_prod(
     seed : int or None, optional
         Master random seed. A value derives independent deterministic streams
         for the starting velocities, the Langevin thermostat, and the
-        barostat's volume moves, making the run reproducible. If None, OpenMM
-        chooses each non-deterministically. Default is None.
+        barostat's volume moves, making a fresh run reproducible. On restart,
+        the checkpoint restores the random generator state and velocities.
+        If None, OpenMM chooses each stream non-deterministically for a fresh
+        run. Default is None.
     trajectory : str or TrajectoryOptions, optional
         Trajectory format, or the full :class:`TrajectoryOptions` when the
         interval or an atom subset matters too. Default is ``'pdb'``, which
@@ -2929,6 +2938,24 @@ def run_openmm_prod(
         *velocity_record_interval*. Frames are held in memory until the run
         ends, so a selection is what keeps a solvated run in RAM. Default is
         None, which records every atom.
+    checkpoint_file : str or None, optional
+        Ordinary OpenMM checkpoint from a compatible classical production
+        run, including a periodic ``<output_prefix>.chk``. Restores positions,
+        velocities, box, time, step count, and internal simulation state.
+        Recreate the same System and integrator settings, including the
+        barostat, masses, and forces, on the same platform and compatible
+        hardware/OpenMM version. Preparation-stage checkpoints with different
+        restraint forces and RPMD restart archives are not interchangeable
+        with these checkpoints. PLUMED bias history requires its own restart
+        setup. Default is None, which starts from *modeller* with new velocities.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *checkpoint_file* does not exist.
+    openmm.OpenMMException
+        If OpenMM cannot load the checkpoint. Loading errors propagate before
+        output reporters are opened; the run does not fall back to a fresh start.
     """
     traj_options = _resolve_trajectory_options(trajectory, n_report)
     thermostat_seed, velocity_seed, barostat_seed = _derive_seeds(
@@ -2951,8 +2978,11 @@ def run_openmm_prod(
                                                  time_step)
     _seed_random_stream(integrator, thermostat_seed)
     simulation = app.Simulation(modeller.topology, system, integrator, platform)
-    simulation.context.setPositions(modeller.positions)
-    _set_velocities_to_temperature(simulation, temperature, velocity_seed)
+    if checkpoint_file is None:
+        simulation.context.setPositions(modeller.positions)
+        _set_velocities_to_temperature(simulation, temperature, velocity_seed)
+    else:
+        _load_checkpoint(simulation, checkpoint_file)
 
     _add_standard_reporters(simulation, output_prefix, n_report,
                             trajectory=traj_options,
