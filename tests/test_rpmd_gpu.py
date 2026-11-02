@@ -3,8 +3,9 @@ GPU-only guards for the RPMD reporters on a mixed ML/MM System.
 
 ``MLPotential.createMixedSystem`` attaches the ML model as an
 ``openmm.PythonForce``, so every force evaluation re-enters Python from the
-platform's own threads. Each case runs in a subprocess under a timeout, so a
-report path that blocks on the GIL fails the suite instead of hanging it.
+platform's own threads. Both cases share a subprocess under a timeout, so a
+report path that blocks on the GIL fails the suite instead of hanging it,
+without paying for Python and CUDA startup twice.
 ``tests/test_reporters.py`` carries the platform-independent half of the
 guard: a test double whose ``getTotalEnergy`` raises.
 """
@@ -16,6 +17,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import numpy as np
+import openmm.app as app
 import openmm.unit as unit
 import pytest
 from openmm import openmm
@@ -42,11 +45,6 @@ def _cuda_is_usable() -> bool:
     except Exception:
         return False
     return True
-
-
-requires_cuda = pytest.mark.skipif(
-    not _cuda_is_usable(), reason="needs a working CUDA platform"
-)
 
 
 _PREAMBLE = '''
@@ -179,35 +177,28 @@ def _run(tmp_path: Path, body: str) -> None:
     )
 
 
-@requires_cuda
-def test_thermodynamic_reporter_reports_on_a_python_force_system(
-    tmp_path: Path,
-) -> None:
-    # One report falling due on a mixed ML/MM system must not stop the run.
-    _run(tmp_path, """
+@pytest.fixture(scope="module")
+def gpu_reporter_outputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Exercise both report paths once, each with a fresh CUDA simulation.
+
+    CUDA is checked only when a GPU test runs, so collection and deselection
+    do not create a Context. Selecting either test executes both probes.
+    """
+    if not _cuda_is_usable():
+        pytest.skip("needs a working CUDA platform")
+    output_dir = tmp_path_factory.mktemp("rpmd-gpu")
+    _run(output_dir, """
+        print("direct thermodynamic reporting")
         simulation = build()
         step_rpmd(simulation, 5)
         with RPMDThermodynamicReporter(
-            file="thermo.log", reportInterval=1,
+            file="direct_thermo.log", reportInterval=1,
         ) as reporter:
             reporter.report(simulation, state=None)
             reporter.report(simulation, state=None)
-        rows = [
-            row.split("\\t") for row in open("thermo.log").read().splitlines()
-        ]
-        assert len(rows) == 3, rows
-        # One step column plus the nine estimators, all of them finite.
-        assert all(len(row) == 10 for row in rows), rows
-        values = np.array([[float(cell) for cell in row] for row in rows[1:]])
-        assert np.isfinite(values).all(), values
-    """)
+        del simulation
 
-
-@requires_cuda
-def test_every_rpmd_reporter_survives_a_scheduled_report(tmp_path: Path) -> None:
-    # The whole attached set, driven through step_rpmd so the reports are
-    # scheduled the way a driver schedules them rather than called by hand.
-    _run(tmp_path, """
+        print("scheduled bead, centroid and thermodynamic reporting")
         simulation = build()
         simulation.reporters.append(RPMDCentroidReporter(
             file_name="centroid.pdb", reportInterval=2,
@@ -218,20 +209,44 @@ def test_every_rpmd_reporter_survives_a_scheduled_report(tmp_path: Path) -> None
             num_beads=N_BEADS, topology=simulation.topology,
         ))
         simulation.reporters.append(RPMDThermodynamicReporter(
-            file="thermo.log", reportInterval=2,
+            file="scheduled_thermo.log", reportInterval=2,
         ))
         step_rpmd(simulation, 4)
         for reporter in simulation.reporters:
             reporter.close()
-
-        assert len(open("thermo.log").read().splitlines()) == 3
-
-        # The ML-region molecule must survive the round trip intact: its
-        # bonds are absent from the System, so OpenMM's own wrapping would
-        # have scattered its four atoms across the box.
-        written = app.PDBFile("beads_bead_0.pdb").getPositions(
-            asNumpy=True
-        ).value_in_unit(unit.nanometer)[:4]
-        span = float(np.ptp(written[:, 0]))
-        assert span < 1.0, span
     """)
+    return output_dir
+
+
+def test_thermodynamic_reporter_reports_on_a_python_force_system(
+    gpu_reporter_outputs: Path,
+) -> None:
+    # One report falling due on a mixed ML/MM system must not stop the run.
+    rows = [
+        row.split("\t")
+        for row in (gpu_reporter_outputs / "direct_thermo.log").read_text().splitlines()
+    ]
+    assert len(rows) == 3, rows
+    # One step column plus the nine estimators, all of them finite.
+    assert all(len(row) == 10 for row in rows), rows
+    values = np.array([[float(cell) for cell in row] for row in rows[1:]])
+    assert np.isfinite(values).all(), values
+
+
+def test_every_rpmd_reporter_survives_a_scheduled_report(
+    gpu_reporter_outputs: Path,
+) -> None:
+    # The whole attached set, driven through step_rpmd so the reports are
+    # scheduled the way a driver schedules them rather than called by hand.
+    assert len(
+        (gpu_reporter_outputs / "scheduled_thermo.log").read_text().splitlines()
+    ) == 3
+
+    # The ML-region molecule must survive the round trip intact: its
+    # bonds are absent from the System, so OpenMM's own wrapping would
+    # have scattered its four atoms across the box.
+    written = app.PDBFile(str(gpu_reporter_outputs / "beads_bead_0.pdb")).getPositions(
+        asNumpy=True,
+    ).value_in_unit(unit.nanometer)[:4]
+    span = float(np.ptp(written[:, 0]))
+    assert span < 1.0, span
