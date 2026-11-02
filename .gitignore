@@ -6,6 +6,7 @@ build/
 dist/
 
 # Tool caches and reports
+.ccache/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

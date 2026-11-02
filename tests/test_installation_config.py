@@ -72,6 +72,107 @@ def test_plumed_checks_use_the_selected_interpreter_and_stop_on_failure(
     assert result.stdout.splitlines() == messages[:3 if failure is None else failure]
 
 
+def _run_plumed_build(
+    tmp_path: Path,
+    *,
+    launcher: str | None,
+    compiler: str | None = None,
+    failure: str = "",
+) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
+    """Run the build recipe against recording tools, without network or compilation."""
+    stub_dir = tmp_path / "commands"
+    stub_dir.mkdir()
+    stub_script = (
+        '#!/bin/bash\n'
+        'command="${0##*/}"\n'
+        'printf "%q " "$command" "${CXX-__unset__}" "$@" >> "$PLUMED_BUILD_LOG"\n'
+        'printf "\\n" >> "$PLUMED_BUILD_LOG"\n'
+        'if [[ "$command" == "$PLUMED_BUILD_FAIL" ]]; then exit 47; fi\n'
+        'if [[ "$command" == git ]]; then\n'
+        '    source_dir="${@: -1}"\n'
+        '    source_dir="${source_dir##*/}"\n'
+        '    source_dir="${source_dir%.git}"\n'
+        '    mkdir -p "$source_dir"\n'
+        '    cp "$0" "$source_dir/configure"\n'
+        'elif [[ "$command" == cmake ]]; then\n'
+        '    mkdir python\n'
+        'elif [[ "$command" == make && "$1" == PythonInstall ]]; then\n'
+        '    exit 1\n'
+        'fi\n'
+    )
+    for name in ("git", "cmake", "make", "pip"):
+        stub = stub_dir / name
+        stub.write_text(stub_script)
+        stub.chmod(0o755)
+    work_dir = tmp_path / "build sources"
+    work_dir.mkdir()
+    log = tmp_path / "commands.log"
+    environment = {
+        **os.environ,
+        "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+        "CONDA_PREFIX": str(tmp_path / "conda environment"),
+        "PLUMED_BUILD_LOG": str(log),
+        "PLUMED_BUILD_FAIL": failure,
+    }
+    if compiler is None:
+        environment.pop("CXX", None)
+    else:
+        environment["CXX"] = compiler
+    result = subprocess.run(
+        [
+            "bash", "-c", 'set -e\nsource "$1"\nshift\nbuild_plumed "$@"',
+            "plumed-build", str(BUILD_TOOLS / "build_plumed.sh"), str(work_dir),
+            *([] if launcher is None else [launcher]),
+        ],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, [shlex.split(line) for line in log.read_text().splitlines()]
+
+
+@pytest.mark.parametrize("launcher", [None, "ccache"])
+@pytest.mark.parametrize("compiler", [None, "conda-c++ -std=c++17"])
+def test_plumed_build_compiler_cache_is_opt_in(
+    tmp_path: Path, launcher: str | None, compiler: str | None,
+) -> None:
+    result, calls = _run_plumed_build(tmp_path, launcher=launcher, compiler=compiler)
+
+    assert result.returncode == 0, result.stderr
+    assert [call[0] for call in calls] == [
+        "git", "configure", "make", "make", "git", "cmake", "make", "make",
+        "make", "pip",
+    ]
+    # The launcher is local to each build system, not exported over conda's CXX.
+    assert all(call[1] == (compiler or "__unset__") for call in calls)
+    configure = calls[1][2:]
+    cmake = calls[5][2:]
+    assert [arg for arg in configure if arg.startswith("CXX=")] == (
+        [] if launcher is None else [f"CXX={launcher} {compiler or 'c++'}"]
+    )
+    assert [arg for arg in cmake if arg.startswith("-DCMAKE_CXX_COMPILER_LAUNCHER=")] == (
+        [] if launcher is None else [f"-DCMAKE_CXX_COMPILER_LAUNCHER={launcher}"]
+    )
+    assert "--enable-modules=opes" in configure
+    assert "--disable-python" in configure
+    assert "--disable-pycv" in configure
+    # Cache hits still install both libraries and the generated Python wrapper.
+    assert [call[2:] for call in calls if call[0] == "make"].count(["install"]) == 2
+    assert calls[-1][2:] == ["install", ".", "--no-build-isolation"]
+
+
+@pytest.mark.parametrize("failure", ["git", "configure", "make", "cmake", "pip"])
+def test_plumed_build_with_a_compiler_cache_stops_on_failure(
+    tmp_path: Path, failure: str,
+) -> None:
+    result, calls = _run_plumed_build(tmp_path, launcher="ccache", failure=failure)
+
+    assert result.returncode == 47, result.stderr
+    assert calls[-1][0] == failure
+    assert [call[0] for call in calls].count(failure) == 1
+
+
 def _environment_requirements(filename: str) -> dict[str, str]:
     """Read package entries from these simple conda files, including pip entries.
 

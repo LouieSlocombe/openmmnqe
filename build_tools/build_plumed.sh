@@ -6,11 +6,19 @@
 PLUMED_VERSION="v2.10.1"
 OPENMM_PLUMED_VERSION="master"
 
-# build_plumed <work_dir>
+# build_plumed <work_dir> [cxx_launcher]
 # Compiles PLUMED (with the opes module) and the OpenMM-PLUMED plugin into $CONDA_PREFIX,
 # cloning the sources into <work_dir>. Leaves the shell in <work_dir>.
+# An optional compiler launcher (for example ccache in CI) caches compilation;
+# configuration, linking and installation still run against this environment.
 build_plumed() {
     local work_dir="$1"
+    local cxx_launcher="${2:-}"
+    local configure_args=() cmake_args=()
+    if [[ -n "${cxx_launcher}" ]]; then
+        configure_args+=("CXX=${cxx_launcher} ${CXX:-c++}")
+        cmake_args+=("-DCMAKE_CXX_COMPILER_LAUNCHER=${cxx_launcher}")
+    fi
 
     echo "=== Compiling PLUMED ${PLUMED_VERSION} ==="
     cd "${work_dir}"
@@ -30,7 +38,8 @@ build_plumed() {
     # --disable-python, and fails wherever cython is absent.
     ./configure --prefix="${CONDA_PREFIX}" --enable-modules=opes --disable-python --disable-pycv \
         LDFLAGS="-L${CONDA_PREFIX}/lib -Wl,-rpath,${CONDA_PREFIX}/lib" \
-        STATIC_LIBS="-Wl,-rpath-link,${CONDA_PREFIX}/lib"
+        STATIC_LIBS="-Wl,-rpath-link,${CONDA_PREFIX}/lib" \
+        "${configure_args[@]}"
     make -j"$(nproc)"
     make install
 
@@ -49,7 +58,8 @@ build_plumed() {
         -DPLUMED_INCLUDE_DIR="${PLUMED_INCLUDE_DIR}" \
         -DPLUMED_LIBRARY_DIR="${PLUMED_LIBRARY_DIR}" \
         -DPYTHON_EXECUTABLE="$(which python)" \
-        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,${CONDA_PREFIX}/lib -Wl,-rpath,${CONDA_PREFIX}/lib"
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,${CONDA_PREFIX}/lib -Wl,-rpath,${CONDA_PREFIX}/lib" \
+        "${cmake_args[@]}"
     make -j"$(nproc)"
     make install
     # openmm-plumed's setup.py imports numpy without declaring it as a build

@@ -42,6 +42,7 @@ dependencies:
   - cmake
   - make
   - cxx-compiler
+  - ccache
   - swig
   - doxygen
   - cython

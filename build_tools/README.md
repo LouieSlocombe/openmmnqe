@@ -96,7 +96,13 @@ release reaches this project by raising the floor and that pin together.
 
 CI pins OpenMM to 8.6.1 and OpenMM-ML to 1.8 to test the minimum supported
 releases and builds PLUMED and its bindings with the same shared build functions
-before running the tests.
+before running the tests. CI passes `ccache` as the optional second argument to
+`build_plumed` and saves the compiler cache between runs. Sources are still fetched,
+configured, linked and installed on every run, including when OpenMM-PLUMED's
+`master` changes; ccache checks the compiler, sources and headers before reusing an
+object file. The cache statistics and pytest's slowest tests are printed in the
+job log so build time and test time can be tracked separately. Local installers
+continue to work without ccache.
 
 ## Sol cluster
 

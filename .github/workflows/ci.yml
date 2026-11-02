@@ -42,6 +42,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+      # Conda cache restores can change compiler mtimes without changing it.
+      CCACHE_COMPILERCHECK: content
     defaults:
       run:
         # -l so every step runs in the activated micromamba environment
@@ -52,16 +57,30 @@ jobs:
         with:
           environment-file: build_tools/environment_ci.yml
           cache-environment: true
+      - name: Cache PLUMED compilation
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-${{ runner.arch }}-plumed-ccache-v1-${{ hashFiles('build_tools/environment_ci.yml', 'build_tools/build_plumed.sh', '.github/workflows/ci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-plumed-ccache-v1-${{ hashFiles('build_tools/environment_ci.yml', 'build_tools/build_plumed.sh', '.github/workflows/ci.yml') }}-
       # Rebuild on every run, including cache hits, so the plugin and Python
-      # bindings always match OpenMM and the shared PLUMED source pins.
+      # bindings always match OpenMM and the shared PLUMED source pins. ccache
+      # reuses only compilations whose source, headers and compiler still match.
       - name: Build PLUMED and its bindings
         run: |
           set -eo pipefail
           source build_tools/build_plumed.sh
-          plumed_build_dir="$(mktemp -d "${RUNNER_TEMP}/openmmnqe-plumed.XXXXXX")"
-          build_plumed "${plumed_build_dir}"
+          # Keep source paths stable across the fresh hosted runners for ccache.
+          plumed_build_dir="${RUNNER_TEMP}/openmmnqe-plumed"
+          mkdir -p "${plumed_build_dir}"
+          ccache --zero-stats
+          build_plumed "${plumed_build_dir}" ccache
           build_py_plumed "${plumed_build_dir}"
           check_plumed_installation python
+      - name: Report compiler cache usage
+        if: always()
+        run: ccache --show-stats
       - name: Verify OpenMM and OpenMM-ML baselines
         run: |
           python - <<'PY'
@@ -71,4 +90,4 @@ jobs:
           PY
       - run: pip install -e . --no-deps
       - run: python -c "import openmmnqe; print(openmmnqe.__version__)"
-      - run: pytest tests --cov=openmmnqe --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
+      - run: pytest tests --cov=openmmnqe --cov-branch --cov-report=term-missing --cov-fail-under=90 --durations=20 -q
