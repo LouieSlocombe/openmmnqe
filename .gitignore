@@ -22,6 +22,10 @@ coverage.xml
 .venv/
 venv/
 CLAUDE.md
+AGENTS.md
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
 
 # Sphinx
 docs/_build/
